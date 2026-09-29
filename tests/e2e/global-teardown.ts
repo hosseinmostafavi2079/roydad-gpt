@@ -42,8 +42,44 @@ function stopE2eServer(): void {
     if (stop.error || stop.status !== 0) {
       throw new Error("E2E cleanup could not stop the local test server.");
     }
+  } else {
+    try {
+      process.kill(server.pid, "SIGTERM");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+    }
   }
   unlinkSync(serverStatePath);
+}
+
+async function waitForTenantSessionsToClose(
+  provisioner: Client,
+  databaseName: string,
+): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  while (true) {
+    const sessions = await tenantSessions(provisioner, databaseName);
+    if (sessions.length === 0) return;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `E2E tenant database still has sessions: ${JSON.stringify(sessions)}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+async function tenantSessions(provisioner: Client, databaseName: string) {
+  const result = await provisioner.query<{
+    pid: number;
+    application_name: string;
+    state: string | null;
+  }>(
+    `SELECT pid, application_name, state FROM pg_stat_activity
+     WHERE datname = $1 ORDER BY pid`,
+    [databaseName],
+  );
+  return result.rows;
 }
 
 export default async function globalTeardown(): Promise<void> {
@@ -110,7 +146,19 @@ export default async function globalTeardown(): Promise<void> {
       );
       const name = registry.rows[0]?.database_name;
       if (name && /^eventos_t_[0-9a-f]{32}$/.test(name)) {
-        await provisioner.query(`DROP DATABASE IF EXISTS "${name}"`);
+        await waitForTenantSessionsToClose(provisioner, name);
+        try {
+          await provisioner.query(`DROP DATABASE IF EXISTS "${name}"`);
+        } catch (error) {
+          const code =
+            typeof error === "object" && error !== null && "code" in error
+              ? error.code
+              : "unknown";
+          const sessions = await tenantSessions(provisioner, name);
+          throw new Error(
+            `E2E tenant database drop failed (code ${code}); sessions: ${JSON.stringify(sessions)}`,
+          );
+        }
       }
       await control.query("BEGIN");
       try {

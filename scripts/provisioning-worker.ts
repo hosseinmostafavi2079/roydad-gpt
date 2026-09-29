@@ -18,7 +18,11 @@ import {
   provisioningQueueName,
   stopProvisioningBoss,
 } from "../src/modules/platform/provisioning/queue";
-import { getControlPool } from "../src/infrastructure/db/control/pool";
+import {
+  closeControlPool,
+  getControlPool,
+} from "../src/infrastructure/db/control/pool";
+import { closeTenantPools } from "../src/infrastructure/db/tenant/pool";
 import { logger } from "../src/infrastructure/logging/logger";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
@@ -511,10 +515,15 @@ const workerId = await boss.work<{
 );
 logger.info("Provisioning worker started");
 process.send?.({ type: "eventos.provisioning.ready" });
-const shutdown = async () => {
-  await boss.offWork(provisioningQueueName, { id: workerId, wait: true });
-  await stopProvisioningBoss();
-  await getControlPool().end();
+let shutdownPromise: Promise<void> | undefined;
+const shutdown = (): Promise<void> => {
+  shutdownPromise ??= (async () => {
+    await boss.offWork(provisioningQueueName, { id: workerId, wait: true });
+    await stopProvisioningBoss();
+    await closeTenantPools();
+    await closeControlPool();
+  })();
+  return shutdownPromise;
 };
 process.once("SIGINT", () => void shutdown());
 process.once("SIGTERM", () => void shutdown());
