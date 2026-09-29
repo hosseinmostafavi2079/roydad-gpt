@@ -4,17 +4,22 @@ import {
   resolveTenantRequest,
 } from "@/modules/tenant-identity/request-auth";
 import { getTenantPool } from "@/infrastructure/db/tenant/pool";
+import { getControlPool } from "@/infrastructure/db/control/pool";
+import type { PoolClient } from "pg";
 import { jsonResponse, requestIdFrom } from "@/shared/http/api-response";
 import { DomainError } from "@/shared/errors/domain-error";
 
 export const runtime = "nodejs";
 
-const allowedGetPaths = new Set(["/get-session"]);
+const allowedGetPaths = new Set(["/get-session", "/verify-email"]);
 const allowedPostPaths = new Set([
   "/sign-in/email",
+  "/sign-up/email",
   "/sign-out",
   "/forget-password",
   "/reset-password",
+  "/email-otp/send-verification-otp",
+  "/sign-in/email-otp",
 ]);
 
 async function readAuthRequestBody(request: Request): Promise<string> {
@@ -86,7 +91,7 @@ async function cleanResponse(
       { status: response.status, headers },
     );
   }
-  if (path !== "/sign-in/email")
+  if (path !== "/sign-in/email" && path !== "/sign-in/email-otp")
     return new Response(response.body, { status: response.status, headers });
   try {
     const body: unknown = await response.json();
@@ -118,6 +123,8 @@ async function cleanResponse(
 
 async function handle(request: Request): Promise<Response> {
   const requestId = requestIdFrom(request);
+  let signupLock: PoolClient | undefined;
+  let signupLockKey: string | undefined;
   try {
     const { tenant, origin } = await resolveTenantRequest(request);
     const path = new URL(request.url).pathname.replace(
@@ -132,11 +139,62 @@ async function handle(request: Request): Promise<Response> {
       throw new DomainError("NOT_FOUND", "Authentication endpoint not found.");
     }
     if (request.method !== "GET") assertTenantSameOrigin(request, origin);
+    if (
+      (path === "/sign-in/email" || path === "/sign-up/email") &&
+      !tenant.features.password_login
+    )
+      throw new DomainError(
+        "FEATURE_DISABLED",
+        "Password login is unavailable.",
+      );
+    if (path === "/sign-up/email" && !tenant.features.registration)
+      throw new DomainError("FEATURE_DISABLED", "Registration is unavailable.");
+    if (path === "/sign-up/email") {
+      signupLock = await getControlPool().connect();
+      signupLockKey = `participant-signup:${tenant.tenantId}`;
+      await signupLock.query(
+        "SELECT pg_advisory_lock(hashtextextended($1,0))",
+        [signupLockKey],
+      );
+      const count = await getTenantPool(tenant).query<{ count: number }>(
+        "SELECT count(*)::int AS count FROM tenant_participant_profiles WHERE tenant_id=$1",
+        [tenant.tenantId],
+      );
+      if ((count.rows[0]?.count ?? 0) >= tenant.limits.max_participants)
+        throw new DomainError(
+          "LIMIT_REACHED",
+          "ظرفیت ثبت‌نام حساب‌های جدید تکمیل شده است.",
+        );
+    }
+    const otpPath =
+      path === "/email-otp/send-verification-otp" ||
+      path === "/sign-in/email-otp";
+    if (otpPath && !tenant.features.email_otp)
+      throw new DomainError(
+        "FEATURE_DISABLED",
+        "Email code login is unavailable.",
+      );
     const auth = getTenantAuth(tenant, origin);
     let attemptedEmail: string | undefined;
     let authRequest = request;
-    if (path === "/sign-in/email") {
+    if (path === "/sign-in/email" || otpPath) {
       const requestBody = await readAuthRequestBody(request);
+      if (path === "/email-otp/send-verification-otp") {
+        try {
+          const input = JSON.parse(requestBody) as {
+            type?: unknown;
+            email?: unknown;
+          };
+          if (
+            input.type !== "sign-in" ||
+            typeof input.email !== "string" ||
+            input.email.length > 320
+          )
+            throw new Error("invalid OTP request");
+        } catch {
+          throw new DomainError("VALIDATION_FAILED", "Invalid code request.");
+        }
+      }
       const authHeaders = new Headers(request.headers);
       authHeaders.delete("content-length");
       authRequest = new Request(request.url, {
@@ -159,6 +217,20 @@ async function handle(request: Request): Promise<Response> {
         ? await auth.api.getSession({ headers: request.headers })
         : null;
     const response = await auth.handler(authRequest);
+    if (path === "/sign-up/email" && response.ok) {
+      const payload = (await response.clone().json()) as {
+        user?: { id?: unknown; name?: unknown };
+      };
+      if (typeof payload.user?.id === "string") {
+        await getTenantPool(tenant).query(
+          `INSERT INTO tenant_participant_profiles (tenant_id, user_id, display_name)
+           SELECT "tenantId", id, name FROM tenant_users
+           WHERE "tenantId"=$1 AND id=$2
+           ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+          [tenant.tenantId, payload.user.id],
+        );
+      }
+    }
     if (
       path === "/sign-in/email" &&
       response.status === 401 &&
@@ -212,6 +284,15 @@ async function handle(request: Request): Promise<Response> {
       },
       { status: error instanceof DomainError ? error.status : 500 },
     );
+  } finally {
+    if (signupLock && signupLockKey) {
+      await signupLock
+        .query("SELECT pg_advisory_unlock(hashtextextended($1,0))", [
+          signupLockKey,
+        ])
+        .catch(() => undefined);
+      signupLock.release();
+    }
   }
 }
 

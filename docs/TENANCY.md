@@ -34,3 +34,7 @@ Separate databases prevent ordinary cross-database joins and constrain accidenta
 ## Phase 3 migration
 
 `0003_phase3_program_core` is a forward-only tenant Prisma SQL migration. New tenant provisioning applies it automatically. Existing Phase 1/2 tenants advance through `pnpm db:migrate:tenants` without dropping data; the migration runner verifies the tenant's recorded migration history and Phase 3 tables. Program, run, session, venue, room, and assignment IDs are resolved within the current tenant database. Cross-tenant IDs fail lookup or tenant-scoped foreign key checks.
+
+## Phase 4 migration
+
+Forward-only migrations `0004_phase4_public_website`, `0005_phase4_enrollment`, and `0006_phase4_self_registration_ids` add the public profile, versioned registration form and enrollment records, and database-generated Better Auth user/account IDs. Existing tenants advance through `pnpm db:migrate:tenants`; new provisioning applies the same sequence. The migration runner checks the expected tenant tables before marking the control registry current. No tenant data is reset.

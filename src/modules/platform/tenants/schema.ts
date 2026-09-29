@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
+  featureKeys,
   featureOverrideSchema,
+  limitKeys,
   limitOverrideSchema,
 } from "@/modules/platform/plans/schema";
 
@@ -58,11 +60,11 @@ export const updateTenantPlanSchema = z.strictObject({
 });
 
 export const updateTenantFeaturesSchema = z.strictObject({
-  overrides: z.array(featureOverrideSchema).min(1).max(14),
+  overrides: z.array(featureOverrideSchema).min(1).max(featureKeys.length),
 });
 
 export const updateTenantLimitsSchema = z.strictObject({
-  overrides: z.array(limitOverrideSchema).min(1).max(8),
+  overrides: z.array(limitOverrideSchema).min(1).max(limitKeys.length),
 });
 
 export const updateBrandingSchema = z.strictObject({

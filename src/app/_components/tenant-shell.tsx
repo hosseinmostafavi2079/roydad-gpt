@@ -48,6 +48,13 @@ const navItems = [
   { href: "/venues", title: "مکان‌ها", permission: "settings.read" },
   { href: "/audit", title: "گزارش امنیتی", permission: "audit.read" },
   { href: "/settings", title: "تنظیمات سازمان", permission: "settings.read" },
+  { href: "/website", title: "وب‌سایت مجموعه", permission: "website.manage" },
+  {
+    href: "/enrollments",
+    title: "ثبت‌نام‌ها",
+    permission: "enrollment.read",
+    feature: "registration" as const,
+  },
 ];
 
 export function TenantShell({

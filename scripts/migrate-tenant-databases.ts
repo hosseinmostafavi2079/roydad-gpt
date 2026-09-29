@@ -70,6 +70,9 @@ for (const tenant of tenants.rows) {
     if (
       tenant.migration_version !== "0001_tenant_foundation" &&
       tenant.migration_version !== tenantIdentityMigrationVersion &&
+      tenant.migration_version !== "0003_phase3_program_core" &&
+      tenant.migration_version !== "0004_phase4_public_website" &&
+      tenant.migration_version !== "0005_phase4_enrollment" &&
       tenant.migration_version !== tenantCurrentMigrationVersion
     ) {
       throw new Error("Tenant migration version requires review.");

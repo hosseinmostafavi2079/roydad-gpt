@@ -134,6 +134,24 @@ export async function createProgram(
 ): Promise<Row> {
   assertScope(scope, "program.create");
   return transaction(scope, async (client) => {
+    const maxPrograms = (
+      scope.tenant as TenantPoolContext & { limits?: { max_programs: number } }
+    ).limits?.max_programs;
+    if (maxPrograms !== undefined) {
+      await client.query(
+        "SELECT tenant_id FROM tenant_metadata WHERE tenant_id=$1 FOR UPDATE",
+        [scope.tenant.tenantId],
+      );
+      const count = await client.query<{ count: number }>(
+        "SELECT count(*)::int AS count FROM programs WHERE tenant_id=$1 AND status<>'ARCHIVED'",
+        [scope.tenant.tenantId],
+      );
+      if ((count.rows[0]?.count ?? 0) >= maxPrograms)
+        throw new DomainError(
+          "LIMIT_REACHED",
+          "سقف تعداد برنامه‌های این مجموعه تکمیل شده است.",
+        );
+    }
     const result = await client.query(
       `INSERT INTO programs (tenant_id, type, title, slug, short_description, description, category, level,
          objectives, prerequisites, intended_audience, default_duration_minutes, created_by)

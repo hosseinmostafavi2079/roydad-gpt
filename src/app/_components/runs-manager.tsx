@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   formatTenantDate,
@@ -51,6 +52,7 @@ export function RunsManager({
   canManage,
   canPublish,
   canAssign,
+  registrationEnabled,
 }: {
   timezone: string;
   canCreate: boolean;
@@ -58,6 +60,7 @@ export function RunsManager({
   canManage: boolean;
   canPublish: boolean;
   canAssign: boolean;
+  registrationEnabled: boolean;
 }) {
   const [runs, setRuns] = useState<Run[]>([]),
     [programs, setPrograms] = useState<Program[]>([]),
@@ -370,7 +373,7 @@ export function RunsManager({
                   name="waitlistEnabled"
                   defaultChecked={editing?.waitlist_enabled ?? false}
                 />{" "}
-                امکان فهرست انتظار در مرحله بعد
+                امکان فهرست انتظار
               </span>
             </label>
             <div className="form-actions field-full">
@@ -432,6 +435,14 @@ export function RunsManager({
                       </span>
                     </td>
                     <td>
+                      {registrationEnabled && canEdit && (
+                        <Link
+                          className="btn btn-small btn-secondary"
+                          href={`/runs/${run.id}/registration-form`}
+                        >
+                          فرم ثبت‌نام
+                        </Link>
+                      )}
                       {canEdit &&
                         !["CANCELLED", "COMPLETED"].includes(run.state) && (
                           <button

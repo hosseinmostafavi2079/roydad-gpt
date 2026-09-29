@@ -28,6 +28,8 @@ import {
   getRoom,
 } from "@/modules/program-core/repository";
 import { sessionInput } from "@/modules/program-core/schema";
+import { enrollParticipant } from "@/modules/enrollment/repository";
+import type { TenantContext } from "@/modules/tenant-identity/auth";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 
@@ -276,7 +278,7 @@ describe("Phase 3 real PostgreSQL program core", () => {
     await transitionProgram(s, programId, "ACTIVE");
     expect((await getProgram(s, programId)).status).toBe("ACTIVE");
     const migration = await getTenantPool(a).query<{ version: string }>(
-      "SELECT version FROM tenant_schema_migrations WHERE version='0003_phase3_program_core'",
+      "SELECT version FROM tenant_schema_migrations WHERE version='0006_phase4_self_registration_ids'",
     );
     expect(migration.rowCount).toBe(1);
     const audits = await getTenantPool(a).query<{ action: string }>(
@@ -430,5 +432,116 @@ describe("Phase 3 real PostgreSQL program core", () => {
     expect(
       (await listSessions(other)).some((row) => row.id === sessionId),
     ).toBe(false);
+  });
+
+  it("locks capacity during concurrent registrations and isolates enrollment by tenant", async () => {
+    const s = scope(a);
+    const startsAt = new Date(Date.now() + 100 * day);
+    const endsAt = new Date(startsAt.getTime() + day);
+    const run = await createRun(s, {
+      ...runInput(programId, venueId, a.instructorA),
+      startsAt,
+      endsAt,
+      capacity: 1,
+      minimumCapacity: null,
+      waitlistEnabled: true,
+      deliveryMode: "ONLINE",
+      venueId: null,
+    });
+    const capacityRunId = String(run.id);
+    await createSession(s, {
+      runId: capacityRunId,
+      title: "Capacity test session",
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 60 * 60_000),
+      timezone: "Asia/Tehran",
+      deliveryMode: "ONLINE",
+      venueId: null,
+      roomId: null,
+      instructorIds: [a.instructorA],
+      notes: "Synthetic",
+    });
+    await transitionRun(s, capacityRunId, "PUBLISHED");
+    const ids = [randomUUID(), randomUUID()];
+    const firstParticipantId = ids[0];
+    if (!firstParticipantId)
+      throw new Error("Participant fixture was not created.");
+    for (const id of ids) {
+      await getTenantPool(a).query(
+        `INSERT INTO tenant_users (id,"tenantId",name,email,"emailVerified",status)
+         VALUES ($1,$2,'Participant',$3,true,'ACTIVE')`,
+        [id, a.tenantId, `${id}@example.test`],
+      );
+      await getTenantPool(a).query(
+        `INSERT INTO tenant_participant_profiles (tenant_id,user_id,display_name)
+         VALUES ($1,$2,'Participant')`,
+        [a.tenantId, id],
+      );
+    }
+    const tenant = {
+      tenantId: a.tenantId,
+      databaseName: a.databaseName,
+      features: {
+        registration: true,
+        courses: true,
+        events: true,
+        waitlist: true,
+      },
+    } as TenantContext;
+    const enrollmentScope = (id: string) => ({
+      tenant,
+      actor: {
+        id,
+        tenantId: a.tenantId,
+        email: `${id}@example.test`,
+        name: "Participant",
+        authenticationLevel: "PASSWORD",
+        permissions: new Set<string>(),
+      },
+      requestId: randomUUID(),
+    });
+    const results = await Promise.all(
+      ids.map((id) =>
+        enrollParticipant(enrollmentScope(id), capacityRunId, {}),
+      ),
+    );
+    expect(results.map((result) => result.status).sort()).toEqual([
+      "CONFIRMED",
+      "WAITLISTED",
+    ]);
+    const rows = await getTenantPool(a).query<{ status: string }>(
+      `SELECT status FROM enrollments WHERE tenant_id=$1 AND run_id=$2`,
+      [a.tenantId, capacityRunId],
+    );
+    expect(rows.rows.filter((row) => row.status === "CONFIRMED")).toHaveLength(
+      1,
+    );
+    await expect(
+      enrollParticipant(enrollmentScope(firstParticipantId), capacityRunId, {}),
+    ).rejects.toMatchObject({ code: "ALREADY_ENROLLED" });
+    const wrongTenant = {
+      ...enrollmentScope(firstParticipantId),
+      tenant: { ...tenant, tenantId: b.tenantId, databaseName: b.databaseName },
+      actor: {
+        ...enrollmentScope(firstParticipantId).actor,
+        tenantId: b.tenantId,
+      },
+    };
+    await expect(
+      enrollParticipant(wrongTenant, capacityRunId, {}),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      enrollParticipant(
+        {
+          ...enrollmentScope(firstParticipantId),
+          tenant: {
+            ...tenant,
+            features: { ...tenant.features, registration: false },
+          },
+        },
+        capacityRunId,
+        {},
+      ),
+    ).rejects.toMatchObject({ code: "FEATURE_DISABLED" });
   });
 });

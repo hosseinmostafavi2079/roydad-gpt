@@ -1,6 +1,11 @@
 import { z } from "zod";
 
 export const featureKeys = [
+  "public_website",
+  "registration",
+  "waitlist",
+  "password_login",
+  "email_otp",
   "courses",
   "events",
   "attendance",
@@ -18,6 +23,8 @@ export const featureKeys = [
 ] as const;
 
 export const limitKeys = [
+  "max_programs",
+  "max_instructors",
   "max_staff",
   "max_participants",
   "max_active_runs",
@@ -29,6 +36,11 @@ export const limitKeys = [
 ] as const;
 
 export const featureSetSchema = z.object({
+  public_website: z.boolean().default(true),
+  registration: z.boolean().default(true),
+  waitlist: z.boolean().default(true),
+  password_login: z.boolean().default(true),
+  email_otp: z.boolean().default(false),
   courses: z.boolean(),
   events: z.boolean(),
   attendance: z.boolean(),
@@ -46,6 +58,8 @@ export const featureSetSchema = z.object({
 });
 
 export const limitSetSchema = z.object({
+  max_programs: z.number().int().min(0).max(100000).default(100000),
+  max_instructors: z.number().int().min(0).max(100000).default(100000),
   max_staff: z.number().int().min(0).max(100000),
   max_participants: z.number().int().min(0).max(10000000),
   max_active_runs: z.number().int().min(0).max(100000),

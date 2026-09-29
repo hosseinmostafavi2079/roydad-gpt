@@ -16,8 +16,11 @@ const featureGroups = [
   {
     title: "آموزش و رویداد",
     items: [
+      ["public_website", "وب‌سایت عمومی"],
       ["courses", "دوره‌ها"],
       ["events", "رویدادها"],
+      ["registration", "ثبت‌نام"],
+      ["waitlist", "فهرست انتظار"],
       ["attendance", "حضور و غیاب"],
       ["qr_attendance", "حضور با QR"],
       ["quiz", "آزمون‌ها"],
@@ -28,6 +31,8 @@ const featureGroups = [
   {
     title: "ارتباطات",
     items: [
+      ["password_login", "ورود با رمز عبور"],
+      ["email_otp", "ورود با کد ایمیلی"],
       ["sms", "پیامک"],
       ["email", "ایمیل"],
       ["crm", "مدیریت ارتباط"],
@@ -44,6 +49,8 @@ const featureGroups = [
   },
 ] as const;
 const limits = [
+  ["max_programs", "حداکثر برنامه‌ها", 100000],
+  ["max_instructors", "حداکثر مربیان", 100000],
   ["max_staff", "حداکثر کارکنان", 100000],
   ["max_participants", "حداکثر شرکت‌کنندگان", 10000000],
   ["max_active_runs", "حداکثر اجراهای فعال", 100000],

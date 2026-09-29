@@ -27,8 +27,40 @@ model TenantMetadata {
   permissions TenantPermission[]
   invitations TenantInvitation[]
   auditLogs   TenantAuditLog[]
+  website     TenantWebsiteProfile?
 
   @@map("tenant_metadata")
+}
+
+model TenantWebsiteProfile {
+  tenantId          String   @id @map("tenant_id") @db.Uuid
+  displayName       String   @default("") @map("display_name") @db.VarChar(160)
+  shortDescription  String   @default("") @map("short_description") @db.VarChar(500)
+  about             String   @default("") @db.Text
+  logoUrl           String   @default("") @map("logo_url") @db.VarChar(2048)
+  coverUrl          String   @default("") @map("cover_url") @db.VarChar(2048)
+  faviconUrl        String   @default("") @map("favicon_url") @db.VarChar(2048)
+  phone             String   @default("") @db.VarChar(40)
+  email             String   @default("") @db.VarChar(320)
+  address           String   @default("") @db.VarChar(500)
+  websiteUrl        String   @default("") @map("website_url") @db.VarChar(2048)
+  socialUrl         String   @default("") @map("social_url") @db.VarChar(2048)
+  contactHours      String   @default("") @map("contact_hours") @db.VarChar(200)
+  footerDescription String   @default("") @map("footer_description") @db.VarChar(500)
+  primaryColor      String   @default("#0e766e") @map("primary_color") @db.VarChar(7)
+  secondaryColor    String   @default("#174b48") @map("secondary_color") @db.VarChar(7)
+  accentColor       String   @default("#d39b45") @map("accent_color") @db.VarChar(7)
+  heroEnabled       Boolean  @default(true) @map("hero_enabled")
+  featuredEnabled   Boolean  @default(true) @map("featured_enabled")
+  aboutEnabled      Boolean  @default(true) @map("about_enabled")
+  contactEnabled    Boolean  @default(true) @map("contact_enabled")
+  cardStyle         String   @default("SOFT") @map("card_style") @db.VarChar(16)
+  radiusStyle       String   @default("MEDIUM") @map("radius_style") @db.VarChar(16)
+  updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  tenant TenantMetadata @relation(fields: [tenantId], references: [tenantId], onDelete: Restrict)
+
+  @@map("tenant_website_profiles")
 }
 
 model TenantRoleTemplate {
@@ -44,7 +76,7 @@ model TenantRoleTemplate {
 }
 
 model TenantUser {
-  id               String    @id @db.VarChar(64)
+  id               String    @id @default(dbgenerated("gen_random_uuid()::text")) @db.VarChar(64)
   tenantId         String    @map("tenantId") @db.Uuid
   name             String    @db.VarChar(120)
   email            String    @db.VarChar(320)
@@ -97,7 +129,7 @@ model TenantAuthSession {
 }
 
 model TenantAuthAccount {
-  id                    String    @id @db.VarChar(64)
+  id                    String    @id @default(dbgenerated("gen_random_uuid()::text")) @db.VarChar(64)
   accountId             String    @db.VarChar(255)
   providerId            String    @db.VarChar(100)
   userId                String    @db.VarChar(64)
@@ -358,6 +390,7 @@ model ProgramRun {
   state                String    @default("DRAFT") @db.VarChar(16)
   venueId              String?   @map("venue_id") @db.Uuid
   notes                String    @default("") @db.Text
+  registrationFormSchema Json     @default("{\"version\":1,\"fields\":[]}") @map("registration_form_schema") @db.JsonB
   createdBy            String    @map("created_by") @db.VarChar(64)
   createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
@@ -366,6 +399,24 @@ model ProgramRun {
   @@index([tenantId, programId, startsAt(sort: Desc)], map: "program_runs_program_idx")
   @@index([tenantId, state, startsAt], map: "program_runs_state_idx")
   @@map("program_runs")
+}
+
+model Enrollment {
+  tenantId           String   @map("tenant_id") @db.Uuid
+  id                 String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  runId              String   @map("run_id") @db.Uuid
+  participantId      String   @map("participant_id") @db.VarChar(64)
+  status             String   @db.VarChar(16)
+  answers            Json     @default("{}") @db.JsonB
+  formSchemaSnapshot Json     @map("form_schema_snapshot") @db.JsonB
+  registeredAt       DateTime @default(now()) @map("registered_at") @db.Timestamptz(6)
+  updatedAt          DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@unique([tenantId, runId, participantId])
+  @@index([tenantId, runId, status, registeredAt], map: "enrollments_run_status_idx")
+  @@index([tenantId, participantId, registeredAt(sort: Desc)], map: "enrollments_participant_idx")
+  @@map("enrollments")
 }
 
 model RunInstructor {

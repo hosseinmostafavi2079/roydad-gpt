@@ -1,6 +1,11 @@
 import { requireTenantPage } from "@/modules/tenant-identity/page-auth";
 
 const featureNames: Record<string, string> = {
+  public_website: "وب‌سایت عمومی",
+  registration: "ثبت‌نام",
+  waitlist: "فهرست انتظار",
+  password_login: "ورود با رمز عبور",
+  email_otp: "ورود با کد ایمیلی",
   courses: "دوره‌ها",
   events: "رویدادها",
   attendance: "حضور و غیاب",

@@ -1,5 +1,9 @@
 # Phase 1 — Platform Foundation
 
+## Phase 4 — Public tenant product (in progress)
+
+Acceptance requires a tenant-scoped Persian public site, configurable safe profile/theme, published event listing/detail, participant registration and password/email-OTP login, transaction-safe enrollment/waitlist, participant account, organizer enrollment management, validated registration forms, server-enforced features/limits, real usage metrics, verified domain routing, public SEO, forward-only migrations, tenant-isolation/security tests, Docker compatibility, and the full local and GitHub gates. Phase 5 is out of scope. Do not mark this phase complete until every acceptance item and GitHub Actions pass.
+
 This file preserves the Phase 1 and Phase 2 acceptance records and tracks the Phase 3 local gate below. Do not begin Phase 4.
 
 ## Acceptance criteria
@@ -131,4 +135,14 @@ Phase 2 remains open. CodeQL, secret scanning, and real-PostgreSQL integration t
 - [x] Complete the local Phase 3 gate: format, lint, type-check, 36 unit tests, 9 real PostgreSQL integration tests, production build, 1 Playwright browser flow, Prisma validation, production dependency audit, and Gitleaks.
 - [ ] Confirm the updated GitHub Actions workflow is green before declaring Phase 3 complete.
 
-Phase 4 enrollment, pricing, payments, attendance, certificates, and related workflows remain deferred.
+Pricing, payments, attendance, and certificates remain deferred.
+
+# Phase 4 — Public tenant product (in progress)
+
+- [x] Add tenant public profile/theme, public home/about/contact/event pages, participant registration, password and email OTP login, enrollment with transactional capacity and waitlist, organizer registration list, form schema, feature flags, usage counts, and SEO foundations.
+- [x] Add forward-only tenant migrations `0004`–`0006`; upgrade existing tenants in place. Add test coverage for self-registration, OTP tenant binding/replay, and concurrent capacity.
+- [x] Expand the local demo seed with public profile content and a full waitlisted event.
+- [ ] Complete tenant-admin custom-domain management and verification status UI; expand public filters and participant account calendar/profile/security views.
+- [ ] Add full Phase 4 browser flow, including self-registration, OTP, enrollment, waitlist, organizer management, and Super Admin feature-toggle denial.
+- [ ] Add email usage metering, enforce remaining measurable limits, and complete Phase 4 security/mobile tests and documentation.
+- [ ] Pass the full local gate and confirm GitHub Actions is green before marking Phase 4 complete.

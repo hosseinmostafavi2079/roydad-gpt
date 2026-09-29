@@ -17,6 +17,7 @@ type TenantContext = Readonly<{
   tenantId: string;
   slug: string;
   hostname: string;
+  primaryHostname: string;
   status: "ACTIVE";
   databaseName: string;
   locale: string;
@@ -96,6 +97,7 @@ export async function resolveTenantContext(
     tenant_id: string;
     slug: string;
     hostname: string;
+    primary_hostname: string | null;
     domain_type: "PLATFORM_SUBDOMAIN" | "CUSTOM";
     verified_at: Date | null;
     status: string;
@@ -118,7 +120,11 @@ export async function resolveTenantContext(
             plan.features AS plan_features, plan.limits AS plan_limits,
             COALESCE((SELECT jsonb_object_agg(feature_key, enabled) FROM tenant_features WHERE tenant_id = tenant.id), '{}'::jsonb) AS feature_overrides,
             COALESCE((SELECT jsonb_object_agg(limit_key, limit_value) FROM tenant_limits WHERE tenant_id = tenant.id), '{}'::jsonb) AS limit_overrides,
-            branding.brand_name, branding.primary_color, branding.accent_color
+            branding.brand_name, branding.primary_color, branding.accent_color,
+            (SELECT primary_domain.hostname FROM tenant_domains primary_domain
+             WHERE primary_domain.tenant_id=tenant.id AND primary_domain.is_primary
+               AND (primary_domain.domain_type='PLATFORM_SUBDOMAIN' OR primary_domain.verified_at IS NOT NULL)
+             LIMIT 1) AS primary_hostname
      FROM tenant_domains AS domain
      JOIN tenants AS tenant ON tenant.id = domain.tenant_id
      JOIN tenant_database_registry AS registry ON registry.tenant_id = tenant.id
@@ -161,6 +167,7 @@ export async function resolveTenantContext(
     tenantId: row.tenant_id,
     slug: row.slug,
     hostname,
+    primaryHostname: row.primary_hostname || hostname,
     status: "ACTIVE",
     databaseName: row.database_name,
     locale: row.locale,

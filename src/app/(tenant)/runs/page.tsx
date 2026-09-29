@@ -11,6 +11,7 @@ export default async function RunsPage() {
       canManage={actor.permissions.has("session.manage")}
       canPublish={actor.permissions.has("program.publish")}
       canAssign={actor.permissions.has("instructor.manage")}
+      registrationEnabled={tenant.features.registration}
     />
   );
 }

@@ -62,7 +62,10 @@ import {
   resolveTenantContext,
   tenantResolutionCacheSize,
 } from "@/modules/tenants/resolver";
-import { POST as tenantAuthPost } from "@/app/api/tenant-auth/[...all]/route";
+import {
+  GET as tenantAuthGet,
+  POST as tenantAuthPost,
+} from "@/app/api/tenant-auth/[...all]/route";
 import {
   GET as getTenantStaff,
   POST as postTenantStaff,
@@ -486,8 +489,8 @@ describe("Phase 1 real PostgreSQL gates", () => {
       );
       expect(identity.rows[0]).toMatchObject({
         role_count: 11,
-        permission_count: 41,
-        owner_grant_count: 41,
+        permission_count: 42,
+        owner_grant_count: 42,
         owner_status: "INVITED",
       });
       const prismaHistory = await tenantDb.query<{ table_name: string | null }>(
@@ -544,9 +547,9 @@ describe("Phase 1 real PostgreSQL gates", () => {
         "SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL",
       );
       const appRows = await migrationCheck.query<{ count: number }>(
-        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0003_phase3_program_core'",
+        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0006_phase4_self_registration_ids'",
       );
-      expect(prismaRows.rows[0]?.count).toBe(4);
+      expect(prismaRows.rows[0]?.count).toBe(7);
       expect(appRows.rows[0]?.count).toBe(1);
     } finally {
       await migrationCheck.end();
@@ -599,7 +602,109 @@ describe("Phase 1 real PostgreSQL gates", () => {
       ownerSessionHeaders,
     );
     expect(ownerActor.tenantId).toBe(first.tenant.id);
-    expect(ownerActor.permissions.size).toBe(41);
+    expect(ownerActor.permissions.size).toBe(42);
+    const participantEmail = `participant-${randomUUID()}@example.test`;
+    const authRequest = (
+      path: string,
+      input: unknown,
+      host = `${slugA}.localhost:3000`,
+    ) =>
+      new Request(`http://${host}/api/tenant-auth${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: `http://${host}`,
+          host,
+        },
+        body: JSON.stringify(input),
+      });
+    const signUp = await tenantAuthPost(
+      authRequest("/sign-up/email", {
+        name: "Synthetic Participant",
+        email: participantEmail,
+        password: "safe participant password 123",
+        callbackURL: "/account",
+      }),
+    );
+    expect(signUp.status).toBe(200);
+    const participantRows = await getTenantPool(ownerContext).query(
+      `SELECT user_id FROM tenant_participant_profiles WHERE tenant_id=$1
+       AND user_id=(SELECT id FROM tenant_users WHERE "tenantId"=$1 AND email=$2)`,
+      [first.tenant.id, participantEmail],
+    );
+    expect(participantRows.rowCount).toBe(1);
+    const verificationMessages = (await readFile(testMailOutbox, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { email: string; text: string });
+    const verificationMessage = verificationMessages.find(
+      (entry) => entry.email === participantEmail,
+    );
+    expect(verificationMessage).toBeDefined();
+    const verificationUrl =
+      verificationMessage?.text.match(/https?:\/\/\S+/)?.[0];
+    if (!verificationUrl)
+      throw new Error("Participant verification email was not delivered.");
+    const verify = await tenantAuthGet(
+      new Request(verificationUrl, {
+        headers: { host: `${slugA}.localhost:3000` },
+      }),
+    );
+    expect(verify.status).toBeLessThan(400);
+    const participantVerified = await getTenantPool(ownerContext).query<{
+      emailVerified: boolean;
+    }>(
+      `SELECT "emailVerified" FROM tenant_users WHERE "tenantId"=$1 AND email=$2`,
+      [first.tenant.id, participantEmail],
+    );
+    expect(participantVerified.rows[0]?.emailVerified).toBe(true);
+    const disabledOtp = await tenantAuthPost(
+      authRequest("/email-otp/send-verification-otp", {
+        email: participantEmail,
+        type: "sign-in",
+      }),
+    );
+    expect(disabledOtp.status).toBe(403);
+    for (const tenantId of [first.tenant.id]) {
+      await getControlPool().query(
+        `INSERT INTO tenant_features (tenant_id,feature_key,enabled,updated_by) VALUES ($1,'email_otp',true,$2)
+         ON CONFLICT (tenant_id,feature_key) DO UPDATE SET enabled=true,updated_by=$2`,
+        [tenantId, adminId],
+      );
+      invalidateTenantResolutionCache(tenantId);
+    }
+    const requestedOtp = await tenantAuthPost(
+      authRequest("/email-otp/send-verification-otp", {
+        email: participantEmail,
+        type: "sign-in",
+      }),
+    );
+    expect(requestedOtp.status).toBe(200);
+    const otpMessages = (await readFile(testMailOutbox, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { email: string; text: string });
+    const otpText = otpMessages
+      .filter((entry) => entry.email === participantEmail)
+      .at(-1)?.text;
+    const otp = otpText?.match(/\b\d{6}\b/)?.[0];
+    if (!otp) throw new Error("Tenant OTP message was not delivered.");
+    const otpLogin = await tenantAuthPost(
+      authRequest("/sign-in/email-otp", { email: participantEmail, otp }),
+    );
+    expect(otpLogin.status).toBe(200);
+    expect(await otpLogin.text()).not.toMatch(/token|session|access.?key/i);
+    const replay = await tenantAuthPost(
+      authRequest("/sign-in/email-otp", { email: participantEmail, otp }),
+    );
+    expect(replay.status).not.toBe(200);
+    for (const tenantId of [first.tenant.id]) {
+      await getControlPool().query(
+        "DELETE FROM tenant_features WHERE tenant_id=$1 AND feature_key='email_otp'",
+        [tenantId],
+      );
+      invalidateTenantResolutionCache(tenantId);
+    }
     await expect(
       updateTenantUserStatus(
         ownerContext,
@@ -1040,6 +1145,57 @@ describe("Phase 1 real PostgreSQL gates", () => {
     expect(contextB.tenantId).toBe(second.tenant.id);
     expect(contextA.databaseName).not.toBe(contextB.databaseName);
     expect(contextA.features.custom_domain).toBe(false);
+    for (const tenantId of [first.tenant.id, second.tenant.id]) {
+      await getControlPool().query(
+        `INSERT INTO tenant_features (tenant_id,feature_key,enabled,updated_by) VALUES ($1,'email_otp',true,$2)
+         ON CONFLICT (tenant_id,feature_key) DO UPDATE SET enabled=true,updated_by=$2`,
+        [tenantId, adminId],
+      );
+      invalidateTenantResolutionCache(tenantId);
+    }
+    const crossTenantChallenge = await tenantAuthPost(
+      authRequest("/email-otp/send-verification-otp", {
+        email: participantEmail,
+        type: "sign-in",
+      }),
+    );
+    expect(crossTenantChallenge.status).toBe(200);
+    const crossTenantMessages = (await readFile(testMailOutbox, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { email: string; text: string });
+    const crossTenantCode = crossTenantMessages
+      .filter((entry) => entry.email === participantEmail)
+      .at(-1)
+      ?.text.match(/\b\d{6}\b/)?.[0];
+    if (!crossTenantCode)
+      throw new Error("Cross-tenant OTP fixture was not delivered.");
+    const crossTenantAttempt = await tenantAuthPost(
+      authRequest(
+        "/sign-in/email-otp",
+        { email: participantEmail, otp: crossTenantCode },
+        `${slugB}.localhost:3000`,
+      ),
+    );
+    expect(crossTenantAttempt.status).not.toBe(200);
+    const correctTenantAttempt = await tenantAuthPost(
+      authRequest("/sign-in/email-otp", {
+        email: participantEmail,
+        otp: crossTenantCode,
+      }),
+    );
+    expect(correctTenantAttempt.status).toBe(200);
+    for (const tenantId of [first.tenant.id, second.tenant.id]) {
+      await getControlPool().query(
+        "DELETE FROM tenant_features WHERE tenant_id=$1 AND feature_key='email_otp'",
+        [tenantId],
+      );
+      invalidateTenantResolutionCache(tenantId);
+    }
+    await Promise.all([
+      resolveTenantContext(`${slugA}.localhost`),
+      resolveTenantContext(`${slugB}.localhost`),
+    ]);
     await expect(
       assignTenantUserRoles(
         contextB,
@@ -1326,7 +1482,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       [created.tenant.id, created.tenant.id],
     );
     expect(firstUpgrade.rows[0]).toEqual({
-      migration_version: "0003_phase3_program_core",
+      migration_version: "0006_phase4_self_registration_ids",
       audit_count: 1,
     });
 
@@ -1367,16 +1523,18 @@ describe("Phase 1 real PostgreSQL gates", () => {
            (SELECT count(*)::int FROM tenant_schema_migrations) AS identity_rows,
            (SELECT count(*)::int FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS prisma_rows`,
       );
-      expect(metadata.rows[0]?.schema_version).toBe("0003_phase3_program_core");
+      expect(metadata.rows[0]?.schema_version).toBe(
+        "0006_phase4_self_registration_ids",
+      );
       expect(identity.rows[0]).toEqual({
         roles: 11,
-        permissions: 41,
-        owner_grants: 41,
+        permissions: 42,
+        owner_grants: 42,
       });
       expect(history.rows[0]).toEqual({
         phase1_rows: 1,
         identity_rows: 2,
-        prisma_rows: 4,
+        prisma_rows: 7,
       });
     } finally {
       await upgraded.end();

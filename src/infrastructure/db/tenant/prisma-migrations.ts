@@ -11,7 +11,8 @@ const tenantIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const baselineMigration = "0000_phase1_baseline";
 export const tenantIdentityMigrationVersion = "0002_tenant_identity_rbac";
-export const tenantCurrentMigrationVersion = "0003_phase3_program_core";
+export const tenantCurrentMigrationVersion =
+  "0006_phase4_self_registration_ids";
 
 function migrationUrl(databaseName: string): string {
   if (!databaseNamePattern.test(databaseName)) {
@@ -88,6 +89,9 @@ export async function applyTenantPrismaMigrations(
       current.tenant_id !== tenantId ||
       (current.schema_version !== "0001_tenant_foundation" &&
         current.schema_version !== tenantIdentityMigrationVersion &&
+        current.schema_version !== "0003_phase3_program_core" &&
+        current.schema_version !== "0004_phase4_public_website" &&
+        current.schema_version !== "0005_phase4_enrollment" &&
         current.schema_version !== tenantCurrentMigrationVersion) ||
       !current.has_foundation_migration
     ) {
@@ -144,6 +148,19 @@ export async function applyTenantPrismaMigrations(
     );
     if (!phase3.rows[0]?.tables_ready) {
       throw new Error("Tenant program schema verification failed.");
+    }
+
+    const phase4 = await client.query<{ ready: boolean }>(
+      "SELECT to_regclass('public.tenant_website_profiles') IS NOT NULL AS ready",
+    );
+    if (!phase4.rows[0]?.ready) {
+      throw new Error("Tenant public website schema verification failed.");
+    }
+    const enrollment = await client.query<{ ready: boolean }>(
+      "SELECT to_regclass('public.enrollments') IS NOT NULL AS ready",
+    );
+    if (!enrollment.rows[0]?.ready) {
+      throw new Error("Tenant enrollment schema verification failed.");
     }
 
     await client.query("BEGIN");

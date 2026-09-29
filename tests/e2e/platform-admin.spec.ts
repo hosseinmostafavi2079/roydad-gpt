@@ -682,6 +682,15 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
     await expect(
       page.getByRole("row").filter({ hasText: phase3RunTitle }),
     ).toContainText("منتشرشده");
+    const publicContext = await browser.newContext();
+    const publicPage = await publicContext.newPage();
+    await publicPage.goto(`${tenantOrigin}/`);
+    await expect(publicPage.getByRole("heading", { level: 1 })).toBeVisible();
+    await publicPage.goto(`${tenantOrigin}/events`);
+    await expect(publicPage.getByText(phase3RunTitle).first()).toBeVisible();
+    await publicPage.goto(`${tenantOrigin}/events/${phase3RunId}`);
+    await expect(publicPage.getByRole("heading", { name: phase3RunTitle })).toBeVisible();
+    await publicContext.close();
     await page.goto(`${tenantOrigin}/calendar`);
     await expect(page.getByText(phase3SessionTitle)).toBeVisible();
 

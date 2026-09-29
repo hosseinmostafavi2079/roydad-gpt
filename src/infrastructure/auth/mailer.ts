@@ -11,15 +11,19 @@ type InvitationEmail = Readonly<{
   tenantName: string;
   inviteUrl: string;
 }>;
-type InvitationMessage = InvitationEmail &
-  Readonly<{ subject: string; text: string; html: string }>;
+type MailMessage = Readonly<{
+  email: string;
+  subject: string;
+  text: string;
+  html: string;
+}>;
 
 interface InvitationEmailProvider {
-  send(message: InvitationMessage): Promise<void>;
+  send(message: MailMessage): Promise<void>;
 }
 
 class TestOutboxInvitationProvider implements InvitationEmailProvider {
-  async send(message: InvitationMessage): Promise<void> {
+  async send(message: MailMessage): Promise<void> {
     const outboxPath = process.env.EVENTOS_TEST_MAIL_OUTBOX;
     const tempRoot = path.resolve(os.tmpdir());
     const resolved = outboxPath ? path.resolve(outboxPath) : "";
@@ -42,7 +46,7 @@ class SmtpInvitationProvider implements InvitationEmailProvider {
     private readonly from: string,
   ) {}
 
-  async send(message: InvitationMessage): Promise<void> {
+  async send(message: MailMessage): Promise<void> {
     const transport = nodemailer.createTransport(this.smtpUrl);
     try {
       await transport.sendMail({
@@ -100,6 +104,32 @@ export async function sendTenantInvitationEmail(
     subject: `Activate your ${input.tenantName} EventOS account`,
     text: `You have been invited to ${input.tenantName}. Activate your account using this one-time link within 24 hours: ${input.inviteUrl}`,
     html: `<p>You have been invited to ${escapeHtml(input.tenantName)}.</p><p><a href="${escapeHtml(input.inviteUrl)}">Activate your account</a></p><p>This one-time link expires after 24 hours. If you did not expect this invitation, ignore this message.</p>`,
+  });
+}
+
+export async function sendTenantEmailOtp(input: {
+  email: string;
+  otp: string;
+  tenantName: string;
+}): Promise<void> {
+  await invitationProvider().send({
+    email: input.email,
+    subject: `کد ورود به ${input.tenantName}`,
+    text: `کد یک‌بارمصرف ورود شما: ${input.otp}. این کد تا پنج دقیقه معتبر است. اگر درخواست نکرده‌اید، این پیام را نادیده بگیرید.`,
+    html: `<p>کد یک‌بارمصرف ورود به ${escapeHtml(input.tenantName)}:</p><p dir="ltr"><strong>${escapeHtml(input.otp)}</strong></p><p>این کد تا پنج دقیقه معتبر است.</p>`,
+  });
+}
+
+export async function sendTenantVerificationEmail(input: {
+  email: string;
+  url: string;
+  tenantName: string;
+}): Promise<void> {
+  await invitationProvider().send({
+    email: input.email,
+    subject: `تأیید ایمیل در ${input.tenantName}`,
+    text: `برای تأیید حساب خود در ${input.tenantName} از این پیوند یک‌بارمصرف استفاده کنید: ${input.url}`,
+    html: `<p>برای تأیید حساب خود در ${escapeHtml(input.tenantName)} از این پیوند استفاده کنید:</p><p><a href="${escapeHtml(input.url)}">تأیید ایمیل</a></p>`,
   });
 }
 

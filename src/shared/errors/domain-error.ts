@@ -10,7 +10,10 @@ export type DomainErrorCode =
   | "DOMAIN_UNVERIFIED"
   | "TENANT_NOT_ACTIVE"
   | "PROVISIONING_FAILED"
-  | "RATE_LIMITED";
+  | "RATE_LIMITED"
+  | "CAPACITY_REACHED"
+  | "REGISTRATION_CLOSED"
+  | "ALREADY_ENROLLED";
 
 const statusByCode: Record<DomainErrorCode, number> = {
   UNAUTHENTICATED: 401,
@@ -25,6 +28,9 @@ const statusByCode: Record<DomainErrorCode, number> = {
   TENANT_NOT_ACTIVE: 403,
   PROVISIONING_FAILED: 409,
   RATE_LIMITED: 429,
+  CAPACITY_REACHED: 409,
+  REGISTRATION_CLOSED: 409,
+  ALREADY_ENROLLED: 409,
 };
 
 export class DomainError extends Error {

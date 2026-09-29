@@ -66,6 +66,11 @@ type Details = {
 };
 
 const featureNames: Record<string, string> = {
+  public_website: "وب‌سایت عمومی",
+  registration: "ثبت‌نام",
+  waitlist: "فهرست انتظار",
+  password_login: "ورود با رمز عبور",
+  email_otp: "ورود با کد ایمیلی",
   courses: "دوره‌ها",
   events: "رویدادها",
   attendance: "حضور و غیاب",
@@ -85,8 +90,11 @@ const featureGroups = [
   {
     title: "آموزش و رویداد",
     keys: [
+      "public_website",
       "courses",
       "events",
+      "registration",
+      "waitlist",
       "attendance",
       "qr_attendance",
       "certificates",
@@ -94,13 +102,18 @@ const featureGroups = [
       "assignments",
     ],
   },
-  { title: "ارتباطات", keys: ["crm", "sms", "email"] },
+  {
+    title: "ارتباطات",
+    keys: ["password_login", "email_otp", "crm", "sms", "email"],
+  },
   {
     title: "سازمان و امکانات پیشرفته",
     keys: ["payments", "branches", "custom_domain", "ai"],
   },
 ];
 const limitNames: Record<string, string> = {
+  max_programs: "حداکثر برنامه‌ها",
+  max_instructors: "حداکثر مربیان",
   max_staff: "حداکثر اعضای تیم",
   max_participants: "حداکثر شرکت‌کنندگان",
   max_active_runs: "رویدادهای فعال",

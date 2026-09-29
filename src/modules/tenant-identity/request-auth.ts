@@ -38,8 +38,9 @@ export async function resolveTenantFromHeaders(
   if (!host) throw new DomainError("NOT_FOUND", "Tenant not found.");
   const tenant = await resolveTenantContext(host);
   const hostname = normalizeHostHeader(host);
+  const localHost = hostname === "localhost" || hostname.endsWith(".localhost");
   const protocol =
-    process.env.NODE_ENV === "production"
+    process.env.NODE_ENV === "production" && !localHost
       ? "https:"
       : requestHeaders.get("x-forwarded-proto") === "https"
         ? "https:"

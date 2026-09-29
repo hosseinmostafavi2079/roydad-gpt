@@ -1,13 +1,18 @@
 import "server-only";
 
 import { betterAuth, type BetterAuthOptions } from "better-auth";
-import { randomUUID } from "node:crypto";
+import { emailOTP } from "better-auth/plugins";
+import { createHmac, randomUUID } from "node:crypto";
 import { getTenantPool } from "@/infrastructure/db/tenant/pool";
 import {
   hashPlatformPassword,
   verifyPlatformPassword,
 } from "@/infrastructure/auth/password";
-import { sendTenantPasswordResetEmail } from "@/infrastructure/auth/mailer";
+import {
+  sendTenantEmailOtp,
+  sendTenantPasswordResetEmail,
+  sendTenantVerificationEmail,
+} from "@/infrastructure/auth/mailer";
 import { logger } from "@/infrastructure/logging/logger";
 import type { resolveTenantContext } from "@/modules/tenants/resolver";
 import { getServerConfig } from "@/shared/config/env";
@@ -29,7 +34,9 @@ export function getTenantAuth(context: TenantContext, origin: string) {
     appName: context.branding.brandName,
     baseURL: origin,
     basePath: "/api/tenant-auth",
-    secret: getServerConfig().BETTER_AUTH_SECRET,
+    secret: createHmac("sha256", getServerConfig().BETTER_AUTH_SECRET)
+      .update(`tenant:${context.tenantId}`)
+      .digest("hex"),
     trustedOrigins: [origin],
     database: pool,
     onAPIError: {
@@ -64,7 +71,8 @@ export function getTenantAuth(context: TenantContext, origin: string) {
       additionalFields: {
         tenantId: {
           type: "string",
-          required: true,
+          required: false,
+          defaultValue: context.tenantId,
           input: false,
           returned: false,
         },
@@ -101,9 +109,20 @@ export function getTenantAuth(context: TenantContext, origin: string) {
       modelName: "tenant_auth_verifications",
       storeIdentifier: "hashed",
     },
+    emailVerification: {
+      sendOnSignUp: true,
+      autoSignInAfterVerification: false,
+      sendVerificationEmail: async ({ user, url }) => {
+        await sendTenantVerificationEmail({
+          email: user.email,
+          url,
+          tenantName: context.branding.brandName,
+        });
+      },
+    },
     emailAndPassword: {
       enabled: true,
-      disableSignUp: true,
+      disableSignUp: false,
       requireEmailVerification: true,
       minPasswordLength: 12,
       maxPasswordLength: 128,
@@ -121,6 +140,24 @@ export function getTenantAuth(context: TenantContext, origin: string) {
         });
       },
     },
+    plugins: [
+      emailOTP({
+        disableSignUp: true,
+        expiresIn: 300,
+        allowedAttempts: 3,
+        storeOTP: "hashed",
+        resendStrategy: "rotate",
+        rateLimit: { window: 60, max: 3 },
+        sendVerificationOTP: async ({ email, otp, type }) => {
+          if (type !== "sign-in") throw new Error("Unsupported OTP purpose.");
+          await sendTenantEmailOtp({
+            email,
+            otp,
+            tenantName: context.branding.brandName,
+          });
+        },
+      }),
+    ],
     rateLimit: {
       enabled: true,
       storage: "database",
@@ -131,6 +168,7 @@ export function getTenantAuth(context: TenantContext, origin: string) {
         "/sign-in/email": { window: 60, max: 5 },
         "/forget-password": { window: 60, max: 3 },
         "/reset-password": { window: 60, max: 5 },
+        "/sign-up/email": { window: 60, max: 3 },
       },
     },
     advanced: {
@@ -148,13 +186,13 @@ export function getTenantAuth(context: TenantContext, origin: string) {
       user: {
         create: {
           before: async (user) => ({
-            data: { ...user, tenantId: context.tenantId, status: "INVITED" },
+            data: { ...user, tenantId: context.tenantId, status: "ACTIVE" },
           }),
         },
       },
       session: {
         create: {
-          before: async (session) => {
+          before: async (session, hookContext) => {
             const user = await pool.query<{
               status: string;
               locked_until: Date | null;
@@ -182,7 +220,11 @@ export function getTenantAuth(context: TenantContext, origin: string) {
               data: {
                 ...session,
                 tenantId: context.tenantId,
-                authenticationLevel: "PASSWORD",
+                authenticationLevel: hookContext?.request?.url.includes(
+                  "/sign-in/email-otp",
+                )
+                  ? "EMAIL_OTP"
+                  : "PASSWORD",
               },
             };
           },
@@ -198,7 +240,11 @@ export function getTenantAuth(context: TenantContext, origin: string) {
                 requestId && /^[0-9a-f-]{36}$/i.test(requestId)
                   ? requestId
                   : randomUUID(),
-                JSON.stringify({ authenticationLevel: "PASSWORD" }),
+                JSON.stringify({
+                  authenticationLevel:
+                    (session as { authenticationLevel?: string })
+                      .authenticationLevel ?? "PASSWORD",
+                }),
               ],
             );
           },

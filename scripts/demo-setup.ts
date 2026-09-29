@@ -360,6 +360,7 @@ async function seedContent(
   databaseName: string,
   ownerId: string,
   instructorId: string,
+  participantId: string,
 ) {
   const tenant = { tenantId, databaseName };
   const actor = {
@@ -383,6 +384,22 @@ async function seedContent(
   };
   const scope = { tenant, actor, requestId: randomUUID() };
   const pool = getTenantPool(tenant);
+  await pool.query(
+    `UPDATE tenant_website_profiles SET display_name=$2,short_description=$3,about=$4,
+      phone=$5,email=$6,address=$7,contact_hours=$8,footer_description=$9,updated_at=now()
+     WHERE tenant_id=$1`,
+    [
+      tenantId,
+      "آکادمی رویداد آزمایشی",
+      "دوره‌ها و رویدادهای آموزشی برای یادگیری در کنار هم",
+      "آکادمی رویداد آزمایشی یک مجموعه ساختگی برای بررسی امکانات عمومی، ثبت‌نام و مدیریت دوره‌ها است.",
+      "021-00000000",
+      "demo-contact@example.test",
+      "اصفهان، مرکز آموزشی رویداد",
+      "شنبه تا چهارشنبه، ۹ تا ۱۷",
+      "با هم یاد می‌گیریم.",
+    ],
+  );
   const venueResult = await pool.query<{ id: string }>(
     "SELECT id FROM venues WHERE tenant_id=$1 AND name=$2",
     [tenantId, "مرکز آموزشی رویداد"],
@@ -478,9 +495,9 @@ async function seedContent(
             registrationStartsAt: null,
             registrationEndsAt: null,
             deliveryMode: index === 0 ? "IN_PERSON" : "ONLINE",
-            capacity: index === 0 ? 24 : 80,
+            capacity: index === 0 ? 24 : 1,
             minimumCapacity: null,
-            waitlistEnabled: false,
+            waitlistEnabled: index === 1,
             venueId: index === 0 ? venueId : null,
             instructorIds: [instructorId],
             notes: "داده آزمایشی",
@@ -515,6 +532,18 @@ async function seedContent(
     }
     if (runExisting.rows[0]?.state === "DRAFT" || !runExisting.rows[0])
       await transitionRun(scope, runId, "PUBLISHED");
+    if (index === 1) {
+      await pool.query(
+        "UPDATE program_runs SET capacity=1,waitlist_enabled=true WHERE tenant_id=$1 AND id=$2",
+        [tenantId, runId],
+      );
+      await pool.query(
+        `INSERT INTO enrollments (tenant_id,run_id,participant_id,status,answers,form_schema_snapshot)
+         VALUES ($1,$2,$3,'CONFIRMED','{}'::jsonb,'{"version":1,"fields":[]}'::jsonb)
+         ON CONFLICT (tenant_id,run_id,participant_id) DO NOTHING`,
+        [tenantId, runId, participantId],
+      );
+    }
   }
 }
 
@@ -541,8 +570,19 @@ try {
     "instructor",
     "instructor",
   );
-  await ensureTenantUser(tenantId, databaseName, "participant", "participant");
-  await seedContent(tenantId, databaseName, ownerId, instructorId);
+  const participantId = await ensureTenantUser(
+    tenantId,
+    databaseName,
+    "participant",
+    "participant",
+  );
+  await seedContent(
+    tenantId,
+    databaseName,
+    ownerId,
+    instructorId,
+    participantId,
+  );
   console.log(
     `EventOS local demo is ready\n\nPlatform Admin:\nURL: http://localhost:3000/sign-in\nEmail: ${credentials.platform.email}\nPassword: ${credentials.platform.password}\n\nTenant Owner:\nURL: http://demo.localhost:3000/login\nEmail: ${credentials.owner.email}\nPassword: ${credentials.owner.password}\n\nInstructor:\nURL: http://demo.localhost:3000/login\nEmail: ${credentials.instructor.email}\nPassword: ${credentials.instructor.password}\n\nParticipant:\nURL: http://demo.localhost:3000/login\nEmail: ${credentials.participant.email}\nPassword: ${credentials.participant.password}\n\nCredentials are also in ignored .demo-credentials.local.`,
   );
