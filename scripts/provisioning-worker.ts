@@ -510,6 +510,7 @@ const workerId = await boss.work<{
   },
 );
 logger.info("Provisioning worker started");
+process.send?.({ type: "eventos.provisioning.ready" });
 const shutdown = async () => {
   await boss.offWork(provisioningQueueName, { id: workerId, wait: true });
   await stopProvisioningBoss();

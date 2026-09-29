@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile, unlink } from "node:fs/promises";
 import os from "node:os";
@@ -69,6 +69,7 @@ import {
 } from "@/app/api/tenant/identity/staff/route";
 import { GET as getTenantRoles } from "@/app/api/tenant/roles/route";
 import { POST as acceptTenantInvitationRoute } from "@/app/api/tenant/invitations/accept/route";
+import { workerDiagnostics } from "../helpers/worker-diagnostics";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 
@@ -81,19 +82,17 @@ const migrations = path.join(
   "migrations",
 );
 const cleanupTenantIds: string[] = [];
-const workerProcesses: ChildProcessWithoutNullStreams[] = [];
+const workerProcesses: ChildProcess[] = [];
 const testMailOutbox = path.join(
   os.tmpdir(),
   `eventos-integration-mail-${process.pid}.jsonl`,
 );
 process.env.EVENTOS_TEST_MAIL_OUTBOX = testMailOutbox;
-const workerOutput = new WeakMap<ChildProcessWithoutNullStreams, string>();
+const workerOutput = new WeakMap<ChildProcess, string>();
 let adminId = "";
 let adminEmail = "";
 
-function startWorker(
-  failurePhase?: string,
-): Promise<ChildProcessWithoutNullStreams> {
+function startWorker(failurePhase?: string): Promise<ChildProcess> {
   const child = spawn(
     process.execPath,
     [
@@ -106,61 +105,68 @@ function startWorker(
       env: {
         ...process.env,
         NODE_ENV: "test",
+        LOG_LEVEL: "warn",
         ...(failurePhase ? { EVENTOS_TEST_FAIL_PHASE: failurePhase } : {}),
       },
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe", "ipc"],
     },
   );
-  child.stdin.end();
+  child.stdin?.end();
   workerProcesses.push(child);
   return new Promise((resolve, reject) => {
-    let output = "";
-    workerOutput.set(child, output);
-    const timer = setTimeout(
-      () =>
-        reject(
-          new Error(
-            `Provisioning worker did not start: ${output.slice(-1000)}`,
-          ),
-        ),
-      20_000,
-    );
-    const onData = (chunk: Buffer) => {
-      output += chunk.toString();
-      workerOutput.set(child, output);
-      if (output.includes("Provisioning worker started")) {
-        clearTimeout(timer);
-        resolve(child);
-      }
-    };
-    child.stdout.on("data", onData);
-    child.stderr.on("data", (chunk) => {
-      output += chunk.toString();
-      workerOutput.set(child, output);
-    });
-    child.once("error", (error) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const diagnostics = () => workerDiagnostics(stdout, stderr);
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      reject(error);
+      if (error) reject(error);
+      else resolve(child);
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(
+        new Error(`Provisioning worker readiness timed out; ${diagnostics()}`),
+      );
+    }, 20_000);
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+      workerOutput.set(child, stdout + stderr);
     });
-    child.once("exit", (code) => {
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+      workerOutput.set(child, stdout + stderr);
+    });
+    child.on("message", (message: unknown) => {
       if (
-        child.exitCode !== null &&
-        !output.includes("Provisioning worker started")
+        typeof message === "object" &&
+        message !== null &&
+        "type" in message &&
+        message.type === "eventos.provisioning.ready"
       ) {
-        clearTimeout(timer);
-        reject(
-          new Error(
-            `Provisioning worker exited with ${code}: ${output.slice(-1000)}`,
-          ),
-        );
+        finish();
       }
     });
+    child.once("error", (error) =>
+      finish(
+        new Error(
+          `Provisioning worker spawn failed: ${error.message}; ${diagnostics()}`,
+        ),
+      ),
+    );
+    child.once("close", (code, signal) =>
+      finish(
+        new Error(
+          `Provisioning worker exited before readiness (code ${code}, signal ${signal}); ${diagnostics()}`,
+        ),
+      ),
+    );
   });
 }
 
-async function stopWorker(
-  child: ChildProcessWithoutNullStreams,
-): Promise<void> {
+async function stopWorker(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
   let timeout: ReturnType<typeof setTimeout> | undefined;

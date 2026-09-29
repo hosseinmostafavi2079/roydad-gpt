@@ -65,17 +65,17 @@ This file preserves the Phase 1 acceptance record and tracks the current phase b
 - `pnpm audit --prod --audit-level high` reported no known vulnerabilities.
 - Pinned Gitleaks v8.30.0 passed on `src`, `scripts`, `tests`, `docs`, and `.github` (the local `.env` was excluded).
 - Source review covered tenant database identifier validation, provisioning transitions and retries, exact host resolution, tenant-scoped pool caching, origin checks, and bootstrap log redaction.
-- This workspace has no `.git` metadata, so no Git diff or remote CI run was available. The final source was reviewed directly; CI and CodeQL workflows are configured, and all available local Phase 1 gates passed.
+- Phase 1 was initially verified before this workspace was connected to Git. The repository is now on `main` with an `origin` remote; GitHub Actions and CodeQL have run during Phase 2.
 - Production deployment and backup/restore readiness remain out of scope and are not claimed.
 
 ## Phase 2 — Tenant Identity, RBAC & Authorization
 
 ### Current gate status
 
-Phase 2 implementation and all runnable local gates are complete. The Phase 2 gate remains open because CodeQL has not run: the CLI is not installed in this workspace, and the workspace has no Git metadata or remote CI run. Do not start Phase 3 until CodeQL passes in CI or an authorized local CodeQL run is available.
+Phase 2 remains open. CodeQL passes in GitHub Actions, but the latest remote quality run failed the Phase 1 provisioning integration case. The failure was a readiness-detection defect: CI sets `LOG_LEVEL=warn`, while the integration and Playwright test launchers waited for the worker's `logger.info("Provisioning worker started")` output. Pino suppressed that line even after `boss.work` registered successfully. The worker now sends an IPC readiness message after queue registration; both test launchers wait for that message and report redacted stderr/stdout plus process exit details on failure. The 20-second guard is unchanged. Do not begin Phase 3 until the updated GitHub quality workflow passes.
 
-- Local results: `pnpm check` passed; unit tests passed (5 files/24 tests); PostgreSQL integration tests passed (1 file/5 tests); production build passed; Playwright passed (1 browser flow); production audit found no vulnerabilities; Prisma schema format/validation passed; `pnpm db:migrate:tenants` passed twice; pinned Gitleaks v8.30.0 found no leaks in `src`, `scripts`, `tests`, `docs`, or `.github`.
-- The configured CodeQL workflow was not run. `codeql` is unavailable locally, and no `.git` metadata or remote CI is available in this workspace.
+- After the readiness fix, local `pnpm check` passed; unit tests passed (6 files/25 tests); PostgreSQL integration tests passed (1 file/5 tests) with worker logging forced to `warn`; production build passed; Playwright passed (1 browser flow) with worker logging forced to `warn`. Earlier Phase 2 checks also found no production audit vulnerabilities, validated the Prisma schema, passed tenant migration twice, and found no leaks with pinned Gitleaks v8.30.0.
+- The user reported CodeQL passing in GitHub Actions. The updated quality workflow still needs a remote rerun after this fix; its result must be recorded before marking Phase 2 complete.
 
 ### Identity and tenant authentication
 
@@ -111,8 +111,8 @@ Phase 2 implementation and all runnable local gates are complete. The Phase 2 ga
 - [x] Add real-PostgreSQL tests for two-tenant identity/RBAC/session/invitation isolation, owner and least-privilege outcomes, escalation attacks, idempotent seeds/migrations, invite/assignment races, replay, revocation, suspension, and wrong-tenant requests.
 - [x] Add Playwright flows for staff invitation and acceptance, custom role assignment and permitted navigation, direct API denial, suspended-session denial, cross-tenant denial, and participant/instructor portal access boundaries.
 - [x] Re-run all Phase 1 tests and preserve their security guarantees.
-- [ ] Pass every configured static security scan. Gitleaks passed; CodeQL remains unverified because its CLI is unavailable locally and this workspace has no Git metadata or remote CI run.
-- [x] Pass formatting, lint, strict TypeScript, unit, real-PostgreSQL integration, Playwright E2E, production build, dependency audit, and secret scan.
+- [x] Pass every configured static security scan. Gitleaks passed locally and CodeQL passed in GitHub Actions, as reported by the user.
+- [ ] Pass formatting, lint, strict TypeScript, unit, real-PostgreSQL integration, Playwright E2E, production build, dependency audit, and secret scan in the updated GitHub quality workflow. Local reruns pass; remote confirmation is pending.
 - [x] Review final changes for cross-tenant access, privilege escalation, session confusion, role/tenant tampering, mass assignment, IDOR, token leakage, enumeration, unsafe logs, CSRF, pool isolation, unsafe queries, and migration safety.
 
 ### Baseline before Phase 2 changes

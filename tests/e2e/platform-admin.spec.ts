@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { once } from "node:events";
 import { expect, test } from "@playwright/test";
 import { currentTotp } from "../helpers/totp";
+import { workerDiagnostics } from "../helpers/worker-diagnostics";
 
 type E2eState = {
   adminEmail: string;
@@ -39,7 +40,7 @@ function saveTenantState(
   );
 }
 
-function startWorker(fail = false): Promise<ChildProcessWithoutNullStreams> {
+function startWorker(fail = false): Promise<ChildProcess> {
   const child = spawn(
     process.execPath,
     [
@@ -52,54 +53,65 @@ function startWorker(fail = false): Promise<ChildProcessWithoutNullStreams> {
       env: {
         ...process.env,
         NODE_ENV: "test",
+        LOG_LEVEL: "warn",
         ...(fail ? { EVENTOS_TEST_FAIL_PHASE: "MIGRATING" } : {}),
       },
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe", "ipc"],
     },
   );
-  child.stdin.end();
+  child.stdin?.end();
   return new Promise((resolve, reject) => {
-    let output = "";
-    const timer = setTimeout(
-      () =>
-        reject(
-          new Error(
-            `Provisioning worker did not start: ${output.slice(-1200)}`,
-          ),
-        ),
-      20_000,
-    );
-    const onData = (chunk: Buffer) => {
-      output += chunk.toString();
-      if (output.includes("Provisioning worker started")) {
-        clearTimeout(timer);
-        resolve(child);
-      }
-    };
-    child.stdout.on("data", onData);
-    child.stderr.on("data", (chunk) => {
-      output += chunk.toString();
-    });
-    child.once("exit", (code) => {
-      if (!output.includes("Provisioning worker started")) {
-        clearTimeout(timer);
-        reject(
-          new Error(
-            `Provisioning worker exited with ${code}: ${output.slice(-1200)}`,
-          ),
-        );
-      }
-    });
-    child.once("error", (error) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const diagnostics = () => workerDiagnostics(stdout, stderr);
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      reject(error);
+      if (error) reject(error);
+      else resolve(child);
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish(
+        new Error(`Provisioning worker readiness timed out; ${diagnostics()}`),
+      );
+    }, 20_000);
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
     });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("message", (message: unknown) => {
+      if (
+        typeof message === "object" &&
+        message !== null &&
+        "type" in message &&
+        message.type === "eventos.provisioning.ready"
+      ) {
+        finish();
+      }
+    });
+    child.once("close", (code, signal) =>
+      finish(
+        new Error(
+          `Provisioning worker exited before readiness (code ${code}, signal ${signal}); ${diagnostics()}`,
+        ),
+      ),
+    );
+    child.once("error", (error) =>
+      finish(
+        new Error(
+          `Provisioning worker spawn failed: ${error.message}; ${diagnostics()}`,
+        ),
+      ),
+    );
   });
 }
 
-async function stopWorker(
-  child: ChildProcessWithoutNullStreams,
-): Promise<void> {
+async function stopWorker(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -133,7 +145,7 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
       "Playwright did not receive the temporary E2E admin credentials.",
     );
   const failWorker = await startWorker(true);
-  let retryWorker: ChildProcessWithoutNullStreams | undefined;
+  let retryWorker: ChildProcess | undefined;
   let tenantId: string | null = null;
   try {
     await page.goto("/sign-in");

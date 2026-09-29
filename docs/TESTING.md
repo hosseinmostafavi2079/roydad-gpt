@@ -39,7 +39,13 @@ pnpm audit:deps
 
 Also validate Prisma tenant schema with the pinned local Prisma CLI and run the pinned Gitleaks scan. CI runs CodeQL for JavaScript/TypeScript. Run every gate after the final implementation changes; do not infer a pass from CI configuration.
 
-CodeQL is configured in `.github/workflows/codeql.yml`. If the CLI and remote CI are unavailable, record CodeQL as unverified and keep the phase gate open until the workflow passes; configuration alone is not a scan result.
+CodeQL is configured in `.github/workflows/codeql.yml` and has passed in GitHub Actions, as reported by the user. The Phase 2 quality gate remains open until the updated `.github/workflows/ci.yml` run passes.
+
+## Provisioning worker readiness regression
+
+The GitHub Actions quality job uses `LOG_LEVEL=warn`. The provisioning worker registered its PostgreSQL queue subscription and then wrote `logger.info("Provisioning worker started")`; Pino suppresses that line at `warn`. Both the real-PostgreSQL integration test and Playwright previously treated the log line as readiness, so the integration test reported `Provisioning worker did not start` after 20 seconds even though the worker could be running. Local development normally used `info`, which hid this mismatch. This was a test orchestration failure, not evidence of slow worker startup; the timeout has not been increased.
+
+The worker now sends `eventos.provisioning.ready` over Node's IPC channel only after `getProvisioningBoss()` and `boss.work(...)` complete. The integration and Playwright launchers create that channel and wait for the message, with their spawned worker's `LOG_LEVEL` fixed at `warn` so local runs exercise CI's logging behavior. If spawn, queue initialization, or registration fails, the test includes process exit/spawn details and captured stderr/stdout in the failure, with database credentials redacted. The existing 20-second timeout still detects a stuck startup. The worker's normal process mode remains available when no IPC parent exists.
 
 ## Local and CI dependencies
 
