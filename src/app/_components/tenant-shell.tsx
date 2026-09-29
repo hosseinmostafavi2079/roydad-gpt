@@ -4,7 +4,31 @@ import type { TenantContext } from "@/modules/tenant-identity/auth";
 import { TenantSignOutButton } from "@/app/_components/tenant-sign-out-button";
 
 const navItems = [
-  { href: "/dashboard", title: "نمای کلی", permission: "dashboard.read" },
+  { href: "/dashboard", title: "داشبورد", permission: "dashboard.read" },
+  {
+    href: "/programs",
+    title: "دوره‌ها و رویدادها",
+    permission: "program.read",
+    feature: "courses" as const,
+  },
+  {
+    href: "/runs",
+    title: "اجراها",
+    permission: "program.read",
+    feature: "courses" as const,
+  },
+  {
+    href: "/sessions",
+    title: "جلسات",
+    permission: "session.read",
+    feature: "courses" as const,
+  },
+  {
+    href: "/calendar",
+    title: "تقویم",
+    permission: "session.read",
+    feature: "courses" as const,
+  },
   { href: "/staff", title: "کارکنان", permission: "staff.read" },
   {
     href: "/instructors",
@@ -19,6 +43,7 @@ const navItems = [
     feature: "crm" as const,
   },
   { href: "/roles", title: "نقش‌ها و دسترسی‌ها", permission: "role.read" },
+  { href: "/venues", title: "مکان‌ها", permission: "settings.read" },
   { href: "/audit", title: "گزارش امنیتی", permission: "audit.read" },
   { href: "/settings", title: "تنظیمات سازمان", permission: "settings.read" },
 ];

@@ -31,3 +31,6 @@ The Prisma schema is a schema/migration authoring and validation artifact; the r
 ## Isolation limits
 
 Separate databases prevent ordinary cross-database joins and constrain accidental query scope, but PostgreSQL roles and application authorization still matter. A provisioning credential can reach all tenant databases and is never used for request queries. Production requires restricted network access, least privilege, encrypted transport/storage, backups, and tested restore procedures.
+## Phase 3 migration
+
+`0003_phase3_program_core` is a forward-only tenant Prisma SQL migration. New tenant provisioning applies it automatically. Existing Phase 1/2 tenants advance through `pnpm db:migrate:tenants` without dropping data; the migration runner verifies the tenant's recorded migration history and Phase 3 tables. Program, run, session, venue, room, and assignment IDs are resolved within the current tenant database. Cross-tenant IDs fail lookup or tenant-scoped foreign key checks.

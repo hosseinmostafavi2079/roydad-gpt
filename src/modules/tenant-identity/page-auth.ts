@@ -13,6 +13,11 @@ export async function requireTenantPage(permission?: string) {
     ) {
       notFound();
     }
+    if (
+      !result.tenant.features.courses &&
+      ["program.read", "session.read"].includes(permission ?? "")
+    )
+      notFound();
     return result;
   } catch (error) {
     if (error instanceof DomainError && error.code === "UNAUTHENTICATED")

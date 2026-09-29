@@ -486,8 +486,8 @@ describe("Phase 1 real PostgreSQL gates", () => {
       );
       expect(identity.rows[0]).toMatchObject({
         role_count: 11,
-        permission_count: 40,
-        owner_grant_count: 40,
+        permission_count: 41,
+        owner_grant_count: 41,
         owner_status: "INVITED",
       });
       const prismaHistory = await tenantDb.query<{ table_name: string | null }>(
@@ -544,9 +544,9 @@ describe("Phase 1 real PostgreSQL gates", () => {
         "SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL",
       );
       const appRows = await migrationCheck.query<{ count: number }>(
-        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0002_tenant_identity_rbac'",
+        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0003_phase3_program_core'",
       );
-      expect(prismaRows.rows[0]?.count).toBe(3);
+      expect(prismaRows.rows[0]?.count).toBe(4);
       expect(appRows.rows[0]?.count).toBe(1);
     } finally {
       await migrationCheck.end();
@@ -599,7 +599,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       ownerSessionHeaders,
     );
     expect(ownerActor.tenantId).toBe(first.tenant.id);
-    expect(ownerActor.permissions.size).toBe(40);
+    expect(ownerActor.permissions.size).toBe(41);
     await expect(
       updateTenantUserStatus(
         ownerContext,
@@ -1326,7 +1326,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       [created.tenant.id, created.tenant.id],
     );
     expect(firstUpgrade.rows[0]).toEqual({
-      migration_version: "0002_tenant_identity_rbac",
+      migration_version: "0003_phase3_program_core",
       audit_count: 1,
     });
 
@@ -1367,18 +1367,16 @@ describe("Phase 1 real PostgreSQL gates", () => {
            (SELECT count(*)::int FROM tenant_schema_migrations) AS identity_rows,
            (SELECT count(*)::int FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS prisma_rows`,
       );
-      expect(metadata.rows[0]?.schema_version).toBe(
-        "0002_tenant_identity_rbac",
-      );
+      expect(metadata.rows[0]?.schema_version).toBe("0003_phase3_program_core");
       expect(identity.rows[0]).toEqual({
         roles: 11,
-        permissions: 40,
-        owner_grants: 40,
+        permissions: 41,
+        owner_grants: 41,
       });
       expect(history.rows[0]).toEqual({
         phase1_rows: 1,
         identity_rows: 2,
-        prisma_rows: 3,
+        prisma_rows: 4,
       });
     } finally {
       await upgraded.end();

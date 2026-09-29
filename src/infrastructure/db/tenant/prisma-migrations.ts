@@ -11,6 +11,7 @@ const tenantIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const baselineMigration = "0000_phase1_baseline";
 export const tenantIdentityMigrationVersion = "0002_tenant_identity_rbac";
+export const tenantCurrentMigrationVersion = "0003_phase3_program_core";
 
 function migrationUrl(databaseName: string): string {
   if (!databaseNamePattern.test(databaseName)) {
@@ -86,7 +87,8 @@ export async function applyTenantPrismaMigrations(
       !current ||
       current.tenant_id !== tenantId ||
       (current.schema_version !== "0001_tenant_foundation" &&
-        current.schema_version !== tenantIdentityMigrationVersion) ||
+        current.schema_version !== tenantIdentityMigrationVersion &&
+        current.schema_version !== tenantCurrentMigrationVersion) ||
       !current.has_foundation_migration
     ) {
       throw new Error(
@@ -133,6 +135,17 @@ export async function applyTenantPrismaMigrations(
 
     await runPrisma(databaseName, ["migrate", "deploy"]);
 
+    const phase3 = await client.query<{ tables_ready: boolean }>(
+      `SELECT to_regclass('public.programs') IS NOT NULL
+          AND to_regclass('public.program_runs') IS NOT NULL
+          AND to_regclass('public.program_sessions') IS NOT NULL
+          AND to_regclass('public.venues') IS NOT NULL
+          AND to_regclass('public.rooms') IS NOT NULL AS tables_ready`,
+    );
+    if (!phase3.rows[0]?.tables_ready) {
+      throw new Error("Tenant program schema verification failed.");
+    }
+
     await client.query("BEGIN");
     const verification = await client.query<{
       permission_count: number;
@@ -164,12 +177,12 @@ export async function applyTenantPrismaMigrations(
     await client.query(
       `UPDATE tenant_metadata SET schema_version = $2
        WHERE singleton = true AND tenant_id = $1`,
-      [tenantId, tenantIdentityMigrationVersion],
+      [tenantId, tenantCurrentMigrationVersion],
     );
     await client.query(
       `INSERT INTO tenant_schema_migrations(version) VALUES ($1)
        ON CONFLICT (version) DO NOTHING`,
-      [tenantIdentityMigrationVersion],
+      [tenantCurrentMigrationVersion],
     );
     await client.query("COMMIT");
   } catch (error) {

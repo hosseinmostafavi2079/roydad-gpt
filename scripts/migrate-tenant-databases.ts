@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { getControlPool } from "../src/infrastructure/db/control/pool";
 import {
   applyTenantPrismaMigrations,
+  tenantCurrentMigrationVersion,
   tenantIdentityMigrationVersion,
 } from "../src/infrastructure/db/tenant/prisma-migrations";
 import { logger } from "../src/infrastructure/logging/logger";
@@ -68,16 +69,17 @@ for (const tenant of tenants.rows) {
     }
     if (
       tenant.migration_version !== "0001_tenant_foundation" &&
-      tenant.migration_version !== tenantIdentityMigrationVersion
+      tenant.migration_version !== tenantIdentityMigrationVersion &&
+      tenant.migration_version !== tenantCurrentMigrationVersion
     ) {
       throw new Error("Tenant migration version requires review.");
     }
     await applyTenantPrismaMigrations(tenant.database_name, tenant.tenant_id);
-    if (tenant.migration_version === tenantIdentityMigrationVersion) {
+    if (tenant.migration_version === tenantCurrentMigrationVersion) {
       logger.info(
         {
           tenantId: tenant.tenant_id,
-          migrationVersion: tenantIdentityMigrationVersion,
+          migrationVersion: tenantCurrentMigrationVersion,
         },
         "Tenant database is already at the current schema version",
       );
@@ -90,7 +92,7 @@ for (const tenant of tenants.rows) {
         `UPDATE tenant_database_registry SET migration_version = $2,
            last_health_state = 'HEALTHY', last_health_check_at = now()
          WHERE tenant_id = $1`,
-        [tenant.tenant_id, tenantIdentityMigrationVersion],
+        [tenant.tenant_id, tenantCurrentMigrationVersion],
       );
       await client.query(
         `INSERT INTO platform_audit_logs
@@ -100,7 +102,7 @@ for (const tenant of tenants.rows) {
           tenant.tenant_id,
           randomUUID(),
           JSON.stringify({ migrationVersion: tenant.migration_version }),
-          JSON.stringify({ migrationVersion: tenantIdentityMigrationVersion }),
+          JSON.stringify({ migrationVersion: tenantCurrentMigrationVersion }),
         ],
       );
       await client.query("COMMIT");
@@ -113,7 +115,7 @@ for (const tenant of tenants.rows) {
     logger.info(
       {
         tenantId: tenant.tenant_id,
-        migrationVersion: tenantIdentityMigrationVersion,
+        migrationVersion: tenantCurrentMigrationVersion,
       },
       "Tenant database migration completed",
     );

@@ -2,7 +2,7 @@ import { getControlPool } from "@/infrastructure/db/control/pool";
 import { getServerConfig } from "@/shared/config/env";
 import { resolveTenantContext } from "@/modules/tenants/resolver";
 import { issueInitialTenantOwnerInvitation } from "@/modules/tenant-identity/repository";
-import { tenantIdentityMigrationVersion } from "@/infrastructure/db/tenant/prisma-migrations";
+import { tenantCurrentMigrationVersion } from "@/infrastructure/db/tenant/prisma-migrations";
 import {
   tenantIdSchema,
   inviteTenantOwnerSchema,
@@ -49,7 +49,7 @@ export function POST(
         throw new DomainError("NOT_FOUND", "The tenant was not found.");
       if (
         tenant.status !== "ACTIVE" ||
-        tenant.migration_version !== tenantIdentityMigrationVersion ||
+        tenant.migration_version !== tenantCurrentMigrationVersion ||
         !tenant.hostname
       ) {
         throw new DomainError(

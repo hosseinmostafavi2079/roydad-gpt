@@ -135,7 +135,7 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
   request,
   browser,
 }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(420_000);
   const email = process.env.EVENTOS_E2E_ADMIN_EMAIL;
   const password = process.env.EVENTOS_E2E_ADMIN_PASSWORD;
   expect(email).toBeTruthy();
@@ -253,7 +253,11 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          overrides: [{ key: "crm", enabled: true }],
+          overrides: [
+            { key: "crm", enabled: true },
+            { key: "courses", enabled: true },
+            { key: "events", enabled: true },
+          ],
         }),
       });
       return response.status;
@@ -404,6 +408,11 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
         async () => (await fetch("/api/tenant/roles")).status,
       ),
     ).toBe(403);
+    expect(
+      await staffPage.evaluate(
+        async () => (await fetch("/api/tenant/programs")).status,
+      ),
+    ).toBe(403);
     await staffPage.getByRole("link", { name: "کارکنان" }).first().click();
     await expect(
       staffPage.getByRole("button", { name: "ارسال دعوت" }),
@@ -428,6 +437,7 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
       collection: "instructors" | "participants",
       name: string,
       email: string,
+      retainSession = false,
     ) {
       await page.goto(`${tenantOrigin}/${collection}`);
       await page.locator("#invite-name").fill(name);
@@ -471,19 +481,194 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
       ).toBe(403);
       const deniedPortal = await portalPage.goto(`${tenantOrigin}/staff`);
       expect(deniedPortal?.status()).toBe(404);
+      if (retainSession) return { context: portalContext, page: portalPage };
       await portalContext.close();
+      return null;
     }
 
-    await invitePortalIdentity(
+    const phase3InstructorEmail = `instructor-${randomUUID()}@example.test`;
+    const unrelatedInstructorEmail = `instructor-${randomUUID()}@example.test`;
+    const phase3InstructorSession = await invitePortalIdentity(
       "instructors",
       "E2E Instructor Identity",
-      `instructor-${randomUUID()}@example.test`,
+      phase3InstructorEmail,
+      true,
+    );
+    if (!phase3InstructorSession)
+      throw new Error("Instructor session fixture was incomplete.");
+    await invitePortalIdentity(
+      "instructors",
+      "Unrelated E2E Instructor",
+      unrelatedInstructorEmail,
     );
     await invitePortalIdentity(
       "participants",
       "E2E Participant Identity",
       `participant-${randomUUID()}@example.test`,
     );
+
+    const phase3ProgramTitle = `کارگاه آزمایشی ${randomUUID().slice(0, 8)}`;
+    const phase3RunTitle = `اجرای آزمایشی ${randomUUID().slice(0, 8)}`;
+    const phase3SessionTitle = "جلسه مدرس اول";
+    const unrelatedSessionTitle = "جلسه مدرس دوم";
+    await page.goto(`${tenantOrigin}/programs`);
+    await page.getByRole("button", { name: "برنامه جدید" }).click();
+    await page.locator('input[name="title"]').fill(phase3ProgramTitle);
+    await page
+      .locator('input[name="slug"]')
+      .fill(`phase3-${randomUUID().slice(0, 8)}`);
+    await page.locator('select[name="type"]').selectOption("WORKSHOP");
+    await page.getByRole("button", { name: "ذخیره", exact: true }).click();
+    await expect(
+      page.getByRole("row").filter({ hasText: phase3ProgramTitle }),
+    ).toBeVisible();
+    await page
+      .getByRole("row")
+      .filter({ hasText: phase3ProgramTitle })
+      .getByRole("button", { name: "فعال‌سازی" })
+      .click();
+    const phase3ProgramId = await page.evaluate(async (title) => {
+      const payload = (await (await fetch("/api/tenant/programs")).json()) as {
+        data: { id: string; title: string }[];
+      };
+      return payload.data.find((program) => program.title === title)?.id ?? "";
+    }, phase3ProgramTitle);
+    expect(phase3ProgramId).toBeTruthy();
+
+    await page.goto(`${tenantOrigin}/venues`);
+    await page.getByRole("button", { name: "مکان جدید" }).click();
+    await page
+      .locator('form input[name="name"]')
+      .fill("مرکز آموزشی آزمایشی E2E");
+    await page.locator('form input[name="city"]').fill("اصفهان");
+    await page.getByRole("button", { name: "ذخیره", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "مرکز آموزشی آزمایشی E2E" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "افزودن کلاس" }).click();
+    await page.locator('form input[name="name"]').fill("کلاس E2E");
+    await page.locator('form input[name="capacity"]').fill("30");
+    await page.getByRole("button", { name: "ذخیره کلاس" }).click();
+    await expect(page.getByText("کلاس E2E", { exact: true })).toBeVisible();
+    const phase3Options = await page.evaluate(async () => {
+      const [people, places] = await Promise.all([
+        fetch("/api/tenant/identity/instructors").then((response) =>
+          response.json(),
+        ),
+        fetch("/api/tenant/venues").then((response) => response.json()),
+      ]);
+      return {
+        people: people.data as { id: string; email: string }[],
+        places: places.data as {
+          id: string;
+          name: string;
+          rooms: { id: string; name: string }[];
+        }[],
+      };
+    });
+    const firstInstructorId = phase3Options.people.find(
+      (person) => person.email === phase3InstructorEmail,
+    )?.id;
+    const secondInstructorId = phase3Options.people.find(
+      (person) => person.email === unrelatedInstructorEmail,
+    )?.id;
+    const place = phase3Options.places.find(
+      (item) => item.name === "مرکز آموزشی آزمایشی E2E",
+    );
+    expect(firstInstructorId).toBeTruthy();
+    expect(secondInstructorId).toBeTruthy();
+    expect(place).toBeTruthy();
+    if (!firstInstructorId || !secondInstructorId || !place)
+      throw new Error("Phase 3 E2E fixture was incomplete.");
+    const roomId = place.rooms.find((room) => room.name === "کلاس E2E")?.id;
+    if (!roomId) throw new Error("Phase 3 E2E room was missing.");
+    const baseDay = new Date(Date.now() + 20 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const laterDay = new Date(Date.now() + 21 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const runEndDay = new Date(Date.now() + 45 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+
+    await page.goto(`${tenantOrigin}/runs`);
+    await page.getByRole("button", { name: "اجرای جدید" }).click();
+    await page
+      .locator('select[name="programId"]')
+      .selectOption(phase3ProgramId);
+    await page.locator('input[name="title"]').fill(phase3RunTitle);
+    await page.locator('input[name="startsAt"]').fill(`${baseDay}T08:00`);
+    await page.locator('input[name="endsAt"]').fill(`${runEndDay}T20:00`);
+    await page.locator('input[name="capacity"]').fill("24");
+    await page.locator('select[name="venueId"]').selectOption(place.id);
+    await page
+      .locator('select[name="instructorIds"]')
+      .selectOption(firstInstructorId);
+    await page.getByRole("button", { name: "ذخیره", exact: true }).click();
+    await expect(
+      page.getByRole("row").filter({ hasText: phase3RunTitle }),
+    ).toBeVisible();
+    const phase3RunId = await page.evaluate(async (title) => {
+      const payload = (await (await fetch("/api/tenant/runs")).json()) as {
+        data: { id: string; title: string }[];
+      };
+      return payload.data.find((run) => run.title === title)?.id ?? "";
+    }, phase3RunTitle);
+    expect(phase3RunId).toBeTruthy();
+
+    await page.goto(`${tenantOrigin}/sessions`);
+    for (const [title, date, instructorId] of [
+      [phase3SessionTitle, baseDay, firstInstructorId],
+      [unrelatedSessionTitle, laterDay, secondInstructorId],
+    ] as [string, string, string][]) {
+      await page.getByRole("button", { name: "جلسه جدید" }).click();
+      await page.locator('select[name="runId"]').selectOption(phase3RunId);
+      await page.locator('input[name="title"]').fill(title);
+      await page.locator('input[name="startsAt"]').fill(`${date}T10:00`);
+      await page.locator('input[name="endsAt"]').fill(`${date}T12:00`);
+      await page.locator('select[name="venueId"]').selectOption(place.id);
+      await page.locator('select[name="roomId"]').selectOption(roomId);
+      await page
+        .locator('select[name="instructorIds"]')
+        .selectOption(instructorId);
+      await page.getByRole("button", { name: "ثبت جلسه" }).click();
+      await expect(
+        page.getByRole("row").filter({ hasText: title }),
+      ).toBeVisible();
+    }
+    const unrelatedSessionId = await page.evaluate(async (title) => {
+      const payload = (await (await fetch("/api/tenant/sessions")).json()) as {
+        data: { id: string; title: string }[];
+      };
+      return payload.data.find((session) => session.title === title)?.id ?? "";
+    }, unrelatedSessionTitle);
+    expect(unrelatedSessionId).toBeTruthy();
+    await page.goto(`${tenantOrigin}/runs`);
+    await page
+      .getByRole("row")
+      .filter({ hasText: phase3RunTitle })
+      .getByRole("button", { name: "انتشار" })
+      .click();
+    await expect(
+      page.getByRole("row").filter({ hasText: phase3RunTitle }),
+    ).toContainText("منتشرشده");
+    await page.goto(`${tenantOrigin}/calendar`);
+    await expect(page.getByText(phase3SessionTitle)).toBeVisible();
+
+    const instructorPage = phase3InstructorSession.page;
+    await instructorPage.goto(`${tenantOrigin}/sessions`);
+    await expect(instructorPage.getByText(phase3SessionTitle)).toBeVisible();
+    await expect(instructorPage.getByText(unrelatedSessionTitle)).toHaveCount(
+      0,
+    );
+    expect(
+      await instructorPage.evaluate(
+        async (id) => (await fetch(`/api/tenant/sessions/${id}`)).status,
+        unrelatedSessionId,
+      ),
+    ).toBe(404);
+    await phase3InstructorSession.context.close();
 
     const wrongHostEmail = `wrong-host-${randomUUID()}@example.test`;
     await page.goto(`${tenantOrigin}/staff`);
@@ -520,9 +705,8 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
     await page.getByLabel("نام ثبتی").fill("EventOS E2E Tenant B Inc.");
     await page.getByLabel("شناسهٔ زیردامنه").fill(secondSlug);
     await page.getByLabel("نام مدیر اولیه").fill("Tenant B Owner");
-    await page
-      .getByLabel("ایمیل مدیر اولیه")
-      .fill(`owner-${randomUUID()}@example.test`);
+    const secondOwnerEmail = `owner-${randomUUID()}@example.test`;
+    await page.getByLabel("ایمیل مدیر اولیه").fill(secondOwnerEmail);
     await page.getByRole("button", { name: "ایجاد و شروع راه‌اندازی" }).click();
     await page.waitForURL(/\/platform\/tenants\/[0-9a-f-]{36}$/);
     const secondTenantId = page.url().split("/").at(-1) ?? null;
@@ -532,8 +716,59 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
     await expect(provisioningStatus).toHaveText("آماده و فعال", {
       timeout: 45_000,
     });
+    expect(
+      await page.evaluate(async (id) => {
+        const response = await fetch(`/api/platform/tenants/${id}/features`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            overrides: [{ key: "courses", enabled: true }],
+          }),
+        });
+        return response.status;
+      }, secondTenantId),
+    ).toBe(200);
+
+    const secondInvitation = readInvitation(secondOwnerEmail);
+    if (!secondInvitation)
+      throw new Error("Tenant B owner invitation was not delivered.");
+    const secondToken = new URL(secondInvitation.inviteUrl).searchParams.get(
+      "token",
+    );
+    if (!secondToken) throw new Error("Tenant B owner link was malformed.");
 
     const secondOrigin = `http://${secondSlug}.localhost:3000`;
+    const secondContext = await browser.newContext();
+    const secondPage = await secondContext.newPage();
+    await secondPage.goto(
+      `${secondOrigin}/accept-invitation?token=${encodeURIComponent(secondToken)}`,
+    );
+    await secondPage
+      .getByLabel("گذرواژهٔ تازه")
+      .fill("second owner e2e password");
+    await secondPage
+      .getByLabel("تکرار گذرواژه")
+      .fill("second owner e2e password");
+    await secondPage.getByRole("button", { name: "فعال‌سازی حساب" }).click();
+    await expect(secondPage.getByRole("status")).toContainText(
+      "حساب شما فعال شد",
+    );
+    await secondPage.goto(`${secondOrigin}/login`);
+    await secondPage
+      .getByLabel("ایمیل", { exact: true })
+      .fill(secondOwnerEmail);
+    await secondPage
+      .getByLabel("گذرواژه", { exact: true })
+      .fill("second owner e2e password");
+    await secondPage.getByRole("button", { name: "ورود امن" }).click();
+    await secondPage.waitForURL("**/dashboard");
+    expect(
+      await secondPage.evaluate(
+        async (id) => (await fetch(`/api/tenant/programs/${id}`)).status,
+        phase3ProgramId,
+      ),
+    ).toBe(404);
+    await secondContext.close();
     const crossTenantSession = await request.get(
       `${secondOrigin}/api/tenant/identity/staff`,
       {

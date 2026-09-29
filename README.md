@@ -1,6 +1,6 @@
 # EventOS
 
-EventOS is a Persian-first, RTL platform for managing organizations and their events. This repository is built phase by phase from `EVENTOS_CODEX_MASTER_SPEC.md`. The current implementation target is **Phase 2 — Tenant Identity, RBAC & Authorization**. Phase 1 platform foundation and Phase 2 tenant identities, authentication, profiles, invitations, role/permission controls, audit, and authorization foundations are implemented. Phase 3 business workflows have not started.
+EventOS is a Persian-first, RTL platform for managing organizations and their events. This repository is built phase by phase from `EVENTOS_CODEX_MASTER_SPEC.md`. Phase 3 adds tenant-local programs, runs, training sessions, instructor scheduling, venues, rooms, calendar, and a local demo. Enrollment and commerce remain later-phase work.
 
 Tenant sign-in is resolved by hostname and uses the tenant's isolated PostgreSQL database. Tenant accounts can hold multiple normalized roles; role permissions are evaluated server-side with default deny. Platform administrators remain separate from tenant users and require production TOTP MFA.
 
@@ -40,8 +40,26 @@ pnpm audit:deps
 
 `pnpm check` combines formatter, lint, and strict type-check. `pnpm test:e2e` builds the standalone production server before running Playwright; CI uses the separate `pnpm test:e2e:run` command after its build step. Integration and E2E tests require a disposable real PostgreSQL instance.
 
-See [testing](docs/TESTING.md), [deployment](docs/DEPLOYMENT.md), [security](docs/SECURITY.md), [tenancy](docs/TENANCY.md), and [RBAC](docs/RBAC.md). `TASKS.md` tracks Phase 2 gates and records explicitly deferred scope.
+See [testing](docs/TESTING.md), [deployment](docs/DEPLOYMENT.md), [security](docs/SECURITY.md), [tenancy](docs/TENANCY.md), and [RBAC](docs/RBAC.md). `TASKS.md` tracks the Phase 3 gate and records explicitly deferred scope.
 
 ## Data boundary
 
-The control plane stores platform metadata. Every tenant receives an independent PostgreSQL database; tenant identity, roles, permissions, sessions, profiles, invitations, and tenant audit records remain inside it. Domain resolution and tenant database acquisition are server-only and deny unknown, unverified, suspended, and incomplete tenants. Program, session, enrollment, finance, attendance, certificate, and other Phase 3 workflows are not implemented.
+The control plane stores platform metadata. Every tenant receives an independent PostgreSQL database; tenant identity, roles, permissions, auth sessions, profiles, invitations, programs, runs, training sessions, venues, rooms, and tenant audit records remain inside it. Domain resolution and tenant database acquisition are server-only and deny unknown, unverified, suspended, and incomplete tenants. Enrollment, finance, attendance, and certificates are deferred.
+
+## Local Demo Access
+
+On Windows, from PowerShell in this repository:
+
+```powershell
+pnpm install --frozen-lockfile
+docker compose up -d postgres
+pnpm db:migrate
+pnpm demo:setup
+pnpm dev
+```
+
+`demo:setup` provisions and migrates only the local `demo` tenant, seeds synthetic Phase 3 content, and prints four local logins. It stores generated passwords in the Git-ignored `.demo-credentials.local` file. Keep that file private. Run `pnpm demo:setup` again to repair missing sample data without resetting existing tenant databases.
+
+Open `http://localhost:3000/sign-in` for the Platform Super Admin, or `http://demo.localhost:3000/login` for the Organization Owner, Instructor, and Participant. Chrome on Windows resolves `demo.localhost` to the loopback interface. The printed login summary and `.demo-credentials.local` identify each account. The owner can create programs, runs, sessions, venues, and rooms; the instructor can inspect assigned runs, sessions, and calendar entries. The participant has a Phase 2 portal shell.
+
+To remove only the local demo tenant and its generated credentials, stop `pnpm dev` and run `pnpm demo:reset --confirm-demo`. The reset refuses production, CI, nonlocal database hosts, other tenant slugs, and missing explicit confirmation. Then run `pnpm demo:setup` to recreate it. Production never creates demo users.

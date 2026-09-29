@@ -5,7 +5,7 @@ import { getServerConfig } from "../src/shared/config/env";
 import { applySqlMigrations } from "../src/infrastructure/db/migrations/runner";
 import {
   applyTenantPrismaMigrations,
-  tenantIdentityMigrationVersion,
+  tenantCurrentMigrationVersion,
 } from "../src/infrastructure/db/tenant/prisma-migrations";
 import { decryptTenantOwnerBootstrap } from "../src/infrastructure/auth/tenant-bootstrap";
 import {
@@ -134,7 +134,7 @@ async function transition(
       await client.query(
         `UPDATE tenant_database_registry SET last_health_state = 'HEALTHY', last_health_check_at = now(),
            migration_version = $2 WHERE tenant_id = $1`,
-        [tenantId, tenantIdentityMigrationVersion],
+        [tenantId, tenantCurrentMigrationVersion],
       );
     } else if (toState.startsWith("FAILED_")) {
       await client.query(
@@ -284,7 +284,7 @@ async function verifyTenantDatabase(
     }
     const schema = identity.rows[0];
     if (
-      schema?.schema_version !== tenantIdentityMigrationVersion ||
+      schema?.schema_version !== tenantCurrentMigrationVersion ||
       schema.role_count !== 11 ||
       schema.permission_count < 40 ||
       schema.owner_grant_count !== schema.permission_count ||

@@ -1,6 +1,6 @@
 # Phase 1 — Platform Foundation
 
-This file preserves the Phase 1 acceptance record and tracks the current phase below. Work is limited to Phase 2 until its gates pass; do not begin Phase 3.
+This file preserves the Phase 1 and Phase 2 acceptance records and tracks the Phase 3 local gate below. Do not begin Phase 4.
 
 ## Acceptance criteria
 
@@ -112,7 +112,7 @@ Phase 2 remains open. CodeQL, secret scanning, and real-PostgreSQL integration t
 - [x] Add Playwright flows for staff invitation and acceptance, custom role assignment and permitted navigation, direct API denial, suspended-session denial, cross-tenant denial, and participant/instructor portal access boundaries.
 - [x] Re-run all Phase 1 tests and preserve their security guarantees.
 - [x] Pass every configured static security scan. Gitleaks and CodeQL passed in GitHub Actions, as reported by the user.
-- [ ] Pass formatting, lint, strict TypeScript, unit, real-PostgreSQL integration, Playwright E2E, production build, dependency audit, and secret scan in the updated GitHub quality workflow. Local reruns pass; remote confirmation is pending.
+- [x] Pass formatting, lint, strict TypeScript, unit, real-PostgreSQL integration, Playwright E2E, production build, dependency audit, and secret scan in the Phase 2 GitHub quality workflow, as reported by the user before Phase 3 began.
 - [x] Review final changes for cross-tenant access, privilege escalation, session confusion, role/tenant tampering, mass assignment, IDOR, token leakage, enumeration, unsafe logs, CSRF, pool isolation, unsafe queries, and migration safety.
 
 ### Baseline before Phase 2 changes
@@ -120,3 +120,15 @@ Phase 2 remains open. CodeQL, secret scanning, and real-PostgreSQL integration t
 - Phase 1 baseline passed before Phase 2 edits: `pnpm format`, `pnpm check`, `pnpm test:unit` (4 files/16 tests), `pnpm test:integration` (1 file/4 tests), `pnpm build`, `pnpm test:e2e:run` (1 browser test), production dependency audit, and pinned Gitleaks scan.
 - The repository has no Prisma schema or migration history. Phase 1 tenant databases use the checksum-verified SQL runner and already-provisioned tenant databases must not be reset. Phase 2 migration tooling must explicitly bridge this baseline.
 - Local Playwright used installed Chrome because the Playwright Chromium CDN returned HTTP 403. CI installs pinned Playwright Chromium. No `.git` metadata is available for a Git diff or remote CI run.
+# Phase 3 — Program core (local gate in progress)
+
+- [x] Add forward-only tenant migration for programs, runs, sessions, instructor assignments, venues, and rooms; upgrade existing tenants and provision new tenants at version `0003_phase3_program_core`.
+- [x] Add tenant-scoped CRUD, controlled publishing transitions, audit events, permission checks, and instructor object access.
+- [x] Prevent concurrent room/instructor overlaps with a tenant-scoped PostgreSQL transaction advisory lock; validate timezones and room capacity.
+- [x] Add Persian RTL management pages, instructor-scoped run/session/calendar views, and real Phase 3 dashboard data.
+- [x] Add guarded, idempotent local demo setup and explicit demo reset; ignore generated credentials.
+- [x] Add focused unit, real PostgreSQL integration, and Playwright coverage for the new flows.
+- [x] Complete the local Phase 3 gate: format, lint, type-check, 36 unit tests, 9 real PostgreSQL integration tests, production build, 1 Playwright browser flow, Prisma validation, production dependency audit, and Gitleaks.
+- [ ] Confirm the updated GitHub Actions workflow is green before declaring Phase 3 complete.
+
+Phase 4 enrollment, pricing, payments, attendance, certificates, and related workflows remain deferred.

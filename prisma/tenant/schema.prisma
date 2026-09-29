@@ -282,3 +282,134 @@ model TenantAuditLog {
   @@index([tenantId, actorId, createdAt(sort: Desc)], map: "tenant_audit_actor_recent_idx")
   @@map("tenant_audit_logs")
 }
+
+model Venue {
+  tenantId    String   @map("tenant_id") @db.Uuid
+  id          String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String   @db.VarChar(160)
+  address     String   @default("") @db.VarChar(500)
+  city        String   @default("") @db.VarChar(120)
+  description String   @default("") @db.VarChar(1000)
+  active      Boolean  @default(true)
+  createdBy   String?  @map("created_by") @db.VarChar(64)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@map("venues")
+}
+
+model Room {
+  tenantId    String   @map("tenant_id") @db.Uuid
+  id          String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId     String   @map("venue_id") @db.Uuid
+  name        String   @db.VarChar(160)
+  capacity    Int
+  description String   @default("") @db.VarChar(1000)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@unique([tenantId, venueId, name])
+  @@index([tenantId, venueId], map: "rooms_venue_idx")
+  @@map("rooms")
+}
+
+model Program {
+  tenantId               String    @map("tenant_id") @db.Uuid
+  id                     String    @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type                   String    @db.VarChar(24)
+  title                  String    @db.VarChar(200)
+  slug                   String    @db.VarChar(100)
+  shortDescription       String    @default("") @map("short_description") @db.VarChar(500)
+  description            String    @default("") @db.Text
+  category               String    @default("") @db.VarChar(120)
+  level                  String    @default("") @db.VarChar(80)
+  objectives             String    @default("") @db.Text
+  prerequisites          String    @default("") @db.Text
+  intendedAudience       String    @default("") @map("intended_audience") @db.Text
+  defaultDurationMinutes Int?      @map("default_duration_minutes")
+  coverMetadata          Json      @default("{}") @map("cover_metadata") @db.JsonB
+  status                 String    @default("DRAFT") @db.VarChar(16)
+  createdBy              String    @map("created_by") @db.VarChar(64)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@unique([tenantId, slug])
+  @@index([tenantId, status, createdAt(sort: Desc)], map: "programs_status_idx")
+  @@map("programs")
+}
+
+model ProgramRun {
+  tenantId             String    @map("tenant_id") @db.Uuid
+  id                   String    @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  programId            String    @map("program_id") @db.Uuid
+  title                String    @db.VarChar(200)
+  startsAt             DateTime  @map("starts_at") @db.Timestamptz(6)
+  endsAt               DateTime  @map("ends_at") @db.Timestamptz(6)
+  registrationStartsAt DateTime? @map("registration_starts_at") @db.Timestamptz(6)
+  registrationEndsAt   DateTime? @map("registration_ends_at") @db.Timestamptz(6)
+  deliveryMode         String    @map("delivery_mode") @db.VarChar(16)
+  capacity             Int
+  minimumCapacity      Int?      @map("minimum_capacity")
+  waitlistEnabled      Boolean   @default(false) @map("waitlist_enabled")
+  state                String    @default("DRAFT") @db.VarChar(16)
+  venueId              String?   @map("venue_id") @db.Uuid
+  notes                String    @default("") @db.Text
+  createdBy            String    @map("created_by") @db.VarChar(64)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@index([tenantId, programId, startsAt(sort: Desc)], map: "program_runs_program_idx")
+  @@index([tenantId, state, startsAt], map: "program_runs_state_idx")
+  @@map("program_runs")
+}
+
+model RunInstructor {
+  tenantId     String  @map("tenant_id") @db.Uuid
+  runId        String  @map("run_id") @db.Uuid
+  instructorId String  @map("instructor_id") @db.VarChar(64)
+  isLead       Boolean @default(false) @map("is_lead")
+
+  @@id([tenantId, runId, instructorId])
+  @@index([tenantId, instructorId], map: "run_instructors_actor_idx")
+  @@map("run_instructors")
+}
+
+model ProgramSession {
+  tenantId         String   @map("tenant_id") @db.Uuid
+  id               String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  runId            String   @map("run_id") @db.Uuid
+  title            String   @db.VarChar(200)
+  startsAt         DateTime @map("starts_at") @db.Timestamptz(6)
+  endsAt           DateTime @map("ends_at") @db.Timestamptz(6)
+  timezone         String   @db.VarChar(80)
+  deliveryMode     String   @map("delivery_mode") @db.VarChar(16)
+  venueId          String?  @map("venue_id") @db.Uuid
+  roomId           String?  @map("room_id") @db.Uuid
+  onlineMetadata   Json     @default("{}") @map("online_metadata") @db.JsonB
+  attendanceConfig Json     @default("{}") @map("attendance_config") @db.JsonB
+  notes            String   @default("") @db.Text
+  status           String   @default("SCHEDULED") @db.VarChar(16)
+  createdBy        String   @map("created_by") @db.VarChar(64)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@index([tenantId, runId, startsAt], map: "program_sessions_run_idx")
+  @@map("program_sessions")
+}
+
+model SessionInstructor {
+  tenantId     String  @map("tenant_id") @db.Uuid
+  sessionId    String  @map("session_id") @db.Uuid
+  instructorId String  @map("instructor_id") @db.VarChar(64)
+  isLead       Boolean @default(false) @map("is_lead")
+
+  @@id([tenantId, sessionId, instructorId])
+  @@index([tenantId, instructorId], map: "session_instructors_actor_idx")
+  @@map("session_instructors")
+}
