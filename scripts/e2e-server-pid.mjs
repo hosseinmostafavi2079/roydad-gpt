@@ -31,3 +31,4 @@ writeFileSync(
   JSON.stringify({ pid: process.pid, cwd: process.cwd() }),
   { flag: "wx", mode: 0o600 },
 );
+globalThis[Symbol.for("eventos.e2e.mail.outbox")] = true;

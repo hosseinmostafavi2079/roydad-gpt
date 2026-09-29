@@ -6,6 +6,84 @@ import path from "node:path";
 import nodemailer from "nodemailer";
 import { getServerConfig } from "@/shared/config/env";
 
+type InvitationEmail = Readonly<{
+  email: string;
+  tenantName: string;
+  inviteUrl: string;
+}>;
+type InvitationMessage = InvitationEmail &
+  Readonly<{ subject: string; text: string; html: string }>;
+
+interface InvitationEmailProvider {
+  send(message: InvitationMessage): Promise<void>;
+}
+
+class TestOutboxInvitationProvider implements InvitationEmailProvider {
+  async send(message: InvitationMessage): Promise<void> {
+    const outboxPath = process.env.EVENTOS_TEST_MAIL_OUTBOX;
+    const tempRoot = path.resolve(os.tmpdir());
+    const resolved = outboxPath ? path.resolve(outboxPath) : "";
+    if (!resolved.startsWith(`${tempRoot}${path.sep}`)) {
+      throw new Error("The test invitation outbox is unavailable.");
+    }
+    const file = await open(resolved, "a", 0o600);
+    try {
+      await file.chmod(0o600);
+      await file.writeFile(`${JSON.stringify(message)}\n`, "utf8");
+    } finally {
+      await file.close();
+    }
+  }
+}
+
+class SmtpInvitationProvider implements InvitationEmailProvider {
+  constructor(
+    private readonly smtpUrl: string,
+    private readonly from: string,
+  ) {}
+
+  async send(message: InvitationMessage): Promise<void> {
+    const transport = nodemailer.createTransport(this.smtpUrl);
+    try {
+      await transport.sendMail({
+        from: this.from,
+        to: message.email,
+        subject: message.subject,
+        text: message.text,
+        html: message.html,
+      });
+    } finally {
+      transport.close();
+    }
+  }
+}
+
+export function invitationProviderKind(
+  nodeEnv: string,
+  e2eHarnessActive: boolean,
+): "test-outbox" | "smtp" {
+  return nodeEnv === "test" || (nodeEnv === "production" && e2eHarnessActive)
+    ? "test-outbox"
+    : "smtp";
+}
+
+function invitationProvider(): InvitationEmailProvider {
+  const config = getServerConfig();
+  const e2eHarnessActive =
+    (globalThis as Record<symbol, unknown>)[
+      Symbol.for("eventos.e2e.mail.outbox")
+    ] === true;
+  if (
+    invitationProviderKind(config.NODE_ENV, e2eHarnessActive) === "test-outbox"
+  ) {
+    return new TestOutboxInvitationProvider();
+  }
+  if (!config.SMTP_URL) {
+    throw new Error("Tenant invitation email delivery is not configured.");
+  }
+  return new SmtpInvitationProvider(config.SMTP_URL, config.SMTP_FROM);
+}
+
 export async function sendPasswordResetEmail(input: {
   email: string;
   resetUrl: string;
@@ -29,48 +107,15 @@ export async function sendPasswordResetEmail(input: {
   }
 }
 
-export async function sendTenantInvitationEmail(input: {
-  email: string;
-  tenantName: string;
-  inviteUrl: string;
-}): Promise<void> {
-  const config = getServerConfig();
-  // The PID marker is injected only by the E2E harness for its tracked server.
-  const isTrackedPlaywrightServer =
-    config.NODE_ENV === "production" &&
-    process.env.EVENTOS_E2E_SERVER_PID_FILE === "tests/.e2e-server.json";
-  if (config.NODE_ENV === "test" || isTrackedPlaywrightServer) {
-    const outboxPath = process.env.EVENTOS_TEST_MAIL_OUTBOX;
-    const tempRoot = path.resolve(os.tmpdir());
-    const resolved = outboxPath ? path.resolve(outboxPath) : "";
-    if (!resolved?.startsWith(`${tempRoot}${path.sep}`)) {
-      throw new Error("The test invitation outbox is unavailable.");
-    }
-    const file = await open(resolved, "a", 0o600);
-    try {
-      await file.chmod(0o600);
-      await file.writeFile(`${JSON.stringify(input)}\n`, "utf8");
-    } finally {
-      await file.close();
-    }
-    return;
-  }
-  if (!config.SMTP_URL) {
-    throw new Error("Tenant invitation email delivery is not configured.");
-  }
-  const transport = nodemailer.createTransport(config.SMTP_URL);
-  const inviteUrl = escapeHtml(input.inviteUrl);
-  try {
-    await transport.sendMail({
-      from: config.SMTP_FROM,
-      to: input.email,
-      subject: `Activate your ${input.tenantName} EventOS account`,
-      text: `You have been invited to ${input.tenantName}. Activate your account using this one-time link within 24 hours: ${input.inviteUrl}`,
-      html: `<p>You have been invited to ${escapeHtml(input.tenantName)}.</p><p><a href="${inviteUrl}">Activate your account</a></p><p>This one-time link expires after 24 hours. If you did not expect this invitation, ignore this message.</p>`,
-    });
-  } finally {
-    transport.close();
-  }
+export async function sendTenantInvitationEmail(
+  input: InvitationEmail,
+): Promise<void> {
+  await invitationProvider().send({
+    ...input,
+    subject: `Activate your ${input.tenantName} EventOS account`,
+    text: `You have been invited to ${input.tenantName}. Activate your account using this one-time link within 24 hours: ${input.inviteUrl}`,
+    html: `<p>You have been invited to ${escapeHtml(input.tenantName)}.</p><p><a href="${escapeHtml(input.inviteUrl)}">Activate your account</a></p><p>This one-time link expires after 24 hours. If you did not expect this invitation, ignore this message.</p>`,
+  });
 }
 
 export async function sendTenantPasswordResetEmail(input: {

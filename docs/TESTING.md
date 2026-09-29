@@ -41,6 +41,12 @@ Also validate Prisma tenant schema with the pinned local Prisma CLI and run the 
 
 CodeQL is configured in `.github/workflows/codeql.yml` and has passed in GitHub Actions, as reported by the user. The Phase 2 quality gate remains open until the updated `.github/workflows/ci.yml` run passes.
 
+## Invitation mail providers in tests
+
+CI exports `NODE_ENV=development` for migrations and administrator seeding. Vitest previously inherited that value, so the invitation mailer chose SMTP instead of its private test outbox and failed because CI correctly leaves `SMTP_URL` empty. `vitest.config.ts` now explicitly sets `NODE_ENV=test` inside the test runner. Run the integration suite with a parent `NODE_ENV=development` to reproduce CI's environment and verify the isolation.
+
+Invitation delivery composes one recipient, subject, text, and HTML message before passing it to an SMTP provider or the test outbox provider. The outbox records the complete message in a mode-0600 temporary file because Playwright's standalone server and test process do not share memory. Integration and Playwright read the captured message to verify recipient, link, hashed-at-rest token, one-time acceptance, and wrong-tenant rejection. No test message is exposed through an application route. The production-built Playwright server activates the outbox only through its validated test preload; an ordinary production process uses SMTP and configuration rejects missing or non-TLS SMTP.
+
 ## Provisioning worker readiness regression
 
 The GitHub Actions quality job uses `LOG_LEVEL=warn`. The provisioning worker registered its PostgreSQL queue subscription and then wrote `logger.info("Provisioning worker started")`; Pino suppresses that line at `warn`. Both the real-PostgreSQL integration test and Playwright previously treated the log line as readiness, so the integration test reported `Provisioning worker did not start` after 20 seconds even though the worker could be running. Local development normally used `info`, which hid this mismatch. This was a test orchestration failure, not evidence of slow worker startup; the timeout has not been increased.

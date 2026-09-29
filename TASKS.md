@@ -72,10 +72,10 @@ This file preserves the Phase 1 acceptance record and tracks the current phase b
 
 ### Current gate status
 
-Phase 2 remains open. CodeQL passes in GitHub Actions, but the latest remote quality run failed the Phase 1 provisioning integration case. The failure was a readiness-detection defect: CI sets `LOG_LEVEL=warn`, while the integration and Playwright test launchers waited for the worker's `logger.info("Provisioning worker started")` output. Pino suppressed that line even after `boss.work` registered successfully. The worker now sends an IPC readiness message after queue registration; both test launchers wait for that message and report redacted stderr/stdout plus process exit details on failure. The 20-second guard is unchanged. Do not begin Phase 3 until the updated GitHub quality workflow passes.
+Phase 2 remains open. CodeQL, secret scanning, and the worker readiness fix passed in GitHub Actions, but the next remote quality run failed while issuing a tenant invitation. CI exports `NODE_ENV=development`; Vitest inherited it, so the mailer selected SMTP instead of the existing test outbox, and CI intentionally has no SMTP provider. Vitest now explicitly runs with `NODE_ENV=test`. Invitation delivery uses an SMTP provider or a deterministic private test outbox provider through one interface. The production-built Playwright server can use the outbox only when launched with the verified E2E preload. Ordinary production remains SMTP-only and fails safely without configured delivery. Do not begin Phase 3 until the updated GitHub quality workflow passes.
 
-- After the readiness fix, local `pnpm check` passed; unit tests passed (6 files/25 tests); PostgreSQL integration tests passed (1 file/5 tests) with worker logging forced to `warn`; production build passed; Playwright passed (1 browser flow) with worker logging forced to `warn`. Earlier Phase 2 checks also found no production audit vulnerabilities, validated the Prisma schema, passed tenant migration twice, and found no leaks with pinned Gitleaks v8.30.0.
-- The user reported CodeQL passing in GitHub Actions. The updated quality workflow still needs a remote rerun after this fix; its result must be recorded before marking Phase 2 complete.
+- After the mail fix, local `pnpm check` passed; unit tests passed (7 files/28 tests); PostgreSQL integration tests passed (1 file/5 tests) with the parent shell set to `NODE_ENV=development`; production build passed; Playwright passed (1 browser flow); Prisma tenant schema validation passed; production dependency audit found no known vulnerabilities; pinned Gitleaks v8.30.0 found no leaks in the scanned source and documentation.
+- The user reported CodeQL and the secret scan passing in GitHub Actions. The updated quality workflow still needs a remote rerun after this fix; its result must be recorded before marking Phase 2 complete.
 
 ### Identity and tenant authentication
 
@@ -111,7 +111,7 @@ Phase 2 remains open. CodeQL passes in GitHub Actions, but the latest remote qua
 - [x] Add real-PostgreSQL tests for two-tenant identity/RBAC/session/invitation isolation, owner and least-privilege outcomes, escalation attacks, idempotent seeds/migrations, invite/assignment races, replay, revocation, suspension, and wrong-tenant requests.
 - [x] Add Playwright flows for staff invitation and acceptance, custom role assignment and permitted navigation, direct API denial, suspended-session denial, cross-tenant denial, and participant/instructor portal access boundaries.
 - [x] Re-run all Phase 1 tests and preserve their security guarantees.
-- [x] Pass every configured static security scan. Gitleaks passed locally and CodeQL passed in GitHub Actions, as reported by the user.
+- [x] Pass every configured static security scan. Gitleaks and CodeQL passed in GitHub Actions, as reported by the user.
 - [ ] Pass formatting, lint, strict TypeScript, unit, real-PostgreSQL integration, Playwright E2E, production build, dependency audit, and secret scan in the updated GitHub quality workflow. Local reruns pass; remote confirmation is pending.
 - [x] Review final changes for cross-tenant access, privilege escalation, session confusion, role/tenant tampering, mass assignment, IDOR, token leakage, enumeration, unsafe logs, CSRF, pool isolation, unsafe queries, and migration safety.
 
