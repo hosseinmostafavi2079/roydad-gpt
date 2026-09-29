@@ -1,0 +1,136 @@
+name: Phase 2 quality gates
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Checks, PostgreSQL, and browser flow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install Node and pnpm
+        uses: pnpm/setup@v2
+        with:
+          version: 11.25.0
+          runtime: node@22
+          install: false
+          cache: true
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate isolated local database credentials
+        run: |
+          node --input-type=module <<'NODE'
+          import { randomBytes } from "node:crypto";
+          import { appendFileSync, writeFileSync } from "node:fs";
+
+          const passwordNames = [
+            "POSTGRES_SUPERUSER_PASSWORD",
+            "CONTROL_APP_PASSWORD",
+            "CONTROL_MIGRATION_PASSWORD",
+            "CONTROL_QUEUE_PASSWORD",
+            "TENANT_PROVISIONER_PASSWORD",
+            "TENANT_RUNTIME_PASSWORD",
+            "TENANT_MIGRATION_PASSWORD",
+            "PLATFORM_BOOTSTRAP_ADMIN_PASSWORD",
+          ];
+          const values = Object.fromEntries(
+            passwordNames.map((name) => [name, randomBytes(32).toString("hex")]),
+          );
+          const config = {
+            NODE_ENV: "development",
+            POSTGRES_HOST_PORT: "55432",
+            ...values,
+            CONTROL_DATABASE_URL: `postgresql://eventos_control_app:${values.CONTROL_APP_PASSWORD}@127.0.0.1:55432/eventos_control`,
+            CONTROL_MIGRATION_DATABASE_URL: `postgresql://eventos_control_migrator:${values.CONTROL_MIGRATION_PASSWORD}@127.0.0.1:55432/eventos_control`,
+            CONTROL_QUEUE_DATABASE_URL: `postgresql://eventos_control_queue:${values.CONTROL_QUEUE_PASSWORD}@127.0.0.1:55432/eventos_control`,
+            TENANT_PROVISIONING_DATABASE_URL: `postgresql://eventos_tenant_provisioner:${values.TENANT_PROVISIONER_PASSWORD}@127.0.0.1:55432/postgres`,
+            TENANT_RUNTIME_DATABASE_URL: `postgresql://eventos_tenant_runtime:${values.TENANT_RUNTIME_PASSWORD}@127.0.0.1:55432/postgres`,
+            TENANT_MIGRATION_DATABASE_URL: `postgresql://eventos_tenant_migrator:${values.TENANT_MIGRATION_PASSWORD}@127.0.0.1:55432/postgres`,
+            BETTER_AUTH_URL: "http://localhost:3000",
+            BETTER_AUTH_SECRET: randomBytes(48).toString("hex"),
+            TENANT_BOOTSTRAP_ENCRYPTION_KEY: randomBytes(32).toString("hex"),
+            PLATFORM_BASE_DOMAIN: "localhost",
+            PLATFORM_REQUIRE_MFA: "true",
+            TRUSTED_PROXY_CIDRS: "",
+            SMTP_URL: "",
+            SMTP_FROM: "EventOS CI <security@example.invalid>",
+            PLATFORM_BOOTSTRAP_ADMIN_EMAIL: "ci-admin@example.test",
+            TENANT_POOL_LIMIT: "16",
+            TENANT_POOL_CONNECTIONS_PER_DATABASE: "2",
+            TENANT_POOL_IDLE_TIMEOUT_MS: "30000",
+            TENANT_POOL_ACQUIRE_TIMEOUT_MS: "5000",
+            LOG_LEVEL: "warn",
+          };
+          const contents = Object.entries(config)
+            .map(([name, value]) => `${name}=${value}`)
+            .join("\n");
+          writeFileSync(".env", `${contents}\n`, { mode: 0o600 });
+          appendFileSync(
+            process.env.GITHUB_ENV,
+            `${Object.entries(config).map(([name, value]) => `${name}=${value}`).join("\n")}\n`,
+          );
+          NODE
+
+      - name: Start PostgreSQL
+        run: docker compose up -d postgres
+
+      - name: Wait for PostgreSQL
+        run: |
+          for attempt in $(seq 1 30); do
+            if docker compose exec -T postgres pg_isready -U eventos_container_admin -d eventos_control; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs postgres
+          exit 1
+
+      - name: Apply migrations and seed local administrator
+        run: |
+          pnpm db:migrate
+          pnpm db:seed:dev
+
+      - name: Format, lint, and type check
+        run: pnpm check
+
+      - name: Unit tests
+        run: pnpm test:unit
+
+      - name: Real PostgreSQL integration tests
+        run: pnpm test:integration
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Install Chromium for Playwright
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Platform and tenant identity browser flows
+        run: pnpm test:e2e:run
+
+      - name: Dependency vulnerability scan
+        run: pnpm audit:deps
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Scan source files with Gitleaks
+        run: >-
+          docker run --rm
+          -v "$GITHUB_WORKSPACE:/repo:ro"
+          ghcr.io/gitleaks/gitleaks:v8.30.0@sha256:691af3c7c5a48b16f187ce3446d5f194838f91238f27270ed36eef6359a574d9
+          dir --redact /repo

@@ -1,0 +1,12 @@
+allowBuilds:
+  '@prisma/engines': true
+  esbuild: true
+  prisma: true
+  sharp: false
+  unrs-resolver: false
+minimumReleaseAgeExclude:
+  - nodemailer@10.0.11
+  - pg-boss@12.35.0
+overrides:
+  deepmerge-ts: 8.0.0
+  mysql2: 3.23.1
