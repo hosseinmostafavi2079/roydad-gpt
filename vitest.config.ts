@@ -11,7 +11,7 @@ export default defineConfig({
     },
   },
   test: {
-    env: { NODE_ENV: "test" },
+    env: { NODE_ENV: "test", MAIL_TRANSPORT: "test" },
     environment: "node",
     testTimeout: 30_000,
     hookTimeout: 30_000,

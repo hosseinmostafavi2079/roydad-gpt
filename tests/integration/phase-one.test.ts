@@ -345,7 +345,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
 
   it("reuses migration checksums and verifies real Argon2id hashes", async () => {
     const result = await getControlPool().query<{ count: number }>(
-      "SELECT count(*)::int AS count FROM eventos_schema_migrations WHERE version IN ($1, $2, $3, $4, $5, $6)",
+      "SELECT count(*)::int AS count FROM eventos_schema_migrations WHERE version IN ($1, $2, $3, $4, $5, $6, $7)",
       [
         "0000_platform_auth",
         "0001_control_plane",
@@ -353,9 +353,19 @@ describe("Phase 1 real PostgreSQL gates", () => {
         "0003_auth_session_id_default",
         "0004_auth_two_factor_id_default",
         "0005_owner_bootstrap_ciphertext",
+        "0006_auth_verification_id_default",
       ],
     );
-    expect(result.rows[0]?.count).toBe(6);
+    expect(result.rows[0]?.count).toBe(7);
+    const verificationIdDefault = await getControlPool().query<{
+      column_default: string | null;
+    }>(
+      `SELECT column_default FROM information_schema.columns
+       WHERE table_name = 'platform_auth_verifications' AND column_name = 'id'`,
+    );
+    expect(verificationIdDefault.rows[0]?.column_default).toContain(
+      "gen_random_uuid()",
+    );
     const hash = await hashPlatformPassword(
       "local test password with enough length",
     );

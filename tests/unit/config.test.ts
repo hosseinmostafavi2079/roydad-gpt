@@ -25,6 +25,7 @@ describe("server configuration", () => {
     const parsed = parseServerConfig(validConfig);
     expect(parsed.PLATFORM_REQUIRE_MFA).toBe(true);
     expect(parsed.TENANT_POOL_LIMIT).toBe(16);
+    expect(parsed.MAIL_TRANSPORT).toBe("smtp");
   });
 
   it("rejects production without mandatory MFA and secure mail delivery", () => {
@@ -67,5 +68,17 @@ describe("server configuration", () => {
         TENANT_RUNTIME_DATABASE_URL: "replace-with-db-url",
       }),
     ).toThrow(/TENANT_RUNTIME_DATABASE_URL/);
+  });
+
+  it("rejects production test mail transport", () => {
+    expect(() =>
+      parseServerConfig({
+        ...validConfig,
+        NODE_ENV: "production",
+        MAIL_TRANSPORT: "test",
+        SMTP_URL: "smtps://mail.example.com",
+        TENANT_BOOTSTRAP_ENCRYPTION_KEY: "a".repeat(32),
+      }),
+    ).toThrow(/Test mail transport is unavailable in production/);
   });
 });

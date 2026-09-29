@@ -11,6 +11,7 @@ process.env.EVENTOS_TEST_MAIL_OUTBOX ||= path.join(
   os.tmpdir(),
   `eventos-e2e-mail-${randomUUID()}.jsonl`,
 );
+process.env.MAIL_TRANSPORT = "test";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -45,6 +46,7 @@ export default defineConfig({
     env: {
       ...process.env,
       NODE_ENV: "production",
+      MAIL_TRANSPORT: "test",
       SMTP_URL: process.env.SMTP_URL || "smtps://localhost:465",
       PORT: "3000",
       EVENTOS_E2E_SERVER_PID_FILE: "tests/.e2e-server.json",

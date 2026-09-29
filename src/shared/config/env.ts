@@ -50,6 +50,7 @@ const serverConfigSchema = z
       .transform((value) => value === "true"),
     TRUSTED_PROXY_CIDRS: z.string().default(""),
     SMTP_URL: z.string().optional().default(""),
+    MAIL_TRANSPORT: z.enum(["smtp", "test"]).default("smtp"),
     SMTP_FROM: z
       .string()
       .min(3)
@@ -78,6 +79,17 @@ const serverConfigSchema = z
       .default("info"),
   })
   .superRefine((config, ctx) => {
+    if (
+      config.NODE_ENV === "production" &&
+      config.MAIL_TRANSPORT === "test" &&
+      !isE2eTestServer()
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["MAIL_TRANSPORT"],
+        message: "Test mail transport is unavailable in production",
+      });
+    }
     if (config.NODE_ENV === "production" && !config.PLATFORM_REQUIRE_MFA) {
       ctx.addIssue({
         code: "custom",
@@ -124,6 +136,15 @@ const serverConfigSchema = z
   });
 
 export type ServerConfig = z.infer<typeof serverConfigSchema>;
+
+export function isE2eTestServer(): boolean {
+  return (
+    (globalThis as Record<symbol, unknown>)[
+      Symbol.for("eventos.e2e.mail.outbox")
+    ] === true &&
+    process.env.EVENTOS_E2E_SERVER_PID_FILE === "tests/.e2e-server.json"
+  );
+}
 
 export function parseServerConfig(
   env: Record<string, string | undefined>,

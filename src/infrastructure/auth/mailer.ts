@@ -58,24 +58,9 @@ class SmtpInvitationProvider implements InvitationEmailProvider {
   }
 }
 
-export function invitationProviderKind(
-  nodeEnv: string,
-  e2eHarnessActive: boolean,
-): "test-outbox" | "smtp" {
-  return nodeEnv === "test" || (nodeEnv === "production" && e2eHarnessActive)
-    ? "test-outbox"
-    : "smtp";
-}
-
 function invitationProvider(): InvitationEmailProvider {
   const config = getServerConfig();
-  const e2eHarnessActive =
-    (globalThis as Record<symbol, unknown>)[
-      Symbol.for("eventos.e2e.mail.outbox")
-    ] === true;
-  if (
-    invitationProviderKind(config.NODE_ENV, e2eHarnessActive) === "test-outbox"
-  ) {
+  if (config.MAIL_TRANSPORT === "test") {
     return new TestOutboxInvitationProvider();
   }
   if (!config.SMTP_URL) {
