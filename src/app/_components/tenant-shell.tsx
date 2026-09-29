@@ -2,6 +2,8 @@ import Link from "next/link";
 import type { TenantActor } from "@/modules/tenant-identity/request-auth";
 import type { TenantContext } from "@/modules/tenant-identity/auth";
 import { TenantSignOutButton } from "@/app/_components/tenant-sign-out-button";
+import { MobileDrawer } from "@/app/_components/mobile-drawer";
+import { TenantNav } from "@/app/_components/tenant-nav";
 
 const navItems = [
   { href: "/dashboard", title: "داشبورد", permission: "dashboard.read" },
@@ -48,37 +50,6 @@ const navItems = [
   { href: "/settings", title: "تنظیمات سازمان", permission: "settings.read" },
 ];
 
-function Navigation({
-  actor,
-  tenant,
-  mobile = false,
-}: {
-  actor: TenantActor;
-  tenant: TenantContext;
-  mobile?: boolean;
-}) {
-  const links = navItems.filter(
-    (item) =>
-      actor.permissions.has(item.permission) &&
-      (!item.feature || tenant.features[item.feature]),
-  );
-  return (
-    <nav
-      className={`nav-list ${mobile ? "mobile-nav" : "desktop-nav"}`}
-      aria-label="پیمایش سازمان"
-    >
-      {links.map((item) => (
-        <Link className="nav-link" href={item.href} key={item.href}>
-          <span className="nav-icon" aria-hidden="true">
-            ◇
-          </span>
-          {item.title}
-        </Link>
-      ))}
-    </nav>
-  );
-}
-
 export function TenantShell({
   children,
   actor,
@@ -88,6 +59,27 @@ export function TenantShell({
   actor: TenantActor;
   tenant: TenantContext;
 }) {
+  const links = navItems
+    .filter(
+      (item) =>
+        actor.permissions.has(item.permission) &&
+        (!item.feature || tenant.features[item.feature]),
+    )
+    .map(({ href, title }) => ({ href, title }));
+  const account = (
+    <>
+      <div className="admin-chip">
+        <span className="avatar" aria-hidden="true">
+          {actor.name.slice(0, 1)}
+        </span>
+        <div className="account-text">
+          <div className="admin-name">{actor.name}</div>
+          <div className="admin-email">{actor.email}</div>
+        </div>
+      </div>
+      <TenantSignOutButton />
+    </>
+  );
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -106,32 +98,25 @@ export function TenantShell({
         </Link>
         <div>
           <p className="nav-group-title">فضای سازمان</p>
-          <Navigation actor={actor} tenant={tenant} />
+          <TenantNav items={links} />
         </div>
-        <div className="sidebar-bottom">
-          <div className="admin-chip">
-            <span className="avatar" aria-hidden="true">
-              {actor.name.slice(0, 1)}
-            </span>
-            <div style={{ minWidth: 0 }}>
-              <div className="admin-name">{actor.name}</div>
-              <div className="admin-email">{actor.email}</div>
-            </div>
-          </div>
-          <TenantSignOutButton />
-        </div>
+        <div className="sidebar-bottom">{account}</div>
       </aside>
       <div className="main">
         <div className="mobile-top">
+          <MobileDrawer
+            brand={tenant.branding.brandName}
+            navigation={<TenantNav items={links} />}
+            account={account}
+          />
           <Link href="/dashboard" className="brand">
             <span className="brand-mark" aria-hidden="true">
               E
             </span>
             <span className="brand-name">{tenant.branding.brandName}</span>
           </Link>
-          <span className="admin-name">{actor.name}</span>
+          <span className="mobile-page-label">پنل سازمان</span>
         </div>
-        <Navigation actor={actor} tenant={tenant} mobile />
         <header className="topbar">
           <div className="crumbs">
             {tenant.branding.brandName} <span aria-hidden="true">/</span> پنل

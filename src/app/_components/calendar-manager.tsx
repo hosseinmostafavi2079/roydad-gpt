@@ -51,7 +51,10 @@ function parts(date: Date, timezone: string): DateParts {
       month: "numeric",
     }).format(date),
     day: get("day"),
-    monthName: get("month"),
+    monthName: new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+      timeZone: timezone,
+      month: "long",
+    }).format(date),
     weekday: get("weekday"),
   };
 }
@@ -62,6 +65,9 @@ export function CalendarManager({ timezone }: { timezone: string }) {
     [loading, setLoading] = useState(true);
   const [anchor, setAnchor] = useState(() => new Date()),
     [view, setView] = useState<"month" | "agenda">("month");
+  useEffect(() => {
+    if (window.matchMedia("(max-width: 600px)").matches) setView("agenda");
+  }, []);
   const [instructor, setInstructor] = useState(""),
     [program, setProgram] = useState(""),
     [venue, setVenue] = useState(""),
@@ -102,11 +108,12 @@ export function CalendarManager({ timezone }: { timezone: string }) {
       item.status === "SCHEDULED",
   );
   const byDay = new Map<string, Session[]>();
-  for (const item of filtered) {
+  const monthItems = filtered.filter((item) => {
+    const date = parts(new Date(item.starts_at), timezone);
+    return date.year === anchorParts.year && date.month === anchorParts.month;
+  });
+  for (const item of monthItems) {
     const key = parts(new Date(item.starts_at), timezone).day;
-    const month = parts(new Date(item.starts_at), timezone);
-    if (month.year !== anchorParts.year || month.month !== anchorParts.month)
-      continue;
     byDay.set(key, [...(byDay.get(key) ?? []), item]);
   }
   const instructors = [
@@ -125,6 +132,22 @@ export function CalendarManager({ timezone }: { timezone: string }) {
   const firstOffset = days[0]
     ? Math.max(0, englishWeek.indexOf(days[0].weekday))
     : 0;
+  function moveMonth(direction: -1 | 1) {
+    const month = parts(anchor, timezone);
+    for (let day = 1; day <= 32; day++) {
+      const candidate = new Date(
+        anchor.getTime() + direction * day * 86_400_000,
+      );
+      const candidateMonth = parts(candidate, timezone);
+      if (
+        candidateMonth.month !== month.month ||
+        candidateMonth.year !== month.year
+      ) {
+        setAnchor(new Date(candidate.getTime() + direction * 14 * 86_400_000));
+        return;
+      }
+    }
+  }
   return (
     <main className="content">
       <div className="page-heading">
@@ -207,21 +230,20 @@ export function CalendarManager({ timezone }: { timezone: string }) {
         <div className="page-heading">
           <div>
             <h2 className="card-title">
-              {anchorParts.monthName} {anchorParts.year}
+              {anchorParts.monthName}{" "}
+              {Number(anchorParts.year).toLocaleString("fa-IR")}
             </h2>
             <p className="muted">
               {loading
                 ? "در حال بارگذاری…"
-                : `${filtered.length} جلسه قابل مشاهده`}
+                : `${monthItems.length.toLocaleString("fa-IR")} جلسه قابل مشاهده`}
             </p>
           </div>
           <div className="form-actions">
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() =>
-                setAnchor(new Date(anchor.getTime() - 31 * 86_400_000))
-              }
+              onClick={() => moveMonth(-1)}
             >
               ماه قبل
             </button>
@@ -235,9 +257,7 @@ export function CalendarManager({ timezone }: { timezone: string }) {
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() =>
-                setAnchor(new Date(anchor.getTime() + 31 * 86_400_000))
-              }
+              onClick={() => moveMonth(1)}
             >
               ماه بعد
             </button>
@@ -277,23 +297,16 @@ export function CalendarManager({ timezone }: { timezone: string }) {
           </div>
         ) : (
           <div className="calendar-agenda">
-            {filtered
-              .filter((item) => {
-                const p = parts(new Date(item.starts_at), timezone);
-                return (
-                  p.year === anchorParts.year && p.month === anchorParts.month
-                );
-              })
-              .map((item) => (
-                <article key={item.id} className="check-row">
-                  <div>
-                    <strong>{item.title}</strong>
-                    <p className="muted">{item.program_title}</p>
-                  </div>
-                  <span>{formatTenantDate(item.starts_at, timezone)}</span>
-                </article>
-              ))}
-            {filtered.length === 0 && (
+            {monthItems.map((item) => (
+              <article key={item.id} className="check-row">
+                <div>
+                  <strong>{item.title}</strong>
+                  <p className="muted">{item.program_title}</p>
+                </div>
+                <span>{formatTenantDate(item.starts_at, timezone)}</span>
+              </article>
+            ))}
+            {monthItems.length === 0 && (
               <p className="empty">جلسه‌ای در این بازه نیست.</p>
             )}
           </div>

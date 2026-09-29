@@ -81,6 +81,25 @@ const featureNames: Record<string, string> = {
   custom_domain: "دامنهٔ اختصاصی",
   branches: "شعب",
 };
+const featureGroups = [
+  {
+    title: "آموزش و رویداد",
+    keys: [
+      "courses",
+      "events",
+      "attendance",
+      "qr_attendance",
+      "certificates",
+      "quiz",
+      "assignments",
+    ],
+  },
+  { title: "ارتباطات", keys: ["crm", "sms", "email"] },
+  {
+    title: "سازمان و امکانات پیشرفته",
+    keys: ["payments", "branches", "custom_domain", "ai"],
+  },
+];
 const limitNames: Record<string, string> = {
   max_staff: "حداکثر اعضای تیم",
   max_participants: "حداکثر شرکت‌کنندگان",
@@ -478,22 +497,31 @@ export function TenantSettings({
               </div>
             </div>
             <form onSubmit={updateFeatures}>
-              <div className="grid grid-2">
-                {Object.entries(featureNames).map(([key, label]) => (
-                  <label className="check-row check-label" key={key}>
-                    <span>
-                      {label}
-                      {details.featureOverrides[key] !== undefined && (
-                        <small className="muted"> · اختصاصی</small>
-                      )}
-                    </span>
-                    <input
-                      type="checkbox"
-                      name={`feature:${key}`}
-                      defaultChecked={details.features[key]}
-                      aria-label={label}
-                    />
-                  </label>
+              <div className="feature-groups">
+                {featureGroups.map((group) => (
+                  <fieldset className="permission-group" key={group.title}>
+                    <legend className="permission-group-title">
+                      {group.title}
+                    </legend>
+                    <div className="feature-grid">
+                      {group.keys.map((key) => (
+                        <label className="feature-option" key={key}>
+                          <input
+                            type="checkbox"
+                            name={`feature:${key}`}
+                            defaultChecked={details.features[key]}
+                            aria-label={featureNames[key]}
+                          />
+                          <span>
+                            {featureNames[key]}
+                            {details.featureOverrides[key] !== undefined && (
+                              <small className="muted"> · اختصاصی</small>
+                            )}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
                 ))}
               </div>
               <div className="form-actions">

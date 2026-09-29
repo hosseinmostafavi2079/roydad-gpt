@@ -25,15 +25,8 @@ export function PlatformNav() {
     </Link>
   ));
   return (
-    <>
-      <div className="desktop-nav">
-        <nav className="nav-list" aria-label="منوی اصلی">
-          {links}
-        </nav>
-      </div>
-      <nav className="mobile-nav" aria-label="منوی اصلی">
-        {links}
-      </nav>
-    </>
+    <nav className="nav-list" aria-label="منوی اصلی">
+      {links}
+    </nav>
   );
 }

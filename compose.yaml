@@ -26,5 +26,47 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  app:
+    build: .
+    image: eventos-local:latest
+    restart: unless-stopped
+    env_file:
+      - .env.local-runtime
+    environment:
+      NODE_ENV: production
+      MAIL_TRANSPORT: smtp
+      PLATFORM_REQUIRE_MFA: "true"
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
+  worker:
+    image: eventos-local:latest
+    restart: unless-stopped
+    command: ["node", "--conditions=react-server", "--import=tsx", "scripts/provisioning-worker.ts"]
+    env_file:
+      - .env.local-runtime
+    environment:
+      NODE_ENV: production
+      MAIL_TRANSPORT: smtp
+      PLATFORM_REQUIRE_MFA: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   eventos-postgres:

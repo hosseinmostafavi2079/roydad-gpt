@@ -180,6 +180,35 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
     await expect(
       page.getByRole("heading", { name: "به پنل EventOS خوش آمدید" }),
     ).toBeVisible();
+    await page.goto("/platform/plans");
+    await expect(page.locator("textarea")).toHaveCount(0);
+    await page.getByRole("button", { name: "ویرایش طرح" }).first().click();
+    await expect(
+      page.getByRole("checkbox", { name: "دوره‌ها" }).first(),
+    ).toBeVisible();
+    await expect(
+      page.locator('input[name="limit:max_staff"]').first(),
+    ).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "باز کردن منو" }).click();
+    await expect(
+      page.getByRole("dialog", { name: "منوی برنامه" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("dialog").getByRole("link", { name: "سازمان‌ها" }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "منوی برنامه" })).toHaveCount(
+      0,
+    );
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBe(0);
+    await page.setViewportSize({ width: 1280, height: 720 });
 
     const denied = await request.get("/api/platform/tenants");
     expect(denied.status()).toBe(401);

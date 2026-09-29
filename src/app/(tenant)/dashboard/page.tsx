@@ -82,7 +82,7 @@ export default async function TenantDashboardPage() {
           <p className="page-description">نمایی از برنامه‌ها و جلسات مجاز شما</p>
         </div>
       </div>
-      <div className="grid grid-4">
+      <div className="grid dashboard-stats">
         {cards.map((card) => (
           <section className="card stat-card" key={card.label}>
             <span className="stat-label">{card.label}</span>
