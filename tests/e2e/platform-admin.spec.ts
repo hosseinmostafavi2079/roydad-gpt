@@ -7,6 +7,24 @@ import { expect, test } from "@playwright/test";
 import { Client } from "pg";
 import { currentTotp } from "../helpers/totp";
 import { workerDiagnostics } from "../helpers/worker-diagnostics";
+import { gregorianWallToJalali } from "@/modules/program-core/dates";
+
+const tinyPng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pXcAAAAASUVORK5CYII=",
+  "base64",
+);
+async function setJalali(
+  page: import("@playwright/test").Page,
+  index: number,
+  wall: string,
+) {
+  const value = gregorianWallToJalali(wall);
+  const picker = page.locator(".jalali-picker").nth(index);
+  await picker.getByLabel("سال خورشیدی").selectOption(String(value.year));
+  await picker.getByLabel("ماه خورشیدی").selectOption(String(value.month));
+  await picker.getByLabel("روز خورشیدی").selectOption(String(value.day));
+  await picker.getByLabel("ساعت").fill(value.time);
+}
 
 type E2eState = {
   adminEmail: string;
@@ -426,8 +444,27 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
     ).toBeVisible();
     await page.goto(`${tenantOrigin}/website`);
     await page.getByLabel("معرفی کوتاه").fill("معرفی تازه مجموعه آزمایشی");
+    await page.getByRole("button", { name: "تماس با ما", exact: true }).click();
     await page.getByLabel("تلفن عمومی").fill("021-12345678");
+    await page.getByRole("button", { name: "هویت بصری" }).click();
     await page.getByLabel("رنگ اصلی").fill("#145d58");
+    await page
+      .locator(".media-uploader")
+      .filter({ hasText: "لوگو" })
+      .locator('input[type="file"]')
+      .setInputFiles({
+        name: "logo.png",
+        mimeType: "image/png",
+        buffer: tinyPng,
+      });
+    await expect(
+      page
+        .locator(".media-uploader")
+        .filter({ hasText: "لوگو" })
+        .locator("img"),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "بخش‌ها" }).click();
+    await page.getByLabel("درباره ما", { exact: true }).uncheck();
     await page.getByRole("button", { name: "ذخیره تغییرات" }).click();
     await expect(page.getByRole("status")).toHaveText("تغییرات ذخیره شد.");
     await page.goto(`${tenantOrigin}/`);
@@ -441,6 +478,8 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
           (element as HTMLElement).style.getPropertyValue("--public-primary"),
         ),
     ).toBe("#145d58");
+    await expect(page.locator(".public-logo img")).toBeVisible();
+    await expect(page.locator(".public-about-band")).toHaveCount(0);
     await page.goto(`${tenantOrigin}/contact`);
     await expect(page.getByText("021-12345678")).toBeVisible();
     await page.goto(`${tenantOrigin}/dashboard`);
@@ -460,6 +499,10 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
         `Tenant owner session was unavailable; cookie names: ${tenantCookies.map((cookie) => cookie.name).join(", ") || "none"}.`,
       );
 
+    await page
+      .locator(".sidebar .nav-group summary")
+      .filter({ hasText: "مدیریت" })
+      .click();
     await page.getByRole("link", { name: "نقش‌ها و دسترسی‌ها" }).first().click();
     await expect(page.locator(".permission-group-title").first()).toBeVisible();
     await expect(page.getByText("دسترسی پرخطر").first()).toBeVisible();
@@ -468,7 +511,7 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
     await page.getByLabel("توضیح").fill("Read-only staff access for E2E.");
     await page
       .locator("label.check-row")
-      .filter({ hasText: "staff.read" })
+      .filter({ hasText: "مشاهده کارکنان" })
       .getByRole("checkbox")
       .check();
     await page.getByRole("button", { name: "ایجاد نقش" }).click();
@@ -479,7 +522,14 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
 
     const staffName = "E2E Read Only Staff";
     const staffEmail = `staff-${randomUUID()}@example.test`;
-    await page.getByRole("link", { name: "کارکنان" }).first().click();
+    await page
+      .locator(".sidebar .nav-group summary")
+      .filter({ hasText: "افراد" })
+      .click();
+    await page
+      .locator(".sidebar")
+      .getByRole("link", { name: "کارکنان" })
+      .click();
     const staffForm = page.locator("form").filter({ hasText: "دعوت کاربر" });
     await expect(
       staffForm.getByRole("checkbox", { name: "Read-only staff" }),
@@ -530,8 +580,12 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       .fill("staff e2e password long");
     await staffPage.getByRole("button", { name: "ورود امن" }).click();
     await staffPage.waitForURL("**/dashboard");
+    await staffPage
+      .locator(".sidebar .nav-group summary")
+      .filter({ hasText: "افراد" })
+      .click();
     await expect(
-      staffPage.getByRole("link", { name: "کارکنان" }).first(),
+      staffPage.locator(".sidebar").getByRole("link", { name: "کارکنان" }),
     ).toBeVisible();
     await expect(
       staffPage.getByRole("link", { name: "نقش‌ها و دسترسی‌ها" }),
@@ -551,7 +605,10 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
         async () => (await fetch("/api/tenant/programs")).status,
       ),
     ).toBe(403);
-    await staffPage.getByRole("link", { name: "کارکنان" }).first().click();
+    await staffPage
+      .locator(".sidebar")
+      .getByRole("link", { name: "کارکنان" })
+      .click();
     await expect(
       staffPage.getByRole("button", { name: "ارسال دعوت" }),
     ).toHaveCount(0);
@@ -661,6 +718,30 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       page.getByRole("row").filter({ hasText: phase3ProgramTitle }),
     ).toBeVisible();
     await page
+      .locator(".media-uploader")
+      .filter({ hasText: "تصویر شاخص / کاور" })
+      .locator('input[type="file"]')
+      .setInputFiles({
+        name: "cover.png",
+        mimeType: "image/png",
+        buffer: tinyPng,
+      });
+    await expect(
+      page
+        .locator(".media-uploader")
+        .filter({ hasText: "تصویر شاخص / کاور" })
+        .locator("img"),
+    ).toBeVisible();
+    const firstCoverUrl = await page.evaluate(async (title) => {
+      const payload = await (await fetch("/api/tenant/programs")).json();
+      return (
+        (payload.data as { title: string; cover_url: string | null }[]).find(
+          (program) => program.title === title,
+        )?.cover_url ?? ""
+      );
+    }, phase3ProgramTitle);
+    expect(firstCoverUrl).toMatch(/^\/api\/media\//);
+    await page
       .getByRole("row")
       .filter({ hasText: phase3ProgramTitle })
       .getByRole("button", { name: "فعال‌سازی" })
@@ -736,8 +817,8 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       .locator('select[name="programId"]')
       .selectOption(phase3ProgramId);
     await page.locator('input[name="title"]').fill(phase3RunTitle);
-    await page.locator('input[name="startsAt"]').fill(`${baseDay}T08:00`);
-    await page.locator('input[name="endsAt"]').fill(`${runEndDay}T20:00`);
+    await setJalali(page, 0, `${baseDay}T08:00`);
+    await setJalali(page, 1, `${runEndDay}T20:00`);
     await page.locator('input[name="capacity"]').fill("24");
     await page.locator('select[name="venueId"]').selectOption(place.id);
     await page
@@ -763,8 +844,8 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       await page.getByRole("button", { name: "جلسه جدید" }).click();
       await page.locator('select[name="runId"]').selectOption(phase3RunId);
       await page.locator('input[name="title"]').fill(title);
-      await page.locator('input[name="startsAt"]').fill(`${date}T10:00`);
-      await page.locator('input[name="endsAt"]').fill(`${date}T12:00`);
+      await setJalali(page, 0, `${date}T10:00`);
+      await setJalali(page, 1, `${date}T12:00`);
       await page.locator('select[name="venueId"]').selectOption(place.id);
       await page.locator('select[name="roomId"]').selectOption(roomId);
       await page
@@ -801,6 +882,15 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
     await expect(
       publicPage.getByRole("heading", { name: phase3RunTitle }),
     ).toBeVisible();
+    await expect(publicPage.locator(".public-event-cover")).toBeVisible();
+    await publicPage.setViewportSize({ width: 390, height: 844 });
+    expect(
+      await publicPage.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      ),
+    ).toBe(0);
     await publicContext.close();
     await page.goto(`${tenantOrigin}/calendar`);
     await expect(page.getByText(phase3SessionTitle)).toBeVisible();
@@ -898,7 +988,13 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
     await secondPage
       .getByLabel("تکرار گذرواژه")
       .fill("second owner e2e password");
+    const secondActivation = secondPage.waitForResponse(
+      (response) =>
+        response.url().includes("/api/tenant/invitations/accept") &&
+        response.request().method() === "POST",
+    );
     await secondPage.getByRole("button", { name: "فعال‌سازی حساب" }).click();
+    expect((await secondActivation).status()).toBe(200);
     await expect(secondPage.getByRole("status")).toContainText(
       "حساب شما فعال شد",
     );
@@ -916,6 +1012,13 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
         async (id) => (await fetch(`/api/tenant/programs/${id}`)).status,
         phase3ProgramId,
       ),
+    ).toBe(404);
+    expect(
+      (
+        await request.get(`http://127.0.0.1:3000${firstCoverUrl}`, {
+          headers: { host: `${secondSlug}.localhost:3000` },
+        })
+      ).status(),
     ).toBe(404);
     await secondContext.close();
     const crossTenantSession = await request.get(

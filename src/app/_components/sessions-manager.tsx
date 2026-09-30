@@ -7,6 +7,7 @@ import {
   tenantWallTimeToUtc,
 } from "@/modules/program-core/dates";
 import { apiRequest, errorMessage } from "./api-client";
+import { JalaliDateTimeInput } from "./jalali-datetime-input";
 
 type Session = {
   id: string;
@@ -214,12 +215,10 @@ export function SessionsManager({
                 defaultValue={editing?.title}
               />
             </label>
-            <label className="field">
+            <div className="field">
               <span className="label">شروع ({timezone})</span>
-              <input
-                className="input"
+              <JalaliDateTimeInput
                 name="startsAt"
-                type="datetime-local"
                 defaultValue={
                   editing
                     ? formatTenantWallInput(editing.starts_at, timezone)
@@ -227,13 +226,11 @@ export function SessionsManager({
                 }
                 required
               />
-            </label>
-            <label className="field">
+            </div>
+            <div className="field">
               <span className="label">پایان ({timezone})</span>
-              <input
-                className="input"
+              <JalaliDateTimeInput
                 name="endsAt"
-                type="datetime-local"
                 defaultValue={
                   editing
                     ? formatTenantWallInput(editing.ends_at, timezone)
@@ -241,7 +238,7 @@ export function SessionsManager({
                 }
                 required
               />
-            </label>
+            </div>
             <label className="field">
               <span className="label">شیوه برگزاری</span>
               <select

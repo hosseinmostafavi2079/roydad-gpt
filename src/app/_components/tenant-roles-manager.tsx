@@ -1,5 +1,7 @@
 "use client";
 
+import { roleLabel } from "@/modules/tenant-identity/role-labels";
+
 import {
   useCallback,
   useEffect,
@@ -43,6 +45,22 @@ const MODULE_LABELS: Record<string, string> = {
 };
 
 const MODULE_ORDER = Object.keys(MODULE_LABELS);
+const ACTION_LABELS: Record<string, string> = {
+  read: "مشاهده",
+  create: "ایجاد",
+  update: "ویرایش",
+  delete: "حذف",
+  manage: "مدیریت",
+  assign: "تخصیص",
+  publish: "انتشار",
+  suspend: "تعلیق",
+  invite: "دعوت",
+  export: "دریافت خروجی",
+};
+function permissionLabel(permission: Permission): string {
+  const [module, action] = permission.key.split(".");
+  return `${ACTION_LABELS[action ?? ""] ?? "مدیریت"} ${MODULE_LABELS[module ?? ""] ?? "دسترسی"}`;
+}
 
 export function TenantRolesManager({
   canCreate,
@@ -235,10 +253,9 @@ export function TenantRolesManager({
                             )
                           }
                         />
-                        {permission.name}
+                        {permissionLabel(permission)}
                       </span>
                       <span className="permission-key mono">
-                        {permission.key}
                         {permission.high_risk && (
                           <span className="badge badge-red">دسترسی پرخطر</span>
                         )}
@@ -261,21 +278,29 @@ export function TenantRolesManager({
           <article className="card card-pad" key={role.id}>
             <div className="section-header">
               <div>
-                <h2>{role.name}</h2>
-                <p className="mono">{role.code}</p>
+                <h2>{roleLabel(role.code, role.name)}</h2>
               </div>
               <span className="badge badge-gray">
                 {role.is_system ? "سیستمی" : "سفارشی"}
               </span>
             </div>
-            <p className="muted">{role.description}</p>
+            {!role.is_system && <p className="muted">{role.description}</p>}
             <p className="hint">
               {role.user_count} کاربر · {role.permission_keys.length} دسترسی
             </p>
             <div className="check-row" style={{ flexWrap: "wrap" }}>
               {role.permission_keys.map((key) => (
                 <span className="badge badge-gray" key={key}>
-                  {key}
+                  {permissionLabel(
+                    permissions.find(
+                      (permission) => permission.key === key,
+                    ) ?? {
+                      key,
+                      module: key.split(".")[0] ?? "",
+                      name: "",
+                      high_risk: false,
+                    },
+                  )}
                 </span>
               ))}
             </div>
@@ -329,10 +354,9 @@ export function TenantRolesManager({
                                   permission.key,
                                 )}
                               />
-                              {permission.name}
+                              {permissionLabel(permission)}
                             </span>
                             <span className="permission-key mono">
-                              {permission.key}
                               {permission.high_risk && (
                                 <span className="badge badge-red">
                                   دسترسی پرخطر

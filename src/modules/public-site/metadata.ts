@@ -27,20 +27,24 @@ export function publicMetadata(
 ): Metadata {
   const summary =
     description ||
+    profile.siteSettings.metaDescription ||
     profile.shortDescription ||
     `${title} در ${profile.displayName || tenant.branding.brandName}`;
   const canonical = publicCanonical(tenant, origin, pathname);
+  const image = profile.siteSettings.socialImageUrl || profile.coverUrl;
   return {
-    title,
+    title: profile.siteSettings.seoTitle || title,
     description: summary,
     alternates: { canonical },
     openGraph: {
       type: "website",
       locale: "fa_IR",
-      title,
+      title: profile.siteSettings.ogTitle || title,
       description: summary,
       url: canonical,
-      ...(profile.coverUrl ? { images: [{ url: profile.coverUrl }] } : {}),
+      ...(image
+        ? { images: [{ url: new URL(image, origin).toString() }] }
+        : {}),
     },
   };
 }

@@ -277,8 +277,9 @@ describe("Phase 3 real PostgreSQL program core", () => {
     });
     await transitionProgram(s, programId, "ACTIVE");
     expect((await getProgram(s, programId)).status).toBe("ACTIVE");
-    const migration = await getTenantPool(a).query<{ version: string }>(
-      "SELECT version FROM tenant_schema_migrations WHERE version='0006_phase4_self_registration_ids'",
+    const migration = await getTenantPool(a).query<{ schema_version: string }>(
+      "SELECT schema_version FROM tenant_metadata WHERE tenant_id=$1 AND schema_version='0007_organization_site_media'",
+      [a.tenantId],
     );
     expect(migration.rowCount).toBe(1);
     const audits = await getTenantPool(a).query<{ action: string }>(

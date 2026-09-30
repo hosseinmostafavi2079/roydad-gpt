@@ -6,54 +6,96 @@ import { MobileDrawer } from "@/app/_components/mobile-drawer";
 import { TenantNav } from "@/app/_components/tenant-nav";
 
 const navItems = [
-  { href: "/dashboard", title: "داشبورد", permission: "dashboard.read" },
+  {
+    href: "/dashboard",
+    title: "داشبورد",
+    permission: "dashboard.read",
+    group: "داشبورد",
+  },
   {
     href: "/programs",
     title: "دوره‌ها و رویدادها",
     permission: "program.read",
     feature: "courses" as const,
+    group: "رویدادها",
   },
   {
     href: "/runs",
     title: "اجراها",
     permission: "program.read",
     feature: "courses" as const,
+    group: "رویدادها",
   },
   {
     href: "/sessions",
     title: "جلسات",
     permission: "session.read",
     feature: "courses" as const,
+    group: "رویدادها",
   },
   {
     href: "/calendar",
     title: "تقویم",
     permission: "session.read",
     feature: "courses" as const,
+    group: "رویدادها",
   },
-  { href: "/staff", title: "کارکنان", permission: "staff.read" },
+  {
+    href: "/staff",
+    title: "کارکنان",
+    permission: "staff.read",
+    group: "افراد",
+  },
   {
     href: "/instructors",
-    title: "مربیان",
+    title: "مدرسان",
     permission: "instructor.read",
     feature: "crm" as const,
+    group: "افراد",
   },
   {
     href: "/participants",
     title: "شرکت‌کنندگان",
     permission: "participant.read",
     feature: "crm" as const,
+    group: "افراد",
   },
-  { href: "/roles", title: "نقش‌ها و دسترسی‌ها", permission: "role.read" },
-  { href: "/venues", title: "مکان‌ها", permission: "settings.read" },
-  { href: "/audit", title: "گزارش امنیتی", permission: "audit.read" },
-  { href: "/settings", title: "تنظیمات سازمان", permission: "settings.read" },
-  { href: "/website", title: "وب‌سایت مجموعه", permission: "website.manage" },
+  {
+    href: "/roles",
+    title: "نقش‌ها و دسترسی‌ها",
+    permission: "role.read",
+    group: "مدیریت",
+  },
+  {
+    href: "/venues",
+    title: "محل برگزاری",
+    permission: "settings.read",
+    group: "رویدادها",
+  },
+  {
+    href: "/audit",
+    title: "گزارش فعالیت",
+    permission: "audit.read",
+    group: "مدیریت",
+  },
+  {
+    href: "/settings",
+    title: "تنظیمات مجموعه",
+    permission: "settings.read",
+    group: "مدیریت",
+  },
+  {
+    href: "/website",
+    title: "وب‌سایت مجموعه",
+    permission: "website.manage",
+    group: "وب‌سایت",
+  },
   {
     href: "/enrollments",
     title: "ثبت‌نام‌ها",
     permission: "enrollment.read",
     feature: "registration" as const,
+    group: "افراد",
   },
 ];
 
@@ -72,7 +114,7 @@ export function TenantShell({
         actor.permissions.has(item.permission) &&
         (!item.feature || tenant.features[item.feature]),
     )
-    .map(({ href, title }) => ({ href, title }));
+    .map(({ href, title, group }) => ({ href, title, group }));
   const account = (
     <>
       <div className="admin-chip">

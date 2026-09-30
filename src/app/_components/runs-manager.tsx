@@ -8,6 +8,7 @@ import {
   tenantWallTimeToUtc,
 } from "@/modules/program-core/dates";
 import { apiRequest, errorMessage } from "./api-client";
+import { JalaliDateTimeInput } from "./jalali-datetime-input";
 
 type Program = { id: string; title: string; status: string };
 type Instructor = { id: string; name: string; status: string };
@@ -224,11 +225,9 @@ export function RunsManager({
               <span className="label">عنوان اجرا</span>
               <input className="input" name="title" required maxLength={200} />
             </label>
-            <label className="field">
+            <div className="field">
               <span className="label">شروع اجرا ({timezone})</span>
-              <input
-                className="input"
-                type="datetime-local"
+              <JalaliDateTimeInput
                 name="startsAt"
                 defaultValue={
                   editing
@@ -237,12 +236,10 @@ export function RunsManager({
                 }
                 required
               />
-            </label>
-            <label className="field">
+            </div>
+            <div className="field">
               <span className="label">پایان اجرا ({timezone})</span>
-              <input
-                className="input"
-                type="datetime-local"
+              <JalaliDateTimeInput
                 name="endsAt"
                 defaultValue={
                   editing
@@ -251,12 +248,10 @@ export function RunsManager({
                 }
                 required
               />
-            </label>
-            <label className="field">
+            </div>
+            <div className="field">
               <span className="label">شروع ثبت‌نام</span>
-              <input
-                className="input"
-                type="datetime-local"
+              <JalaliDateTimeInput
                 name="registrationStartsAt"
                 defaultValue={
                   editing?.registration_starts_at
@@ -267,12 +262,10 @@ export function RunsManager({
                     : undefined
                 }
               />
-            </label>
-            <label className="field">
+            </div>
+            <div className="field">
               <span className="label">پایان ثبت‌نام</span>
-              <input
-                className="input"
-                type="datetime-local"
+              <JalaliDateTimeInput
                 name="registrationEndsAt"
                 defaultValue={
                   editing?.registration_ends_at
@@ -283,7 +276,7 @@ export function RunsManager({
                     : undefined
                 }
               />
-            </label>
+            </div>
             <label className="field">
               <span className="label">روش برگزاری</span>
               <select

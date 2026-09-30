@@ -93,7 +93,7 @@ export default async function TenantsPage({
                     </td>
                     <td className="mono">{tenant.primaryHostname ?? "—"}</td>
                     <td>
-                      {new Intl.DateTimeFormat("fa-IR", {
+                      {new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
                         dateStyle: "medium",
                       }).format(new Date(tenant.createdAt))}
                     </td>

@@ -75,6 +75,8 @@ import { POST as acceptTenantInvitationRoute } from "@/app/api/tenant/invitation
 import { workerDiagnostics } from "../helpers/worker-diagnostics";
 import { PUT as putWebsiteProfile } from "@/app/api/tenant/website/route";
 import { getWebsiteProfile } from "@/modules/public-site/profile";
+import { saveMedia, removeMedia } from "@/modules/media/repository";
+import { GET as getPublicMedia } from "@/app/api/media/[id]/route";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 
@@ -549,9 +551,9 @@ describe("Phase 1 real PostgreSQL gates", () => {
         "SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL",
       );
       const appRows = await migrationCheck.query<{ count: number }>(
-        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0006_phase4_self_registration_ids'",
+        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0007_organization_site_media'",
       );
-      expect(prismaRows.rows[0]?.count).toBe(7);
+      expect(prismaRows.rows[0]?.count).toBe(8);
       expect(appRows.rows[0]?.count).toBe(1);
     } finally {
       await migrationCheck.end();
@@ -613,6 +615,10 @@ describe("Phase 1 real PostgreSQL gates", () => {
       phone: "021-00000000",
       primaryColor: "#145d58",
       heroEnabled: false,
+      siteSettings: {
+        ...websiteBefore.siteSettings,
+        sections: { ...websiteBefore.siteSettings.sections, about: false },
+      },
     };
     const websiteRequest = (input: unknown, cookie = ownerCookie) =>
       new Request(`${websiteOrigin}/api/tenant/website`, {
@@ -632,12 +638,49 @@ describe("Phase 1 real PostgreSQL gates", () => {
       phone: "021-00000000",
       primaryColor: "#145d58",
       heroEnabled: false,
+      siteSettings: { sections: { about: false } },
     });
     const invalidWebsite = await putWebsiteProfile(
       websiteRequest({ ...websiteInput, primaryColor: "javascript:alert(1)" }),
     );
     expect(invalidWebsite.status).toBe(400);
     expect((await invalidWebsite.json()).error.message).toContain("رنگ اصلی");
+    const invalidSection = await putWebsiteProfile(
+      websiteRequest({
+        ...websiteInput,
+        siteSettings: {
+          ...websiteInput.siteSettings,
+          heroCtaHref: "javascript:alert(1)",
+        },
+      }),
+    );
+    expect(invalidSection.status).toBe(400);
+    const logo = await saveMedia(
+      ownerContext,
+      ownerActor,
+      "WEBSITE_LOGO",
+      ownerContext.tenantId,
+      "image/png",
+      Uint8Array.from(
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pXcAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      ),
+      randomUUID(),
+    );
+    expect(logo.url).toMatch(/^\/api\/media\//);
+    const ownMedia = await getPublicMedia(
+      new Request(`${websiteOrigin}${logo.url}`, {
+        headers: { host: `${slugA}.localhost:3000` },
+      }),
+      { params: Promise.resolve({ id: logo.id }) },
+    );
+    expect(ownMedia.status).toBe(200);
+    const profileWithLogo = await putWebsiteProfile(
+      websiteRequest({ ...websiteInput, logoUrl: logo.url }),
+    );
+    expect(profileWithLogo.status).toBe(200);
     const unauthenticatedWebsite = await putWebsiteProfile(
       websiteRequest(websiteInput, ""),
     );
@@ -1183,6 +1226,20 @@ describe("Phase 1 real PostgreSQL gates", () => {
     expect(contextA.tenantId).toBe(first.tenant.id);
     expect(contextB.tenantId).toBe(second.tenant.id);
     expect(contextA.databaseName).not.toBe(contextB.databaseName);
+    const wrongMedia = await getPublicMedia(
+      new Request(`http://${slugB}.localhost:3000${logo.url}`, {
+        headers: { host: `${slugB}.localhost:3000` },
+      }),
+      { params: Promise.resolve({ id: logo.id }) },
+    );
+    expect(wrongMedia.status).toBe(404);
+    await removeMedia(
+      ownerContext,
+      ownerActor,
+      "WEBSITE_LOGO",
+      ownerContext.tenantId,
+      randomUUID(),
+    );
     expect(contextA.features.custom_domain).toBe(false);
     for (const tenantId of [first.tenant.id, second.tenant.id]) {
       await getControlPool().query(
@@ -1521,7 +1578,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       [created.tenant.id, created.tenant.id],
     );
     expect(firstUpgrade.rows[0]).toEqual({
-      migration_version: "0006_phase4_self_registration_ids",
+      migration_version: "0007_organization_site_media",
       audit_count: 1,
     });
 
@@ -1563,7 +1620,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
            (SELECT count(*)::int FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS prisma_rows`,
       );
       expect(metadata.rows[0]?.schema_version).toBe(
-        "0006_phase4_self_registration_ids",
+        "0007_organization_site_media",
       );
       expect(identity.rows[0]).toEqual({
         roles: 11,
@@ -1573,7 +1630,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       expect(history.rows[0]).toEqual({
         phase1_rows: 1,
         identity_rows: 2,
-        prisma_rows: 7,
+        prisma_rows: 8,
       });
     } finally {
       await upgraded.end();

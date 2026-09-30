@@ -51,6 +51,15 @@ const serverConfigSchema = z
     TRUSTED_PROXY_CIDRS: z.string().default(""),
     SMTP_URL: z.string().optional().default(""),
     MAIL_TRANSPORT: z.enum(["smtp", "test"]).default("smtp"),
+    MEDIA_S3_ENDPOINT: z.string().default(""),
+    MEDIA_S3_REGION: z.string().default("us-east-1"),
+    MEDIA_S3_BUCKET: z.string().default(""),
+    MEDIA_S3_ACCESS_KEY_ID: z.string().default(""),
+    MEDIA_S3_SECRET_ACCESS_KEY: z.string().default(""),
+    MEDIA_S3_ALLOW_HTTP_LOCAL: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
     SMTP_FROM: z
       .string()
       .min(3)

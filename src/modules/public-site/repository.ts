@@ -25,6 +25,8 @@ export type PublicRun = {
   instructor: string | null;
   confirmedCount: number;
   registrationFormSchema: unknown;
+  coverUrl: string | null;
+  videoUrl: string | null;
 };
 
 const publicRunsSql = `SELECT r.id, r.title, r.id::text AS slug, p.type,
@@ -36,6 +38,8 @@ const publicRunsSql = `SELECT r.id, r.title, r.id::text AS slug, p.type,
   r.delivery_mode AS "deliveryMode", r.capacity,
   r.waitlist_enabled AS "waitlistEnabled", r.registration_form_schema AS "registrationFormSchema", v.name AS venue,
   instructor.display_name AS instructor,
+  (SELECT '/api/media/' || m.id::text FROM tenant_media m WHERE m.tenant_id=p.tenant_id AND m.resource_id=p.id AND m.purpose='PROGRAM_COVER') AS "coverUrl",
+  (SELECT '/api/media/' || m.id::text FROM tenant_media m WHERE m.tenant_id=p.tenant_id AND m.resource_id=p.id AND m.purpose='PROGRAM_VIDEO') AS "videoUrl",
   (SELECT count(*)::int FROM enrollments e WHERE e.tenant_id=r.tenant_id AND e.run_id=r.id AND e.status='CONFIRMED') AS "confirmedCount"
   FROM program_runs r
   JOIN programs p ON p.tenant_id = r.tenant_id AND p.id = r.program_id

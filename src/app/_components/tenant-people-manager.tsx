@@ -1,5 +1,7 @@
 "use client";
 
+import { roleLabel } from "@/modules/tenant-identity/role-labels";
+
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { apiRequest, errorMessage } from "@/app/_components/api-client";
 
@@ -226,7 +228,7 @@ export function TenantPeopleManager({
                           )
                         }
                       />
-                      {role.name}
+                      {roleLabel(role.code, role.name)}
                     </label>
                   ))}
                 </div>
@@ -266,11 +268,15 @@ export function TenantPeopleManager({
                     <span className="table-sub">{person.email}</span>
                   </td>
                   <td>{person.status}</td>
-                  <td>{person.role_codes.join("، ") || "—"}</td>
+                  <td>
+                    {person.role_codes
+                      .map((code) => roleLabel(code))
+                      .join("، ") || "—"}
+                  </td>
                   <td>
                     {person.last_login_at
                       ? new Date(person.last_login_at).toLocaleDateString(
-                          "fa-IR",
+                          "fa-IR-u-ca-persian",
                         )
                       : "—"}
                   </td>
@@ -341,7 +347,7 @@ export function TenantPeopleManager({
                                     }))
                                   }
                                 />
-                                {role.name}
+                                {roleLabel(role.code, role.name)}
                               </label>
                             ))}
                             <button

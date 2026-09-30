@@ -200,7 +200,7 @@ export function EnrollmentsManager({
                         : "لغو شده"}
                   </td>
                   <td>
-                    {new Intl.DateTimeFormat("fa-IR", {
+                    {new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
                       dateStyle: "medium",
                     }).format(new Date(entry.registered_at))}
                   </td>

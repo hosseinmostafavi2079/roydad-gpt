@@ -87,6 +87,23 @@ function createEnv() {
 
 function createContainerEnv() {
   let existingEnv = readFileSync(envPath, "utf8");
+  for (const [name, fallback] of Object.entries({
+    MEDIA_S3_ENDPOINT: "http://127.0.0.1:59000",
+    MEDIA_S3_REGION: "us-east-1",
+    MEDIA_S3_BUCKET: "eventos-local-media",
+    MEDIA_S3_ACCESS_KEY_ID: secret(),
+    MEDIA_S3_SECRET_ACCESS_KEY: secret(),
+    MEDIA_S3_ALLOW_HTTP_LOCAL: "true",
+  })) {
+    const pattern = new RegExp(`^${name}=.*$`, "m");
+    const current =
+      existingEnv.match(pattern)?.[0]?.slice(name.length + 1) ?? "";
+    if (!current)
+      existingEnv = pattern.test(existingEnv)
+        ? existingEnv.replace(pattern, `${name}=${fallback}`)
+        : `${existingEnv.trimEnd()}\n${name}=${fallback}\n`;
+  }
+  writeFileSync(envPath, existingEnv, { mode: 0o600 });
   const requireMfa = process.env.PLATFORM_REQUIRE_MFA === "true";
   const mfaLine = `PLATFORM_REQUIRE_MFA=${requireMfa}`;
   const updatedEnv = /^PLATFORM_REQUIRE_MFA=.*$/m.test(existingEnv)
@@ -158,6 +175,15 @@ function createContainerEnv() {
   values.MAIL_TRANSPORT = "smtp";
   values.PLATFORM_REQUIRE_MFA =
     process.env.PLATFORM_REQUIRE_MFA === "true" ? "true" : "false";
+  values.MEDIA_S3_ENDPOINT = "http://minio:9000";
+  for (const key of [
+    "MEDIA_S3_REGION",
+    "MEDIA_S3_BUCKET",
+    "MEDIA_S3_ACCESS_KEY_ID",
+    "MEDIA_S3_SECRET_ACCESS_KEY",
+    "MEDIA_S3_ALLOW_HTTP_LOCAL",
+  ])
+    values[key] = process.env[key] ?? "";
   const output = `${Object.entries(values)
     .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
     .join("\n")}\n`;
@@ -171,7 +197,7 @@ function createContainerEnv() {
 createEnv();
 createContainerEnv();
 run("docker", ["info", "--format", "{{.ServerVersion}}"]);
-run("docker", ["compose", "up", "-d", "--wait", "postgres"]);
+run("docker", ["compose", "up", "-d", "--wait", "postgres", "minio"]);
 const scriptEnv = {
   ...process.env,
   NODE_ENV: "development",

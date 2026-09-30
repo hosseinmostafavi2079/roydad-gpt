@@ -90,7 +90,11 @@ export async function listPrograms(
 ): Promise<Row[]> {
   assertScope(scope, "program.read");
   const result = await getTenantPool(scope.tenant).query(
-    `SELECT p.*, (SELECT count(*)::int FROM program_runs r WHERE r.tenant_id = p.tenant_id AND r.program_id = p.id) AS run_count
+    `SELECT p.*, (SELECT count(*)::int FROM program_runs r WHERE r.tenant_id = p.tenant_id AND r.program_id = p.id) AS run_count,
+       (SELECT '/api/media/' || m.id::text FROM tenant_media m WHERE m.tenant_id=p.tenant_id AND m.resource_id=p.id AND m.purpose='PROGRAM_COVER') AS cover_url,
+       (SELECT '/api/media/' || m.id::text FROM tenant_media m WHERE m.tenant_id=p.tenant_id AND m.resource_id=p.id AND m.purpose='PROGRAM_VIDEO') AS video_url,
+       (SELECT min(r.starts_at) FROM program_runs r WHERE r.tenant_id=p.tenant_id AND r.program_id=p.id) AS next_run_at,
+       (SELECT instructor.display_name FROM program_runs r JOIN run_instructors ri ON ri.tenant_id=r.tenant_id AND ri.run_id=r.id AND ri.is_lead JOIN tenant_instructor_profiles instructor ON instructor.tenant_id=ri.tenant_id AND instructor.user_id=ri.instructor_id WHERE r.tenant_id=p.tenant_id AND r.program_id=p.id ORDER BY r.starts_at LIMIT 1) AS lead_instructor
      FROM programs p WHERE p.tenant_id = $1
        AND ($2 = '' OR p.title ILIKE '%' || $2 || '%')
        AND ($3 = '' OR p.type = $3) AND ($4 = '' OR p.status = $4)

@@ -5,7 +5,7 @@ import type { WebsiteProfile } from "@/modules/public-site/profile";
 import type { PublicRun } from "@/modules/public-site/repository";
 
 function formatDate(date: Date): string {
-  return new Intl.DateTimeFormat("fa-IR", {
+  return new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
     dateStyle: "long",
     timeZone: "Asia/Tehran",
   }).format(date);
@@ -25,6 +25,8 @@ export function PublicSiteShell({
     "--public-primary": profile.primaryColor,
     "--public-secondary": profile.secondaryColor,
     "--public-accent": profile.accentColor,
+    "--public-background": profile.siteSettings.backgroundColor,
+    "--public-text": profile.siteSettings.textColor,
     "--public-radius":
       profile.radiusStyle === "LARGE"
         ? "24px"
@@ -33,7 +35,11 @@ export function PublicSiteShell({
           : "16px",
   } as CSSProperties;
   return (
-    <div className="public-site" dir="rtl" style={style}>
+    <div
+      className={`public-site ${profile.siteSettings.fontPreset === "TAHOMA" ? "public-font-tahoma" : ""} ${profile.siteSettings.buttonStyle === "OUTLINE" ? "public-buttons-outline" : ""}`}
+      dir="rtl"
+      style={style}
+    >
       <header className="public-header">
         <Link href="/" className="public-logo">
           {profile.logoUrl ? (
@@ -70,7 +76,13 @@ export function PublicRunCard({ run }: { run: PublicRun }) {
   return (
     <article className="public-run-card">
       <div className="public-run-art" aria-hidden="true">
-        {run.type === "COURSE" ? "دوره" : "رویداد"}
+        {run.coverUrl ? (
+          <img src={run.coverUrl} alt="" loading="lazy" />
+        ) : run.type === "COURSE" ? (
+          "دوره"
+        ) : (
+          "رویداد"
+        )}
       </div>
       <div className="public-run-body">
         <span className="public-eyebrow">{formatDate(run.startsAt)}</span>

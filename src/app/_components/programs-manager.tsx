@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiRequest, errorMessage } from "./api-client";
+import { MediaUploader } from "./media-uploader";
 
 type Program = {
   id: string;
@@ -18,6 +19,10 @@ type Program = {
   intended_audience: string;
   default_duration_minutes: number | null;
   run_count: number;
+  cover_url: string | null;
+  video_url: string | null;
+  next_run_at: string | null;
+  lead_instructor: string | null;
 };
 const types: Record<string, string> = {
   COURSE: "دوره",
@@ -98,12 +103,24 @@ export function ProgramsManager({
       defaultDurationMinutes: duration ? Number(duration) : null,
     };
     try {
-      await apiRequest(
+      const saved = await apiRequest<Program>(
         editing ? `/api/tenant/programs/${editing.id}` : "/api/tenant/programs",
         { method: editing ? "PUT" : "POST", body },
       );
-      setShowForm(false);
-      setEditing(null);
+      if (!editing) {
+        setEditing({
+          ...saved,
+          cover_url: null,
+          video_url: null,
+          next_run_at: null,
+          lead_instructor: null,
+          run_count: 0,
+        });
+        setShowForm(true);
+      } else {
+        setShowForm(false);
+        setEditing(null);
+      }
       await refresh();
     } catch (cause) {
       setError(errorMessage(cause));
@@ -215,7 +232,7 @@ export function ProgramsManager({
             {editing ? "ویرایش برنامه" : "برنامه جدید"}
           </h2>
           <form key={editing?.id ?? "new"} onSubmit={save}>
-            <h3>۱. اطلاعات پایه</h3>
+            <h3>اطلاعات اصلی</h3>
             <div className="form-grid">
               {field("title", "عنوان")}
               {field("slug", "شناسه لاتین")}
@@ -236,18 +253,49 @@ export function ProgramsManager({
               {field("category", "دسته‌بندی")}
               {field("shortDescription", "توضیح کوتاه", "textarea", true)}
             </div>
-            <h3>۲. محتوای آموزشی</h3>
+            <h3>محتوا و سرفصل‌ها</h3>
             <div className="form-grid">
               {field("description", "توضیحات", "textarea", true)}
               {field("objectives", "اهداف", "textarea", true)}
               {field("prerequisites", "پیش‌نیازها", "textarea", true)}
               {field("intendedAudience", "مخاطبان", "textarea", true)}
             </div>
-            <h3>۳. تنظیمات</h3>
+            <h3>زمان‌بندی و انتشار</h3>
             <div className="form-grid">
               {field("level", "سطح")}
               {field("duration", "مدت پیش‌فرض (دقیقه)", "number")}
             </div>
+            <h3>رسانه</h3>
+            {editing ? (
+              <div className="media-grid">
+                <MediaUploader
+                  kind="PROGRAM_COVER"
+                  programId={editing.id}
+                  label="تصویر شاخص / کاور"
+                  value={editing.cover_url ?? ""}
+                  onChange={(url) =>
+                    setEditing((current) =>
+                      current ? { ...current, cover_url: url } : current,
+                    )
+                  }
+                />
+                <MediaUploader
+                  kind="PROGRAM_VIDEO"
+                  programId={editing.id}
+                  label="ویدیوی معرفی MP4"
+                  value={editing.video_url ?? ""}
+                  onChange={(url) =>
+                    setEditing((current) =>
+                      current ? { ...current, video_url: url } : current,
+                    )
+                  }
+                />
+              </div>
+            ) : (
+              <p className="hint">
+                برای بارگذاری تصویر و ویدیو، ابتدا برنامه را ذخیره کنید.
+              </p>
+            )}
             <div className="form-actions">
               <button type="submit" className="btn btn-primary" disabled={busy}>
                 {busy ? "در حال ذخیره…" : "ذخیره"}
@@ -314,8 +362,10 @@ export function ProgramsManager({
             <table>
               <thead>
                 <tr>
-                  <th>عنوان</th>
+                  <th>تصویر و عنوان</th>
                   <th>نوع</th>
+                  <th>زمان بعدی</th>
+                  <th>مدرس</th>
                   <th>وضعیت</th>
                   <th>اجراها</th>
                   <th>عملیات</th>
@@ -325,10 +375,27 @@ export function ProgramsManager({
                 {items.map((item) => (
                   <tr key={item.id}>
                     <td>
+                      {item.cover_url && (
+                        <img
+                          className="program-list-cover"
+                          src={item.cover_url}
+                          alt=""
+                          loading="lazy"
+                        />
+                      )}
                       <span className="table-name">{item.title}</span>
                       <span className="table-sub">{item.slug}</span>
                     </td>
                     <td>{types[item.type] ?? item.type}</td>
+                    <td>
+                      {item.next_run_at
+                        ? new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+                            dateStyle: "medium",
+                            timeZone: "Asia/Tehran",
+                          }).format(new Date(item.next_run_at))
+                        : "—"}
+                    </td>
+                    <td>{item.lead_instructor || "—"}</td>
                     <td>
                       <span className="badge badge-green">
                         {states[item.status] ?? item.status}

@@ -61,6 +61,12 @@ jobs:
             TENANT_BOOTSTRAP_ENCRYPTION_KEY: randomBytes(32).toString("hex"),
             PLATFORM_BASE_DOMAIN: "localhost",
             PLATFORM_REQUIRE_MFA: "false",
+            MEDIA_S3_ENDPOINT: "http://127.0.0.1:59000",
+            MEDIA_S3_REGION: "us-east-1",
+            MEDIA_S3_BUCKET: "eventos-ci-media",
+            MEDIA_S3_ACCESS_KEY_ID: randomBytes(32).toString("hex"),
+            MEDIA_S3_SECRET_ACCESS_KEY: randomBytes(32).toString("hex"),
+            MEDIA_S3_ALLOW_HTTP_LOCAL: "true",
             TRUSTED_PROXY_CIDRS: "",
             SMTP_URL: "",
             MAIL_TRANSPORT: "smtp",
@@ -86,6 +92,7 @@ jobs:
             ...config,
             NODE_ENV: "production",
             SMTP_URL: "smtps://localhost:465",
+            MEDIA_S3_ENDPOINT: "http://minio:9000",
             CONTROL_DATABASE_URL: containerUrl(config.CONTROL_DATABASE_URL),
             CONTROL_MIGRATION_DATABASE_URL: containerUrl(config.CONTROL_MIGRATION_DATABASE_URL),
             CONTROL_QUEUE_DATABASE_URL: containerUrl(config.CONTROL_QUEUE_DATABASE_URL),
@@ -107,8 +114,8 @@ jobs:
       - name: Validate CI Compose configuration
         run: docker compose config --quiet
 
-      - name: Start PostgreSQL
-        run: docker compose up -d postgres
+      - name: Start PostgreSQL and local object storage
+        run: docker compose up -d postgres minio
 
       - name: Wait for PostgreSQL
         run: |

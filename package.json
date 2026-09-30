@@ -12,7 +12,7 @@
     "lint": "biome lint .",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run tests/unit",
-    "test:integration": "vitest run tests/integration",
+    "test:integration": "vitest run tests/integration --no-file-parallelism",
     "test": "pnpm test:unit && pnpm test:integration",
     "test:e2e": "pnpm build && pnpm test:e2e:run",
     "test:e2e:run": "playwright test",
@@ -33,6 +33,7 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1012.0",
     "@fontsource/vazirmatn": "5.3.0",
     "@next/env": "16.3.6",
     "@node-rs/argon2": "2.2.1",

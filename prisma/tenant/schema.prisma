@@ -28,6 +28,7 @@ model TenantMetadata {
   invitations TenantInvitation[]
   auditLogs   TenantAuditLog[]
   website     TenantWebsiteProfile?
+  media       TenantMedia[]
 
   @@map("tenant_metadata")
 }
@@ -57,10 +58,29 @@ model TenantWebsiteProfile {
   cardStyle         String   @default("SOFT") @map("card_style") @db.VarChar(16)
   radiusStyle       String   @default("MEDIUM") @map("radius_style") @db.VarChar(16)
   updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  siteSettings      Json     @default("{}") @map("site_settings") @db.JsonB
 
   tenant TenantMetadata @relation(fields: [tenantId], references: [tenantId], onDelete: Restrict)
 
   @@map("tenant_website_profiles")
+}
+
+model TenantMedia {
+  tenantId    String   @map("tenant_id") @db.Uuid
+  id          String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  purpose     String   @db.VarChar(32)
+  resourceId  String   @map("resource_id") @db.Uuid
+  objectKey   String   @unique @map("object_key") @db.VarChar(300)
+  contentType String   @map("content_type") @db.VarChar(32)
+  sizeBytes   BigInt   @map("size_bytes")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tenant TenantMetadata @relation(fields: [tenantId], references: [tenantId], onDelete: Restrict)
+
+  @@id([tenantId, id])
+  @@unique([tenantId, purpose, resourceId])
+  @@index([tenantId, purpose], map: "tenant_media_usage_idx")
+  @@map("tenant_media")
 }
 
 model TenantRoleTemplate {

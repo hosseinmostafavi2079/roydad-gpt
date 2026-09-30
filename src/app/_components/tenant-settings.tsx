@@ -792,7 +792,7 @@ export function TenantSettings({
                 <code className="mono">{verification.recordValue}</code>
                 <p className="hint">
                   اعتبار تا{" "}
-                  {new Intl.DateTimeFormat("fa-IR", {
+                  {new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
                     dateStyle: "short",
                     timeStyle: "short",
                   }).format(new Date(verification.expiresAt))}
@@ -813,7 +813,7 @@ export function TenantSettings({
                 <div className="check-row" key={item.id}>
                   <span>{item.action}</span>
                   <time className="hint" dateTime={item.createdAt}>
-                    {new Intl.DateTimeFormat("fa-IR", {
+                    {new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
                       dateStyle: "short",
                       timeStyle: "short",
                     }).format(new Date(item.createdAt))}
