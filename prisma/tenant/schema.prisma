@@ -484,3 +484,87 @@ model SessionInstructor {
   @@index([tenantId, instructorId], map: "session_instructors_actor_idx")
   @@map("session_instructors")
 }
+
+model AttendanceRecord {
+  tenantId       String    @map("tenant_id") @db.Uuid
+  id             String    @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId      String    @map("session_id") @db.Uuid
+  participantId  String    @map("participant_id") @db.VarChar(64)
+  status         String    @db.VarChar(16)
+  checkInAt      DateTime? @map("check_in_at") @db.Timestamptz(6)
+  markedByUserId String    @map("marked_by_user_id") @db.VarChar(64)
+  notes          String?   @db.VarChar(500)
+  source         String    @db.VarChar(8)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@unique([tenantId, sessionId, participantId])
+  @@index([tenantId, participantId, updatedAt(sort: Desc)], map: "attendance_records_participant_idx")
+  @@map("attendance_records")
+}
+
+model AttendanceQrChallenge {
+  tenantId       String    @map("tenant_id") @db.Uuid
+  id             String    @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId      String    @map("session_id") @db.Uuid
+  issuedByUserId String    @map("issued_by_user_id") @db.VarChar(64)
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@index([tenantId, sessionId, expiresAt(sort: Desc)], map: "attendance_qr_challenges_session_idx")
+  @@map("attendance_qr_challenges")
+}
+
+model AttendanceQrUse {
+  tenantId      String   @map("tenant_id") @db.Uuid
+  challengeId   String   @map("challenge_id") @db.Uuid
+  participantId String   @map("participant_id") @db.VarChar(64)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([tenantId, challengeId, participantId])
+  @@index([tenantId, participantId, createdAt(sort: Desc)], map: "attendance_qr_uses_participant_idx")
+  @@map("attendance_qr_uses")
+}
+
+model CertificateTemplate {
+  tenantId            String   @map("tenant_id") @db.Uuid
+  id                  String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                String   @db.VarChar(120)
+  backgroundObjectKey String?  @unique @map("background_object_key") @db.VarChar(300)
+  backgroundSizeBytes BigInt   @default(0) @map("background_size_bytes")
+  fieldsConfig        Json     @default("{}") @map("fields_config") @db.JsonB
+  createdByUserId     String   @map("created_by_user_id") @db.VarChar(64)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@unique([tenantId, name])
+  @@map("certificate_templates")
+}
+
+model Certificate {
+  tenantId         String    @map("tenant_id") @db.Uuid
+  id               String    @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  participantId    String    @map("participant_id") @db.VarChar(64)
+  programId        String    @map("program_id") @db.Uuid
+  runId            String    @map("run_id") @db.Uuid
+  templateId       String    @map("template_id") @db.Uuid
+  serialNumber     String    @unique @map("serial_number") @db.VarChar(40)
+  verificationCode String    @unique @map("verification_code") @db.VarChar(64)
+  issuedAt         DateTime  @default(now()) @map("issued_at") @db.Timestamptz(6)
+  issuedByUserId   String    @map("issued_by_user_id") @db.VarChar(64)
+  status           String    @default("ACTIVE") @db.VarChar(16)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedByUserId  String?   @map("revoked_by_user_id") @db.VarChar(64)
+  pdfObjectKey     String    @unique @map("pdf_object_key") @db.VarChar(300)
+  pdfSizeBytes     BigInt    @map("pdf_size_bytes")
+
+  @@id([tenantId, id])
+  @@unique([tenantId, runId, participantId])
+  @@index([tenantId, participantId, issuedAt(sort: Desc)], map: "certificates_participant_idx")
+  @@index([tenantId, programId, issuedAt(sort: Desc)], map: "certificates_program_idx")
+  @@map("certificates")
+}

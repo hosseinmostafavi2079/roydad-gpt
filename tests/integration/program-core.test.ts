@@ -29,6 +29,21 @@ import {
 } from "@/modules/program-core/repository";
 import { sessionInput } from "@/modules/program-core/schema";
 import { enrollParticipant } from "@/modules/enrollment/repository";
+import {
+  checkInWithQr,
+  getSessionAttendance,
+  issueAttendanceQr,
+  listOwnAttendance,
+  markAttendanceBatch,
+} from "@/modules/attendance/repository";
+import {
+  getCertificatePdf,
+  issueCertificate,
+  listCertificates,
+  revokeCertificate,
+  saveTemplate,
+  verifyCertificate,
+} from "@/modules/certificates/repository";
 import type { TenantContext } from "@/modules/tenant-identity/auth";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
@@ -278,7 +293,7 @@ describe("Phase 3 real PostgreSQL program core", () => {
     await transitionProgram(s, programId, "ACTIVE");
     expect((await getProgram(s, programId)).status).toBe("ACTIVE");
     const migration = await getTenantPool(a).query<{ schema_version: string }>(
-      "SELECT schema_version FROM tenant_metadata WHERE tenant_id=$1 AND schema_version='0007_organization_site_media'",
+      "SELECT schema_version FROM tenant_metadata WHERE tenant_id=$1 AND schema_version='0008_phase5_attendance_certificates'",
       [a.tenantId],
     );
     expect(migration.rowCount).toBe(1);
@@ -545,4 +560,203 @@ describe("Phase 3 real PostgreSQL program core", () => {
       ),
     ).rejects.toMatchObject({ code: "FEATURE_DISABLED" });
   });
+
+  it("enforces attendance, QR replay, certificate issuance, storage, revocation and tenant boundaries", async () => {
+    const pool = getTenantPool(a);
+    const participantOne = randomUUID();
+    const participantTwo = randomUUID();
+    const participantIds = [participantOne, participantTwo];
+    for (const id of participantIds) {
+      await pool.query(
+        `INSERT INTO tenant_users (id,"tenantId",name,email,"emailVerified",status) VALUES ($1,$2,'Phase 5 Participant',$3,true,'ACTIVE')`,
+        [id, a.tenantId, `${id}@example.test`],
+      );
+      await pool.query(
+        `INSERT INTO tenant_participant_profiles (tenant_id,user_id,display_name) VALUES ($1,$2,'Phase 5 Participant')`,
+        [a.tenantId, id],
+      );
+      await pool.query(
+        `INSERT INTO enrollments (tenant_id,run_id,participant_id,status,form_schema_snapshot) VALUES ($1,$2,$3,'CONFIRMED','{"version":1,"fields":[]}'::jsonb)`,
+        [a.tenantId, runId, id],
+      );
+    }
+    const tenant = {
+      tenantId: a.tenantId,
+      databaseName: a.databaseName,
+      hostname: "phase5.localhost",
+      branding: { brandName: "Phase 5" },
+      features: { attendance: true, qr_attendance: true, certificates: true },
+      limits: { max_storage_mb: 20 },
+    } as TenantContext;
+    const staffScope = {
+      ...scope(a, a.ownerId, [
+        "attendance.view",
+        "attendance.manage",
+        "attendance.export",
+        "certificate.template.manage",
+        "certificate.issue",
+        "certificate.read",
+        "certificate.revoke",
+        "certificate.self.read",
+        "session.manage",
+      ]),
+      tenant,
+    };
+    const participantScope = (id: string) => ({
+      ...scope(a, id, [
+        "attendance.checkin",
+        "attendance.self.read",
+        "certificate.self.read",
+      ]),
+      tenant,
+    });
+    await expect(
+      markAttendanceBatch(participantScope(participantOne), sessionId, {
+        records: [
+          { participantId: participantOne, status: "PRESENT", notes: null },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      getSessionAttendance(
+        {
+          ...staffScope,
+          actor: { ...staffScope.actor, permissions: new Set<string>() },
+        },
+        sessionId,
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const instructorAttendanceScope = {
+      ...scope(a, a.instructorB, ["attendance.view", "attendance.manage"]),
+      tenant,
+    };
+    await expect(
+      getSessionAttendance(instructorAttendanceScope, sessionId),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await markAttendanceBatch(staffScope, sessionId, {
+      records: [
+        { participantId: participantOne, status: "PRESENT", notes: null },
+      ],
+    });
+    await expect(
+      markAttendanceBatch(staffScope, sessionId, {
+        records: [
+          { participantId: participantOne, status: "ABSENT", notes: null },
+          { participantId: a.instructorA, status: "PRESENT", notes: null },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(
+      (await getSessionAttendance(staffScope, sessionId)).summary.present,
+    ).toBe(1);
+    await expect(
+      getSessionAttendance(
+        {
+          ...staffScope,
+          tenant: {
+            ...tenant,
+            features: { ...tenant.features, attendance: false },
+          },
+        },
+        sessionId,
+      ),
+    ).rejects.toMatchObject({ code: "FEATURE_DISABLED" });
+    expect(
+      (await listOwnAttendance(participantScope(participantOne))).summary.total,
+    ).toBe(0);
+    await expect(
+      getSessionAttendance(
+        {
+          ...staffScope,
+          tenant: {
+            ...tenant,
+            tenantId: b.tenantId,
+            databaseName: b.databaseName,
+          },
+        },
+        sessionId,
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    const now = new Date();
+    await pool.query(
+      `UPDATE program_sessions SET starts_at=$3,ends_at=$4 WHERE tenant_id=$1 AND id=$2`,
+      [
+        a.tenantId,
+        sessionId,
+        new Date(now.getTime() - 60_000),
+        new Date(now.getTime() + 60_000),
+      ],
+    );
+    const qr = await issueAttendanceQr(staffScope, sessionId);
+    expect(
+      (await checkInWithQr(participantScope(participantTwo), qr.token)).status,
+    ).toBe("PRESENT");
+    await expect(
+      checkInWithQr(participantScope(participantTwo), qr.token),
+    ).rejects.toMatchObject({ code: "QR_REPLAYED" });
+    const template = await saveTemplate(staffScope, {
+      name: "Default",
+      fields: {
+        message: "{{participantName}} - {{programName}}",
+        showOrganizationLogo: false,
+        accentColor: "#174b57",
+      },
+    });
+    await expect(
+      issueCertificate(staffScope, {
+        runId,
+        participantId: participantOne,
+        templateId: template.id,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_STATE_TRANSITION" });
+    await pool.query(
+      `UPDATE program_runs SET state='COMPLETED' WHERE tenant_id=$1 AND id=$2`,
+      [a.tenantId, runId],
+    );
+    const issued = await issueCertificate(staffScope, {
+      runId,
+      participantId: participantOne,
+      templateId: template.id,
+    });
+    expect(
+      (
+        await issueCertificate(staffScope, {
+          runId,
+          participantId: participantOne,
+          templateId: template.id,
+        })
+      ).alreadyIssued,
+    ).toBe(true);
+    expect(
+      Buffer.from(
+        (
+          await getCertificatePdf(participantScope(participantOne), issued.id)
+        ).subarray(0, 5),
+      ).toString(),
+    ).toBe("%PDF-");
+    await expect(
+      getCertificatePdf(participantScope(participantTwo), issued.id),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const certs = await listCertificates(staffScope);
+    expect(certs).toHaveLength(1);
+    expect(JSON.stringify(certs)).not.toContain("verification_code");
+    const stored = await pool.query<{ verification_code: string }>(
+      `SELECT verification_code FROM certificates WHERE tenant_id=$1 AND id=$2`,
+      [a.tenantId, issued.id],
+    );
+    const code = stored.rows[0]?.verification_code;
+    if (!code) throw new Error("Certificate verification code was not stored.");
+    expect(await verifyCertificate(tenant, code)).not.toBeNull();
+    expect(
+      await verifyCertificate(
+        { ...tenant, tenantId: b.tenantId, databaseName: b.databaseName },
+        code,
+      ),
+    ).toBeNull();
+    await revokeCertificate(staffScope, issued.id);
+    expect(await verifyCertificate(tenant, code)).toBeNull();
+    await expect(
+      getCertificatePdf(participantScope(participantOne), issued.id),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  }, 120_000);
 });

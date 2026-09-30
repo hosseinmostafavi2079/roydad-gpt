@@ -44,3 +44,15 @@ Last updated for Phase 2.
 ## Deferred threat areas
 
 Payment callback forgery, QR replay, file uploads, public registration, participant privacy workflows, and business-record authorization across program/session/enrollment relationships belong to later phases. Future features must add resource-specific authorization before exposing those records. Production controls also depend on deployment infrastructure, backup testing, secret management, monitoring, and recovery procedures.
+
+## Attendance and certificate threat update
+
+| Threat | Mitigation | Verification |
+|---|---|---|
+| Wrong-tenant or replayed QR | HMAC binds tenant/session/challenge/expiry; row lock, unique use, and unique attendance record reject repeat redemption | QR unit and real-PostgreSQL tests |
+| Instructor reads unrelated attendance | Session assignment query in server repository; direct API uses same service | Real-PostgreSQL scope test |
+| Certificate issued for ineligible participant | Completed run and confirmed/completed enrollment checked within serialized tenant transaction | Real-PostgreSQL issuance test |
+| Public verification leaks private records | Random 192-bit code, trusted tenant host, tenant-local throttling, minimal response, revoked/invalid indistinguishable | Real-PostgreSQL verification/revocation test |
+| Private PDF or template crosses tenant | Tenant-derived object keys, tenant-scoped metadata lookups, authenticated download | Real-PostgreSQL storage/tenant test |
+
+Payment callback forgery remains deferred. Production operational controls still require deployment-specific review.

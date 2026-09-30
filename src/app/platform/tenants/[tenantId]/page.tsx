@@ -67,6 +67,9 @@ export default async function TenantDetailsPage({
                 ],
                 ["جلسات", usage.sessions, null],
                 ["ثبت‌نام‌های فعال", usage.enrollments, null],
+                ["رکوردهای حضور", usage.attendance_records, null],
+                ["گواهی‌های معتبر", usage.certificates_issued, null],
+                ["گواهی‌های لغوشده", usage.certificates_revoked, null],
               ] as const
             ).map(([label, used, limit]) => (
               <div key={label}>
@@ -93,6 +96,16 @@ export default async function TenantDetailsPage({
                   "fa-IR",
                   { maximumFractionDigits: 1 },
                 )}{" "}
+                مگابایت
+              </strong>
+            </div>
+            <div>
+              <span>فضای PDF گواهی‌ها</span>
+              <strong>
+                {(
+                  Number(usage.certificate_pdf_bytes) /
+                  (1024 * 1024)
+                ).toLocaleString("fa-IR", { maximumFractionDigits: 1 })}{" "}
                 مگابایت
               </strong>
             </div>

@@ -43,3 +43,7 @@ Tenant audit entries record tenant, actor when authenticated, target, request ID
 ## Phase 3 object scope
 
 `program.read/create/update/delete/publish`, `session.read/manage`, `instructor.read/manage`, and `settings.manage` are enforced server-side. Organization management grants can inspect the organization schedule. Instructor-only users can read only runs and sessions related to their tenant-local instructor identity, including explicit session assignments. A general `session.read` grant does not expose unrelated instructors' objects. Venue and room changes require `settings.manage`. The Phase 3 migration adds `instructor.manage` to the permission catalog and seeds it for appropriate management roles.
+
+## Attendance and certificate permissions
+
+Migration `0008` adds `attendance.view`, `attendance.export`, `attendance.self.read`, `attendance.checkin`, `certificate.template.manage`, `certificate.revoke`, and `certificate.self.read`. Existing `attendance.read/manage` and `certificate.read/issue` remain available. Existing attendance read grants gain `attendance.view`, including custom roles. Participants receive only own attendance/check-in/certificate permissions, and the broad `certificate.read` grant is removed from the participant system role. Staff API checks are server-side; instructor attendance access also requires assignment to the specific session. Feature flags gate each route and page independently of navigation visibility.

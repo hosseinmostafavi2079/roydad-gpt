@@ -11,7 +11,8 @@ const tenantIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const baselineMigration = "0000_phase1_baseline";
 export const tenantIdentityMigrationVersion = "0002_tenant_identity_rbac";
-export const tenantCurrentMigrationVersion = "0007_organization_site_media";
+export const tenantCurrentMigrationVersion =
+  "0008_phase5_attendance_certificates";
 
 function migrationUrl(databaseName: string): string {
   if (!databaseNamePattern.test(databaseName)) {
@@ -92,6 +93,7 @@ export async function applyTenantPrismaMigrations(
         current.schema_version !== "0004_phase4_public_website" &&
         current.schema_version !== "0005_phase4_enrollment" &&
         current.schema_version !== "0006_phase4_self_registration_ids" &&
+        current.schema_version !== "0007_organization_site_media" &&
         current.schema_version !== tenantCurrentMigrationVersion) ||
       !current.has_foundation_migration
     ) {
@@ -167,6 +169,18 @@ export async function applyTenantPrismaMigrations(
     );
     if (!media.rows[0]?.ready)
       throw new Error("Tenant media schema verification failed.");
+
+    const operations = await client.query<{ ready: boolean }>(
+      `SELECT to_regclass('public.attendance_records') IS NOT NULL
+          AND to_regclass('public.attendance_qr_challenges') IS NOT NULL
+          AND to_regclass('public.attendance_qr_uses') IS NOT NULL
+          AND to_regclass('public.certificate_templates') IS NOT NULL
+          AND to_regclass('public.certificates') IS NOT NULL AS ready`,
+    );
+    if (!operations.rows[0]?.ready)
+      throw new Error(
+        "Tenant attendance/certificate schema verification failed.",
+      );
 
     await client.query("BEGIN");
     const verification = await client.query<{

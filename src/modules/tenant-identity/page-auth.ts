@@ -18,6 +18,13 @@ export async function requireTenantPage(permission?: string) {
       ["program.read", "session.read"].includes(permission ?? "")
     )
       notFound();
+    if (!result.tenant.features.attendance && permission === "attendance.view")
+      notFound();
+    if (
+      !result.tenant.features.certificates &&
+      permission === "certificate.read"
+    )
+      notFound();
     return result;
   } catch (error) {
     if (error instanceof DomainError && error.code === "UNAUTHENTICATED")

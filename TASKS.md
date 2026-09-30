@@ -146,3 +146,21 @@ Pricing, payments, attendance, and certificates remain deferred.
 - [ ] Add full Phase 4 browser flow, including self-registration, OTP, enrollment, waitlist, organizer management, and Super Admin feature-toggle denial.
 - [ ] Add email usage metering, enforce remaining measurable limits, and complete Phase 4 security/mobile tests and documentation.
 - [ ] Pass the full local gate and confirm GitHub Actions is green before marking Phase 4 complete.
+
+# Requested Phase 5 — Attendance and certificate foundation (local implementation; GitHub gate pending)
+
+The project brief calls commerce Phase 5 and operations Phase 6. This request explicitly schedules attendance and certificates now and defers payments. Existing `attendance`, `qr_attendance`, and `certificates` plan/tenant feature keys remain the canonical server-side flags; their enabled values provide the requested attendance and certificate switches without a duplicate source of truth.
+
+## Acceptance criteria
+
+- [x] Add forward-only tenant migrations and Prisma models for one tenant-scoped attendance record per participant/session, replay-safe QR challenges, certificate templates, and certificates with unique serial and verification codes.
+- [x] Enforce attendance and certificate permissions, assigned-session instructor scope, participant self-access, eligibility, feature flags, and tenant scope in services and routes.
+- [x] Provide Persian RTL attendance marking, bulk actions, reports, CSV export, participant attendance, and signed short-lived QR check-in.
+- [x] Provide controlled certificate templates, validated template background uploads, auditable issue/revoke operations, Persian PDF generation to private S3-compatible storage, authorized PDF download, and minimal public verification.
+- [x] Show tenant-scoped attendance/certificate/PDF usage to Platform Super Admin and hide disabled tenant navigation.
+- [x] Cover permission denial, tenant separation, QR expiry/replay, attendance transactions, certificate eligibility/idempotency/revocation/privacy, and migration upgrade with unit, real PostgreSQL integration, and Playwright tests.
+- [x] Pass focused tests, `pnpm check`, all unit and integration tests, Prisma validation, production build, and Playwright; review security and update architecture, RBAC, threat model, and testing documentation.
+
+Local gate: `pnpm check` passed (11 pre-existing lint advisories); 43/43 unit tests, 11/11 real PostgreSQL integration tests, production build, Linux Docker image build and healthy app startup, 2/2 Playwright tests, Prisma validation, production dependency audit, and pinned Gitleaks source scan passed. GitHub Actions has not run on this patch, so Phase 5 remains open.
+
+Do not start payments or other Phase 6 work. Do not mark this requested phase complete until local gates and GitHub Actions pass.

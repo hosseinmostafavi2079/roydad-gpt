@@ -14,7 +14,11 @@ export type DomainErrorCode =
   | "RATE_LIMITED"
   | "CAPACITY_REACHED"
   | "REGISTRATION_CLOSED"
-  | "ALREADY_ENROLLED";
+  | "ALREADY_ENROLLED"
+  | "INVALID_QR"
+  | "QR_EXPIRED"
+  | "QR_REPLAYED"
+  | "SESSION_NOT_OPEN";
 
 const statusByCode: Record<DomainErrorCode, number> = {
   UNAUTHENTICATED: 401,
@@ -33,6 +37,10 @@ const statusByCode: Record<DomainErrorCode, number> = {
   CAPACITY_REACHED: 409,
   REGISTRATION_CLOSED: 409,
   ALREADY_ENROLLED: 409,
+  INVALID_QR: 400,
+  QR_EXPIRED: 410,
+  QR_REPLAYED: 409,
+  SESSION_NOT_OPEN: 409,
 };
 
 export class DomainError extends Error {

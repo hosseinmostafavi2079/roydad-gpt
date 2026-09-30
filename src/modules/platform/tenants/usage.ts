@@ -15,6 +15,8 @@ export async function getTenantUsage(tenantId: string) {
   const row = registry.rows[0];
   if (!row) throw new DomainError("NOT_FOUND", "Tenant not found.");
   if (!row.migration_version) return null;
+  const phaseFive =
+    row.migration_version === "0008_phase5_attendance_certificates";
   const result = await getTenantPool({
     tenantId,
     databaseName: row.database_name,
@@ -26,6 +28,10 @@ export async function getTenantUsage(tenantId: string) {
     active_runs: number;
     sessions: number;
     enrollments: number;
+    attendance_records: number;
+    certificates_issued: number;
+    certificates_revoked: number;
+    certificate_pdf_bytes: string;
     database_bytes: string;
   }>(
     `SELECT
@@ -36,6 +42,10 @@ export async function getTenantUsage(tenantId: string) {
       (SELECT count(*)::int FROM program_runs WHERE tenant_id=$1 AND state='PUBLISHED') AS active_runs,
       (SELECT count(*)::int FROM program_sessions WHERE tenant_id=$1 AND status='SCHEDULED') AS sessions,
       (SELECT count(*)::int FROM enrollments WHERE tenant_id=$1 AND status IN ('CONFIRMED','WAITLISTED')) AS enrollments,
+      ${phaseFive ? "(SELECT count(*)::int FROM attendance_records WHERE tenant_id=$1)" : "0"} AS attendance_records,
+      ${phaseFive ? "(SELECT count(*)::int FROM certificates WHERE tenant_id=$1 AND status='ACTIVE')" : "0"} AS certificates_issued,
+      ${phaseFive ? "(SELECT count(*)::int FROM certificates WHERE tenant_id=$1 AND status='REVOKED')" : "0"} AS certificates_revoked,
+      ${phaseFive ? "(SELECT COALESCE(sum(pdf_size_bytes),0)::text FROM certificates WHERE tenant_id=$1)" : "'0'"} AS certificate_pdf_bytes,
       pg_database_size(current_database())::text AS database_bytes`,
     [tenantId],
   );

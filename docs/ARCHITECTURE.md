@@ -45,3 +45,13 @@ See `docs/ADR/` for the modular monolith, database-per-tenant boundary, trusted 
 ## Phase 3 program core
 
 Programs are reusable tenant-local definitions. Runs schedule delivery and hold capacity, registration windows, default venue, assigned instructors, and controlled publication state. Sessions hold UTC timestamps, tenant timezone, room, delivery mode, and optional instructor overrides. Venue and room records remain in the same tenant database. The calendar and dashboard query real tenant data through the permission-aware repository. Enrollment is intentionally outside this phase.
+
+## Requested Phase 5 attendance and certificates
+
+Migration `0008_phase5_attendance_certificates` adds attendance, QR challenge/use, template, and certificate tables to each tenant database. Composite foreign keys keep sessions, participants, runs, and templates tenant-local. The existing plan flags `attendance`, `qr_attendance`, and `certificates` control server paths; no duplicate feature state is stored.
+
+Staff attendance writes lock the session row and require a valid enrollment. Instructor-only staff can access assigned sessions. QR tokens are HMAC-signed, tenant-bound, expire after 90 seconds, and are redeemed transactionally against a unique participant/challenge use and unique session attendance record. QR URLs put the token in a fragment, removed from browser history before redemption.
+
+Certificates use controlled text placeholders and optional validated image assets. The server renders Persian PDFs to private S3-compatible storage; the database stores metadata and object keys. Issuance requires a completed run and valid enrollment, is unique per run/participant, and is audited. Public verification exposes only a minimal active-certificate result and uses a tenant-local rate limit. Platform usage includes attendance, certificate counts, and PDF bytes. Payment work remains outside this request.
+
+The production image keeps Next's traced standalone server under `/app/standalone` and the full dependency tree under `/app/node_modules` for the provisioning worker and migration scripts. Keeping these trees separate avoids collisions between traced package directories and pnpm symlinks. The app server changes its working directory to the standalone folder; the PDF font is traced there.

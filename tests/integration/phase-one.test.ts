@@ -494,8 +494,8 @@ describe("Phase 1 real PostgreSQL gates", () => {
       );
       expect(identity.rows[0]).toMatchObject({
         role_count: 11,
-        permission_count: 42,
-        owner_grant_count: 42,
+        permission_count: 49,
+        owner_grant_count: 49,
         owner_status: "INVITED",
       });
       const prismaHistory = await tenantDb.query<{ table_name: string | null }>(
@@ -552,9 +552,9 @@ describe("Phase 1 real PostgreSQL gates", () => {
         "SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL",
       );
       const appRows = await migrationCheck.query<{ count: number }>(
-        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0007_organization_site_media'",
+        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0008_phase5_attendance_certificates'",
       );
-      expect(prismaRows.rows[0]?.count).toBe(8);
+      expect(prismaRows.rows[0]?.count).toBe(9);
       expect(appRows.rows[0]?.count).toBe(1);
     } finally {
       await migrationCheck.end();
@@ -607,7 +607,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       ownerSessionHeaders,
     );
     expect(ownerActor.tenantId).toBe(first.tenant.id);
-    expect(ownerActor.permissions.size).toBe(42);
+    expect(ownerActor.permissions.size).toBe(49);
     const websiteBefore = await getWebsiteProfile(ownerContext);
     const websiteOrigin = `http://${slugA}.localhost:3000`;
     const websiteInput = {
@@ -1600,7 +1600,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       [created.tenant.id, created.tenant.id],
     );
     expect(firstUpgrade.rows[0]).toEqual({
-      migration_version: "0007_organization_site_media",
+      migration_version: "0008_phase5_attendance_certificates",
       audit_count: 1,
     });
 
@@ -1642,17 +1642,17 @@ describe("Phase 1 real PostgreSQL gates", () => {
            (SELECT count(*)::int FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS prisma_rows`,
       );
       expect(metadata.rows[0]?.schema_version).toBe(
-        "0007_organization_site_media",
+        "0008_phase5_attendance_certificates",
       );
       expect(identity.rows[0]).toEqual({
         roles: 11,
-        permissions: 42,
-        owner_grants: 42,
+        permissions: 49,
+        owner_grants: 49,
       });
       expect(history.rows[0]).toEqual({
         phase1_rows: 1,
         identity_rows: 2,
-        prisma_rows: 8,
+        prisma_rows: 9,
       });
     } finally {
       await upgraded.end();

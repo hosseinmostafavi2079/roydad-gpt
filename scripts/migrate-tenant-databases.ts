@@ -74,6 +74,7 @@ for (const tenant of tenants.rows) {
       tenant.migration_version !== "0004_phase4_public_website" &&
       tenant.migration_version !== "0005_phase4_enrollment" &&
       tenant.migration_version !== "0006_phase4_self_registration_ids" &&
+      tenant.migration_version !== "0007_organization_site_media" &&
       tenant.migration_version !== tenantCurrentMigrationVersion
     ) {
       throw new Error("Tenant migration version requires review.");

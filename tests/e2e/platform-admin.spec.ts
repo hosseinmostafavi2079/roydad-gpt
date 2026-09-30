@@ -393,6 +393,9 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
             { key: "crm", enabled: true },
             { key: "courses", enabled: true },
             { key: "events", enabled: true },
+            { key: "attendance", enabled: true },
+            { key: "qr_attendance", enabled: true },
+            { key: "certificates", enabled: true },
           ],
         }),
       });
@@ -696,11 +699,14 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       "Unrelated E2E Instructor",
       unrelatedInstructorEmail,
     );
-    await invitePortalIdentity(
+    const phase5ParticipantSession = await invitePortalIdentity(
       "participants",
       "E2E Participant Identity",
       `participant-${randomUUID()}@example.test`,
+      true,
     );
+    if (!phase5ParticipantSession)
+      throw new Error("Participant session fixture was incomplete.");
 
     const phase3ProgramTitle = `کارگاه آزمایشی ${randomUUID().slice(0, 8)}`;
     const phase3RunTitle = `اجرای آزمایشی ${randomUUID().slice(0, 8)}`;
@@ -872,6 +878,15 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
     await expect(
       page.getByRole("row").filter({ hasText: phase3RunTitle }),
     ).toContainText("منتشرشده");
+    await phase5ParticipantSession.page.goto(
+      `${tenantOrigin}/events/${phase3RunId}`,
+    );
+    await phase5ParticipantSession.page
+      .getByRole("button", { name: "ثبت‌نام در برنامه" })
+      .click();
+    await expect(
+      phase5ParticipantSession.page.getByRole("status"),
+    ).toContainText("ثبت‌نام شما تأیید شد");
     const publicContext = await browser.newContext();
     const publicPage = await publicContext.newPage();
     await publicPage.goto(`${tenantOrigin}/`);
@@ -908,6 +923,140 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       ),
     ).toBe(404);
     await phase3InstructorSession.context.close();
+
+    const phase5Control = new Client({
+      connectionString: process.env.CONTROL_MIGRATION_DATABASE_URL,
+    });
+    await phase5Control.connect();
+    const registered = await phase5Control.query<{ database_name: string }>(
+      "SELECT database_name FROM tenant_database_registry WHERE tenant_id=$1",
+      [tenantId],
+    );
+    await phase5Control.end();
+    const databaseName = registered.rows[0]?.database_name;
+    if (!databaseName)
+      throw new Error("E2E tenant database was not registered.");
+    const phase5Url = new URL(process.env.TENANT_MIGRATION_DATABASE_URL ?? "");
+    phase5Url.pathname = `/${databaseName}`;
+    const phase5Db = new Client({ connectionString: phase5Url.toString() });
+    await phase5Db.connect();
+    try {
+      await phase5Db.query(
+        "UPDATE program_sessions SET starts_at=$3,ends_at=$4 WHERE tenant_id=$1 AND title=$2",
+        [
+          tenantId,
+          phase3SessionTitle,
+          new Date(Date.now() - 2 * 60 * 60_000),
+          new Date(Date.now() - 60 * 60_000),
+        ],
+      );
+    } finally {
+      await phase5Db.end();
+    }
+
+    await page.goto(`${tenantOrigin}/attendance`);
+    await expect(
+      page.getByRole("heading", { name: "حضور و غیاب" }),
+    ).toBeVisible();
+    await page
+      .getByRole("row")
+      .filter({ hasText: phase3SessionTitle })
+      .getByRole("link", { name: "ثبت و مشاهده" })
+      .click();
+    await expect(
+      page.getByRole("heading", { name: "خلاصه حضور" }),
+    ).toBeVisible();
+    await page
+      .getByLabel("وضعیت E2E Participant Identity")
+      .selectOption("PRESENT");
+    await page
+      .getByLabel("یادداشت E2E Participant Identity")
+      .fill("حضور تأیید شد");
+    await page.getByRole("button", { name: "ثبت حضور این صفحه" }).click();
+    await expect(page.getByRole("status")).toContainText("حضور ثبت شد");
+    await expect(page.getByText("حاضر: 1", { exact: false })).toBeVisible();
+    await page.goto(`${tenantOrigin}/attendance`);
+    await expect(
+      page.getByRole("row").filter({ hasText: "E2E Participant Identity" }),
+    ).toContainText("100٪");
+    await phase5ParticipantSession.page.goto(`${tenantOrigin}/account`);
+    await expect(
+      phase5ParticipantSession.page.getByRole("heading", { name: "حضور من" }),
+    ).toBeVisible();
+    await expect(
+      phase5ParticipantSession.page.getByText(phase3SessionTitle),
+    ).toBeVisible();
+
+    const phase5Completion = new Client({
+      connectionString: phase5Url.toString(),
+    });
+    await phase5Completion.connect();
+    try {
+      await phase5Completion.query(
+        "UPDATE program_runs SET state='COMPLETED' WHERE tenant_id=$1 AND id=$2",
+        [tenantId, phase3RunId],
+      );
+    } finally {
+      await phase5Completion.end();
+    }
+    await page.goto(`${tenantOrigin}/certificates`);
+    await expect(
+      page.getByRole("heading", { name: "گواهی‌ها", exact: true }),
+    ).toBeVisible();
+    await page.getByLabel("نام قالب").fill("قالب آزمون E2E");
+    await page.getByRole("button", { name: "ساخت قالب" }).click();
+    await expect(page.getByRole("status")).toContainText("قالب ساخته شد");
+    await page
+      .getByLabel("شرکت‌کننده و اجرا")
+      .selectOption({ label: `E2E Participant Identity · ${phase3RunTitle}` });
+    await page.getByRole("button", { name: "صدور", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText("گواهی صادر شد");
+    await expect(
+      page.getByRole("row").filter({ hasText: "E2E Participant Identity" }),
+    ).toContainText("معتبر");
+    await phase5ParticipantSession.page.goto(`${tenantOrigin}/account`);
+    await expect(
+      phase5ParticipantSession.page.getByRole("heading", {
+        name: "گواهی‌های من",
+      }),
+    ).toBeVisible();
+    const verificationDb = new Client({
+      connectionString: phase5Url.toString(),
+    });
+    await verificationDb.connect();
+    let publicCode = "";
+    try {
+      const result = await verificationDb.query<{ verification_code: string }>(
+        "SELECT verification_code FROM certificates WHERE tenant_id=$1 AND run_id=$2",
+        [tenantId, phase3RunId],
+      );
+      publicCode = result.rows[0]?.verification_code ?? "";
+    } finally {
+      await verificationDb.end();
+    }
+    if (!publicCode)
+      throw new Error("E2E certificate verification code was missing.");
+    const verificationContext = await browser.newContext();
+    const verificationPage = await verificationContext.newPage();
+    await verificationPage.goto(`${tenantOrigin}/certificate/${publicCode}`);
+    await expect(
+      verificationPage.getByRole("heading", { name: "گواهی معتبر است" }),
+    ).toBeVisible();
+    await expect(
+      verificationPage.getByText("E2E Participant Identity"),
+    ).toBeVisible();
+    await page
+      .getByRole("row")
+      .filter({ hasText: "E2E Participant Identity" })
+      .getByRole("button", { name: "لغو" })
+      .click();
+    await expect(page.getByRole("status")).toContainText("گواهی لغو شد");
+    await verificationPage.reload();
+    await expect(
+      verificationPage.getByRole("heading", { name: "گواهی معتبر یافت نشد" }),
+    ).toBeVisible();
+    await verificationContext.close();
+    await phase5ParticipantSession.context.close();
 
     const wrongHostEmail = `wrong-host-${randomUUID()}@example.test`;
     await page.goto(`${tenantOrigin}/staff`);

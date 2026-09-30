@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { PublicSiteShell, formatDate } from "@/app/_components/public-site";
 import { TenantSignOutButton } from "@/app/_components/tenant-sign-out-button";
 import { listOwnEnrollments } from "@/modules/enrollment/repository";
+import { listOwnAttendance } from "@/modules/attendance/repository";
+import { listCertificates } from "@/modules/certificates/repository";
 import { requireTenantActor } from "@/modules/tenant-identity/request-auth";
 import { publicPageContext } from "@/modules/public-site/page-context";
 import { DomainError } from "@/shared/errors/domain-error";
@@ -30,6 +32,16 @@ export default async function AccountPage() {
     actor,
     requestId: "account-page",
   });
+  const scope = { tenant, actor, requestId: "account-page" };
+  const attendance =
+    tenant.features.attendance && actor.permissions.has("attendance.self.read")
+      ? await listOwnAttendance(scope)
+      : null;
+  const certificates =
+    tenant.features.certificates &&
+    actor.permissions.has("certificate.self.read")
+      ? await listCertificates(scope, true)
+      : [];
   return (
     <PublicSiteShell tenant={tenant} profile={profile}>
       <section className="public-page-header">
@@ -81,6 +93,46 @@ export default async function AccountPage() {
           </p>
         )}
       </section>
+      {attendance ? (
+        <section className="public-section">
+          <h2>حضور من</h2>
+          <p>
+            حضور در {attendance.summary.attended} جلسه از{" "}
+            {attendance.summary.total} جلسه · {attendance.summary.percentage}٪
+          </p>
+          {tenant.features.qr_attendance &&
+          actor.permissions.has("attendance.checkin") ? (
+            <Link href="/check-in">ثبت حضور با QR</Link>
+          ) : null}
+          <ul>
+            {attendance.records.map((record) => (
+              <li key={record.id}>
+                {record.title} · {record.run_title} ·{" "}
+                {record.status ?? "ثبت نشده"}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {certificates.length ? (
+        <section className="public-section">
+          <h2>گواهی‌های من</h2>
+          <ul>
+            {certificates.map((certificate) => (
+              <li key={certificate.id}>
+                {certificate.program_name} · {certificate.serial_number} ·{" "}
+                {certificate.status === "ACTIVE" ? (
+                  <a href={`/api/tenant/certificates/${certificate.id}/pdf`}>
+                    دریافت PDF
+                  </a>
+                ) : (
+                  "لغوشده"
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </PublicSiteShell>
   );
 }

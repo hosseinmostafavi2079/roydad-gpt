@@ -41,6 +41,20 @@ const navItems = [
     group: "رویدادها",
   },
   {
+    href: "/attendance",
+    title: "حضور و غیاب",
+    permission: "attendance.view",
+    feature: "attendance" as const,
+    group: "عملیات",
+  },
+  {
+    href: "/certificates",
+    title: "گواهی‌ها",
+    permission: "certificate.read",
+    feature: "certificates" as const,
+    group: "عملیات",
+  },
+  {
     href: "/staff",
     title: "کارکنان",
     permission: "staff.read",
