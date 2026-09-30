@@ -103,13 +103,15 @@ export function getAuth() {
           .filter(Boolean),
       },
     },
-    plugins: [
-      twoFactor({
-        issuer: "EventOS Platform",
-        twoFactorTable: "platform_admin_two_factors",
-        allowPasswordless: false,
-      }),
-    ],
+    plugins: config.PLATFORM_REQUIRE_MFA
+      ? [
+          twoFactor({
+            issuer: "EventOS Platform",
+            twoFactorTable: "platform_admin_two_factors",
+            allowPasswordless: false,
+          }),
+        ]
+      : [],
     logger: {
       disabled: false,
       log: (level, _message) => {

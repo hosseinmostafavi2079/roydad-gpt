@@ -7,12 +7,17 @@ const items = [
   { href: "/platform", label: "نمای کلی", icon: "⌂" },
   { href: "/platform/tenants", label: "سازمان‌ها", icon: "▦" },
   { href: "/platform/plans", label: "طرح‌ها و محدودیت‌ها", icon: "◇" },
-  { href: "/platform/security/mfa", label: "امنیت حساب", icon: "⌑" },
 ];
 
-export function PlatformNav() {
+export function PlatformNav({ requireMfa = false }: { requireMfa?: boolean }) {
   const pathname = usePathname();
-  const links = items.map((item) => (
+  const visibleItems = requireMfa
+    ? [
+        ...items,
+        { href: "/platform/security/mfa", label: "امنیت حساب", icon: "⌑" },
+      ]
+    : items;
+  const links = visibleItems.map((item) => (
     <Link
       key={item.href}
       href={item.href}

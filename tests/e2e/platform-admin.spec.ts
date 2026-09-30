@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { once } from "node:events";
 import { expect, test } from "@playwright/test";
+import { Client } from "pg";
 import { currentTotp } from "../helpers/totp";
 import { workerDiagnostics } from "../helpers/worker-diagnostics";
 
@@ -130,7 +131,68 @@ async function stopWorker(child: ChildProcess): Promise<void> {
   }
 }
 
-test("platform and tenant users retain MFA, isolation, RBAC, invitations, and portal boundaries", async ({
+test("platform admin password login respects the MFA setting", async ({
+  page,
+}) => {
+  const email = process.env.EVENTOS_E2E_ADMIN_EMAIL;
+  const password = process.env.EVENTOS_E2E_ADMIN_PASSWORD;
+  if (!email || !password)
+    throw new Error("E2E admin credentials are missing.");
+  if (process.env.PLATFORM_REQUIRE_MFA !== "true") {
+    const client = new Client({
+      connectionString: process.env.CONTROL_DATABASE_URL,
+    });
+    await client.connect();
+    try {
+      await client.query(
+        `UPDATE platform_auth_users SET "twoFactorEnabled"=true WHERE email=$1`,
+        [email],
+      );
+    } finally {
+      await client.end();
+    }
+  }
+  await page.goto("/sign-in");
+  await page.getByLabel("ایمیل سازمانی").fill(email);
+  await page.getByLabel("گذرواژه", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "ورود امن به پلتفرم" }).click();
+  if (process.env.PLATFORM_REQUIRE_MFA === "true") {
+    await page.waitForURL("**/platform/security/mfa");
+    const enableResponse = page.waitForResponse((response) =>
+      response.url().includes("/api/auth/two-factor/enable"),
+    );
+    await page.getByLabel("گذرواژهٔ فعلی").fill(password);
+    await page
+      .getByRole("button", { name: "راه‌اندازی احراز هویت دو‌مرحله‌ای" })
+      .click();
+    const setup = (await (await enableResponse).json()) as { totpURI: string };
+    const secret = new URL(setup.totpURI).searchParams.get("secret");
+    if (!secret) throw new Error("TOTP enrollment returned no secret.");
+    const enrollmentCode = currentTotp(secret);
+    await page.getByLabel("کد شش‌رقمی برنامه").fill(enrollmentCode);
+    await page.getByRole("button", { name: "فعال‌سازی و ورود به پنل" }).click();
+    await page.waitForURL("**/platform");
+    await page.getByRole("button", { name: "خروج امن" }).click();
+    await page.waitForURL("**/sign-in");
+    await page.getByLabel("ایمیل سازمانی").fill(email);
+    await page.getByLabel("گذرواژه", { exact: true }).fill(password);
+    await page.getByRole("button", { name: "ورود امن به پلتفرم" }).click();
+    await expect(page.getByLabel("کد برنامهٔ احراز هویت")).toBeVisible();
+    await expect
+      .poll(() => currentTotp(secret), { timeout: 35_000 })
+      .not.toBe(enrollmentCode);
+    await page.getByLabel("کد برنامهٔ احراز هویت").fill(currentTotp(secret));
+    await page.getByRole("button", { name: "تأیید و ورود" }).click();
+  } else {
+    await expect(page.getByLabel("کد برنامهٔ احراز هویت")).toHaveCount(0);
+  }
+  await page.waitForURL("**/platform");
+  await expect(
+    page.getByRole("heading", { name: "به پنل EventOS خوش آمدید" }),
+  ).toBeVisible();
+});
+
+test("platform and tenant users retain configurable MFA, isolation, RBAC, invitations, and portal boundaries", async ({
   page,
   request,
   browser,
@@ -155,31 +217,58 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
     await page.getByLabel("ایمیل سازمانی").fill(email);
     await page.getByLabel("گذرواژه", { exact: true }).fill(password);
     await page.getByRole("button", { name: "ورود امن به پلتفرم" }).click();
-    await page.waitForURL("**/platform/security/mfa", { timeout: 15_000 });
+    if (process.env.PLATFORM_REQUIRE_MFA === "true") {
+      await page.waitForURL("**/platform/security/mfa", { timeout: 15_000 });
 
-    const enableResponse = page.waitForResponse((response) =>
-      response.url().includes("/api/auth/two-factor/enable"),
-    );
-    await page.getByLabel("گذرواژهٔ فعلی").fill(password);
-    await page
-      .getByRole("button", { name: "راه‌اندازی احراز هویت دو‌مرحله‌ای" })
-      .click();
-    const setup = (await (await enableResponse).json()) as {
-      totpURI: string;
-      backupCodes: string[];
-      method: string;
-    };
-    expect(setup.method).toBe("totp");
-    expect(setup.backupCodes.length).toBeGreaterThan(0);
-    const secret = new URL(setup.totpURI).searchParams.get("secret");
-    expect(secret).toBeTruthy();
-    if (!secret) throw new Error("Better Auth returned no TOTP secret.");
-    await page.getByLabel("کد شش‌رقمی برنامه").fill(currentTotp(secret));
-    await page.getByRole("button", { name: "فعال‌سازی و ورود به پنل" }).click();
-    await page.waitForURL("**/platform");
-    await expect(
-      page.getByRole("heading", { name: "به پنل EventOS خوش آمدید" }),
-    ).toBeVisible();
+      const enableResponse = page.waitForResponse((response) =>
+        response.url().includes("/api/auth/two-factor/enable"),
+      );
+      await page.getByLabel("گذرواژهٔ فعلی").fill(password);
+      await page
+        .getByRole("button", { name: "راه‌اندازی احراز هویت دو‌مرحله‌ای" })
+        .click();
+      const setup = (await (await enableResponse).json()) as {
+        totpURI: string;
+        backupCodes: string[];
+        method: string;
+      };
+      expect(setup.method).toBe("totp");
+      expect(setup.backupCodes.length).toBeGreaterThan(0);
+      const secret = new URL(setup.totpURI).searchParams.get("secret");
+      expect(secret).toBeTruthy();
+      if (!secret) throw new Error("Better Auth returned no TOTP secret.");
+      const enrollmentCode = currentTotp(secret);
+      await page.getByLabel("کد شش‌رقمی برنامه").fill(enrollmentCode);
+      await page
+        .getByRole("button", { name: "فعال‌سازی و ورود به پنل" })
+        .click();
+      await page.waitForURL("**/platform");
+      await expect(
+        page.getByRole("heading", { name: "به پنل EventOS خوش آمدید" }),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "خروج امن" }).click();
+      await page.waitForURL("**/sign-in");
+      await page.getByLabel("ایمیل سازمانی").fill(email);
+      await page.getByLabel("گذرواژه", { exact: true }).fill(password);
+      await page.getByRole("button", { name: "ورود امن به پلتفرم" }).click();
+      await expect(page.getByLabel("کد برنامهٔ احراز هویت")).toBeVisible();
+      await expect
+        .poll(() => currentTotp(secret), { timeout: 35_000 })
+        .not.toBe(enrollmentCode);
+      await page.getByLabel("کد برنامهٔ احراز هویت").fill(currentTotp(secret));
+      await page.getByRole("button", { name: "تأیید و ورود" }).click();
+      await page.waitForURL("**/platform");
+      await expect(
+        page.getByRole("heading", { name: "به پنل EventOS خوش آمدید" }),
+      ).toBeVisible();
+    } else {
+      await page.waitForURL("**/platform");
+      await expect(page).not.toHaveURL(/\/platform\/security\/mfa/);
+      await expect(page.getByLabel("کد برنامهٔ احراز هویت")).toHaveCount(0);
+      await expect(
+        page.getByRole("heading", { name: "به پنل EventOS خوش آمدید" }),
+      ).toBeVisible();
+    }
     await page.goto("/platform/plans");
     await expect(page.locator("textarea")).toHaveCount(0);
     await page.getByRole("button", { name: "ویرایش طرح" }).first().click();
@@ -335,6 +424,26 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
     await expect(
       page.getByRole("heading", { name: `سلام ${ownerName}` }),
     ).toBeVisible();
+    await page.goto(`${tenantOrigin}/website`);
+    await page.getByLabel("معرفی کوتاه").fill("معرفی تازه مجموعه آزمایشی");
+    await page.getByLabel("تلفن عمومی").fill("021-12345678");
+    await page.getByLabel("رنگ اصلی").fill("#145d58");
+    await page.getByRole("button", { name: "ذخیره تغییرات" }).click();
+    await expect(page.getByRole("status")).toHaveText("تغییرات ذخیره شد.");
+    await page.goto(`${tenantOrigin}/`);
+    await expect(
+      page.getByText("معرفی تازه مجموعه آزمایشی").first(),
+    ).toBeVisible();
+    expect(
+      await page
+        .locator(".public-site")
+        .evaluate((element) =>
+          (element as HTMLElement).style.getPropertyValue("--public-primary"),
+        ),
+    ).toBe("#145d58");
+    await page.goto(`${tenantOrigin}/contact`);
+    await expect(page.getByText("021-12345678")).toBeVisible();
+    await page.goto(`${tenantOrigin}/dashboard`);
     expect(
       await page.evaluate(
         async () => (await fetch("/api/tenant/roles")).status,
@@ -689,7 +798,9 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
     await publicPage.goto(`${tenantOrigin}/events`);
     await expect(publicPage.getByText(phase3RunTitle).first()).toBeVisible();
     await publicPage.goto(`${tenantOrigin}/events/${phase3RunId}`);
-    await expect(publicPage.getByRole("heading", { name: phase3RunTitle })).toBeVisible();
+    await expect(
+      publicPage.getByRole("heading", { name: phase3RunTitle }),
+    ).toBeVisible();
     await publicContext.close();
     await page.goto(`${tenantOrigin}/calendar`);
     await expect(page.getByText(phase3SessionTitle)).toBeVisible();
@@ -808,22 +919,23 @@ test("platform and tenant users retain MFA, isolation, RBAC, invitations, and po
     ).toBe(404);
     await secondContext.close();
     const crossTenantSession = await request.get(
-      `${secondOrigin}/api/tenant/identity/staff`,
+      "http://127.0.0.1:3000/api/tenant/identity/staff",
       {
         headers: {
+          host: `${secondSlug}.localhost:3000`,
           cookie: `${ownerCookie.name}=${ownerCookie.value}`,
         },
       },
     );
     expect(crossTenantSession.status()).toBe(401);
     const wrongHostAcceptance = await request.post(
-      `${secondOrigin}/api/tenant/invitations/accept`,
+      "http://127.0.0.1:3000/api/tenant/invitations/accept",
       {
         data: {
           token: wrongHostToken,
           password: "wrong host attempt password",
         },
-        headers: { origin: secondOrigin },
+        headers: { host: `${secondSlug}.localhost:3000`, origin: secondOrigin },
       },
     );
     expect(wrongHostAcceptance.status()).toBe(400);

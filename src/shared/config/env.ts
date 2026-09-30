@@ -46,7 +46,7 @@ const serverConfigSchema = z
       .max(253),
     PLATFORM_REQUIRE_MFA: z
       .enum(["true", "false"])
-      .default("true")
+      .default("false")
       .transform((value) => value === "true"),
     TRUSTED_PROXY_CIDRS: z.string().default(""),
     SMTP_URL: z.string().optional().default(""),
@@ -90,14 +90,6 @@ const serverConfigSchema = z
         message: "Test mail transport is unavailable in production",
       });
     }
-    if (config.NODE_ENV === "production" && !config.PLATFORM_REQUIRE_MFA) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["PLATFORM_REQUIRE_MFA"],
-        message: "Platform administrator MFA cannot be disabled in production",
-      });
-    }
-
     if (
       config.NODE_ENV === "production" &&
       (!config.SMTP_URL || !config.SMTP_FROM)

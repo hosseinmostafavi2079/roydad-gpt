@@ -95,7 +95,11 @@ export async function requirePlatformPageAdmin(options?: {
     ) {
       throw error;
     }
-    if (error instanceof DomainError && error.code === "FORBIDDEN") {
+    if (
+      error instanceof DomainError &&
+      error.code === "FORBIDDEN" &&
+      getServerConfig().PLATFORM_REQUIRE_MFA
+    ) {
       redirect("/platform/security/mfa");
     }
     throw error;

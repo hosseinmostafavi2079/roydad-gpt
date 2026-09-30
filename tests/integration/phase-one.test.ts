@@ -73,6 +73,8 @@ import {
 import { GET as getTenantRoles } from "@/app/api/tenant/roles/route";
 import { POST as acceptTenantInvitationRoute } from "@/app/api/tenant/invitations/accept/route";
 import { workerDiagnostics } from "../helpers/worker-diagnostics";
+import { PUT as putWebsiteProfile } from "@/app/api/tenant/website/route";
+import { getWebsiteProfile } from "@/modules/public-site/profile";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 
@@ -603,6 +605,43 @@ describe("Phase 1 real PostgreSQL gates", () => {
     );
     expect(ownerActor.tenantId).toBe(first.tenant.id);
     expect(ownerActor.permissions.size).toBe(42);
+    const websiteBefore = await getWebsiteProfile(ownerContext);
+    const websiteOrigin = `http://${slugA}.localhost:3000`;
+    const websiteInput = {
+      ...websiteBefore,
+      shortDescription: "معرفی عمومی آزمایشی",
+      phone: "021-00000000",
+      primaryColor: "#145d58",
+      heroEnabled: false,
+    };
+    const websiteRequest = (input: unknown, cookie = ownerCookie) =>
+      new Request(`${websiteOrigin}/api/tenant/website`, {
+        method: "PUT",
+        headers: {
+          host: `${slugA}.localhost:3000`,
+          origin: websiteOrigin,
+          cookie,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(input),
+      });
+    const websiteSave = await putWebsiteProfile(websiteRequest(websiteInput));
+    expect(websiteSave.status).toBe(200);
+    expect(await getWebsiteProfile(ownerContext)).toMatchObject({
+      shortDescription: "معرفی عمومی آزمایشی",
+      phone: "021-00000000",
+      primaryColor: "#145d58",
+      heroEnabled: false,
+    });
+    const invalidWebsite = await putWebsiteProfile(
+      websiteRequest({ ...websiteInput, primaryColor: "javascript:alert(1)" }),
+    );
+    expect(invalidWebsite.status).toBe(400);
+    expect((await invalidWebsite.json()).error.message).toContain("رنگ اصلی");
+    const unauthenticatedWebsite = await putWebsiteProfile(
+      websiteRequest(websiteInput, ""),
+    );
+    expect(unauthenticatedWebsite.status).toBe(401);
     const participantEmail = `participant-${randomUUID()}@example.test`;
     const authRequest = (
       path: string,

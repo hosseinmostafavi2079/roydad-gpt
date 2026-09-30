@@ -3,11 +3,13 @@ import { requirePlatformPageAdmin } from "@/infrastructure/auth/platform-session
 import { PlatformNav } from "@/app/_components/platform-nav";
 import { SignOutButton } from "@/app/_components/sign-out-button";
 import { MobileDrawer } from "@/app/_components/mobile-drawer";
+import { getServerConfig } from "@/shared/config/env";
 
 export default async function PlatformLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   const actor = await requirePlatformPageAdmin();
+  const requireMfa = getServerConfig().PLATFORM_REQUIRE_MFA;
   const account = (
     <>
       <div className="admin-chip">
@@ -35,7 +37,7 @@ export default async function PlatformLayout({
         </Link>
         <div>
           <p className="nav-group-title">مدیریت پلتفرم</p>
-          <PlatformNav />
+          <PlatformNav requireMfa={requireMfa} />
         </div>
         <div className="sidebar-bottom">{account}</div>
       </aside>
@@ -43,7 +45,7 @@ export default async function PlatformLayout({
         <div className="mobile-top">
           <MobileDrawer
             brand="EventOS"
-            navigation={<PlatformNav />}
+            navigation={<PlatformNav requireMfa={requireMfa} />}
             account={account}
           />
           <Link href="/platform" className="brand">

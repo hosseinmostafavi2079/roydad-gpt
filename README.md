@@ -2,7 +2,7 @@
 
 EventOS is a Persian-first, RTL platform for managing organizations and their events. This repository is built phase by phase from `EVENTOS_CODEX_MASTER_SPEC.md`. Phase 3 adds tenant-local programs, runs, training sessions, instructor scheduling, venues, rooms, calendar, and a local demo. Enrollment and commerce remain later-phase work.
 
-Tenant sign-in is resolved by hostname and uses the tenant's isolated PostgreSQL database. Tenant accounts can hold multiple normalized roles; role permissions are evaluated server-side with default deny. Platform administrators remain separate from tenant users and require production TOTP MFA.
+Tenant sign-in is resolved by hostname and uses the tenant's isolated PostgreSQL database. Tenant accounts can hold multiple normalized roles; role permissions are evaluated server-side with default deny. Platform administrators remain separate from tenant users. Authenticator MFA is optional and disabled by default.
 
 ## Requirements
 
@@ -71,10 +71,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\uninstall-local-au
 
 For active coding and hot reload, stop the persistent app and worker with `pnpm local:down`, start PostgreSQL with `docker compose up -d postgres`, then run `pnpm dev` and `pnpm worker:provisioning` in separate terminals. `pnpm dev` is a separate development mode; the persistent Docker service runs the production build with `NODE_ENV=production`.
 
-`demo:setup` provisions and migrates only the local `demo` tenant, seeds synthetic Phase 3 content, and prints four local logins. It stores generated passwords in the Git-ignored `.demo-credentials.local` file. Keep that file private. Run `pnpm demo:setup` again to repair missing sample data without resetting existing tenant databases.
+`demo:setup` provisions and migrates only the local `demo` tenant, seeds synthetic demo content, and prints four local logins. It stores generated passwords in the Git-ignored `.demo-credentials.local` file. Keep that file private. The Platform Admin signs in with email and password directly. Run `pnpm demo:setup` again to repair missing sample data without resetting existing tenant databases. Stop any `pnpm dev` process before using the Docker app; both modes use port 3000 and may answer different `localhost` addresses.
 
 Open `http://localhost:3000/sign-in` for the Platform Super Admin, or `http://demo.localhost:3000/login` for the Organization Owner, Instructor, and Participant. Chrome on Windows resolves `demo.localhost` to the loopback interface. The printed login summary and `.demo-credentials.local` identify each account. The owner can create programs, runs, sessions, venues, and rooms; the instructor can inspect assigned runs, sessions, and calendar entries. The participant has a Phase 2 portal shell.
 
-The persistent service keeps production platform MFA enforcement. On the first platform admin login, follow the TOTP enrollment screen and save the recovery codes. Configure a real TLS `SMTP_URL` in ignored `.env` and rerun `pnpm local:setup` before issuing new invitations; without SMTP, delivery fails safely. Docker never selects the test mail transport.
+`PLATFORM_REQUIRE_MFA=false` is the default for local and production use. Set it to `true` explicitly to restore mandatory Platform Admin TOTP enrollment and challenge. Run `pnpm local:setup` and rebuild the app after changing this setting. Configure a real TLS `SMTP_URL` in ignored `.env` and rerun `pnpm local:setup` before issuing new invitations; without SMTP, delivery fails safely. Docker never selects the test mail transport.
 
 To remove only the local demo tenant and its generated credentials, stop `pnpm dev` and run `pnpm demo:reset --confirm-demo`. The reset refuses production, CI, nonlocal database hosts, other tenant slugs, and missing explicit confirmation. Then run `pnpm demo:setup` to recreate it. Production never creates demo users.

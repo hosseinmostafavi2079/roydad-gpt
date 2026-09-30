@@ -60,7 +60,7 @@ jobs:
             BETTER_AUTH_SECRET: randomBytes(48).toString("hex"),
             TENANT_BOOTSTRAP_ENCRYPTION_KEY: randomBytes(32).toString("hex"),
             PLATFORM_BASE_DOMAIN: "localhost",
-            PLATFORM_REQUIRE_MFA: "true",
+            PLATFORM_REQUIRE_MFA: "false",
             TRUSTED_PROXY_CIDRS: "",
             SMTP_URL: "",
             MAIL_TRANSPORT: "smtp",
@@ -76,11 +76,36 @@ jobs:
             .map(([name, value]) => `${name}=${value}`)
             .join("\n");
           writeFileSync(".env", `${contents}\n`, { mode: 0o600 });
+          const containerUrl = (value) => {
+            const url = new URL(value);
+            url.hostname = "postgres";
+            url.port = "5432";
+            return url.toString();
+          };
+          const runtime = {
+            ...config,
+            NODE_ENV: "production",
+            SMTP_URL: "smtps://localhost:465",
+            CONTROL_DATABASE_URL: containerUrl(config.CONTROL_DATABASE_URL),
+            CONTROL_MIGRATION_DATABASE_URL: containerUrl(config.CONTROL_MIGRATION_DATABASE_URL),
+            CONTROL_QUEUE_DATABASE_URL: containerUrl(config.CONTROL_QUEUE_DATABASE_URL),
+            TENANT_PROVISIONING_DATABASE_URL: containerUrl(config.TENANT_PROVISIONING_DATABASE_URL),
+            TENANT_RUNTIME_DATABASE_URL: containerUrl(config.TENANT_RUNTIME_DATABASE_URL),
+            TENANT_MIGRATION_DATABASE_URL: containerUrl(config.TENANT_MIGRATION_DATABASE_URL),
+          };
+          writeFileSync(
+            ".env.local-runtime",
+            `${Object.entries(runtime).map(([name, value]) => `${name}=${JSON.stringify(value)}`).join("\n")}\n`,
+            { mode: 0o600 },
+          );
           appendFileSync(
             process.env.GITHUB_ENV,
             `${Object.entries(config).map(([name, value]) => `${name}=${value}`).join("\n")}\n`,
           );
           NODE
+
+      - name: Validate CI Compose configuration
+        run: docker compose config --quiet
 
       - name: Start PostgreSQL
         run: docker compose up -d postgres
@@ -124,6 +149,10 @@ jobs:
 
       - name: Dependency vulnerability scan
         run: pnpm audit:deps
+
+      - name: Remove temporary CI runtime env
+        if: always()
+        run: rm -f .env .env.local-runtime
 
   secrets:
     name: Secret scan

@@ -12,6 +12,8 @@ process.env.EVENTOS_TEST_MAIL_OUTBOX ||= path.join(
   `eventos-e2e-mail-${randomUUID()}.jsonl`,
 );
 process.env.MAIL_TRANSPORT = "test";
+process.env.PLATFORM_REQUIRE_MFA =
+  process.env.EVENTOS_E2E_REQUIRE_PLATFORM_MFA === "true" ? "true" : "false";
 
 export default defineConfig({
   testDir: "./tests/e2e",

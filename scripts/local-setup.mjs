@@ -86,7 +86,16 @@ function createEnv() {
 }
 
 function createContainerEnv() {
-  const existingEnv = readFileSync(envPath, "utf8");
+  let existingEnv = readFileSync(envPath, "utf8");
+  const requireMfa = process.env.PLATFORM_REQUIRE_MFA === "true";
+  const mfaLine = `PLATFORM_REQUIRE_MFA=${requireMfa}`;
+  const updatedEnv = /^PLATFORM_REQUIRE_MFA=.*$/m.test(existingEnv)
+    ? existingEnv.replace(/^PLATFORM_REQUIRE_MFA=.*$/m, mfaLine)
+    : `${existingEnv.trimEnd()}\n${mfaLine}\n`;
+  if (updatedEnv !== existingEnv) {
+    writeFileSync(envPath, updatedEnv, { mode: 0o600 });
+    existingEnv = updatedEnv;
+  }
   if (!/^TENANT_BOOTSTRAP_ENCRYPTION_KEY=/m.test(existingEnv)) {
     writeFileSync(
       envPath,
@@ -147,7 +156,8 @@ function createContainerEnv() {
   values.SMTP_URL = process.env.SMTP_URL || "smtps://localhost:465";
   values.NODE_ENV = "production";
   values.MAIL_TRANSPORT = "smtp";
-  values.PLATFORM_REQUIRE_MFA = "true";
+  values.PLATFORM_REQUIRE_MFA =
+    process.env.PLATFORM_REQUIRE_MFA === "true" ? "true" : "false";
   const output = `${Object.entries(values)
     .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
     .join("\n")}\n`;
@@ -184,5 +194,7 @@ console.log("Platform: http://localhost:3000/sign-in");
 console.log("Tenant: http://demo.localhost:3000/login");
 console.log("Demo logins: .demo-credentials.local (ignored by Git)");
 console.log(
-  "Platform administrators must enroll TOTP on first production-mode login.",
+  process.env.PLATFORM_REQUIRE_MFA === "true"
+    ? "Platform administrators must enroll TOTP on first login."
+    : "Platform administrators can sign in with email and password.",
 );

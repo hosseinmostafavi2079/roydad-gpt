@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listTenants } from "@/modules/platform/tenants/service";
 import { listPlans } from "@/modules/platform/plans/service";
+import { getServerConfig } from "@/shared/config/env";
 
 export const metadata = { title: "نمای کلی" };
 
@@ -132,24 +133,26 @@ export default async function PlatformHome() {
               ))}
           </div>
         </article>
-        <article className="card card-pad">
-          <div className="section-header">
-            <div>
-              <h2>امنیت حساب مدیر</h2>
-              <p>حساب‌های مدیریتی با احراز هویت دو‌مرحله‌ای محافظت می‌شوند.</p>
+        {getServerConfig().PLATFORM_REQUIRE_MFA && (
+          <article className="card card-pad">
+            <div className="section-header">
+              <div>
+                <h2>امنیت حساب مدیر</h2>
+                <p>حساب‌های مدیریتی با احراز هویت دو‌مرحله‌ای محافظت می‌شوند.</p>
+              </div>
+              <Link
+                className="btn btn-secondary btn-small"
+                href="/platform/security/mfa"
+              >
+                تنظیم امنیت
+              </Link>
             </div>
-            <Link
-              className="btn btn-secondary btn-small"
-              href="/platform/security/mfa"
-            >
-              تنظیم امنیت
-            </Link>
-          </div>
-          <div className="notice">
-            نشست‌های مدیریتی کوتاه‌مدت هستند و عملیات حساس در گزارش ممیزی ثبت
-            می‌شوند.
-          </div>
-        </article>
+            <div className="notice">
+              نشست‌های مدیریتی کوتاه‌مدت هستند و عملیات حساس در گزارش ممیزی ثبت
+              می‌شوند.
+            </div>
+          </article>
+        )}
       </section>
     </main>
   );

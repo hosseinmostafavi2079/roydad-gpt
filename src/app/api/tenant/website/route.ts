@@ -1,7 +1,7 @@
 import {
   getWebsiteProfile,
   updateWebsiteProfile,
-  websiteProfileInput,
+  parseWebsiteProfileInput,
 } from "@/modules/public-site/profile";
 import { parseJson, withTenantRoute } from "@/shared/http/tenant-route";
 
@@ -22,7 +22,7 @@ export function PUT(request: Request): Promise<Response> {
       updateWebsiteProfile(
         tenant,
         actor,
-        await parseJson(request, websiteProfileInput),
+        await parseJson(request, { parse: parseWebsiteProfileInput }),
         requestId,
       ),
     "website.manage",

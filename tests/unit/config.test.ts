@@ -23,19 +23,25 @@ const validConfig = {
 describe("server configuration", () => {
   it("parses required URLs and defaults safely", () => {
     const parsed = parseServerConfig(validConfig);
-    expect(parsed.PLATFORM_REQUIRE_MFA).toBe(true);
+    expect(parsed.PLATFORM_REQUIRE_MFA).toBe(false);
     expect(parsed.TENANT_POOL_LIMIT).toBe(16);
     expect(parsed.MAIL_TRANSPORT).toBe("smtp");
   });
 
-  it("rejects production without mandatory MFA and secure mail delivery", () => {
-    expect(() =>
+  it("allows optional MFA in production and keeps secure mail delivery", () => {
+    expect(
       parseServerConfig({
         ...validConfig,
         NODE_ENV: "production",
         PLATFORM_REQUIRE_MFA: "false",
-      }),
-    ).toThrow(/MFA cannot be disabled/);
+        SMTP_URL: "smtps://mail.example.com",
+        TENANT_BOOTSTRAP_ENCRYPTION_KEY: "a".repeat(32),
+      }).PLATFORM_REQUIRE_MFA,
+    ).toBe(false);
+    expect(
+      parseServerConfig({ ...validConfig, PLATFORM_REQUIRE_MFA: "true" })
+        .PLATFORM_REQUIRE_MFA,
+    ).toBe(true);
     expect(() =>
       parseServerConfig({ ...validConfig, NODE_ENV: "production" }),
     ).toThrow(/SMTP/);

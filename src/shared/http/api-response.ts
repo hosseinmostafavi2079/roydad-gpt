@@ -18,8 +18,11 @@ export function jsonResponse(data: unknown, init: ResponseInit = {}): Response {
   return Response.json(data, { ...init, headers });
 }
 
-export function errorResponse(error: unknown, request: Request): Response {
-  const requestId = requestIdFrom(request);
+export function errorResponse(
+  error: unknown,
+  request: Request,
+  requestId = requestIdFrom(request),
+): Response {
   if (error instanceof DomainError) {
     return jsonResponse(
       { error: { code: error.code, message: error.message, requestId } },

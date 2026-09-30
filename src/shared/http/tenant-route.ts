@@ -51,7 +51,7 @@ export async function withTenantRoute<T>(
       { headers: { "x-request-id": requestId } },
     );
   } catch (error) {
-    return errorResponse(error, request);
+    return errorResponse(error, request, requestId);
   }
 }
 

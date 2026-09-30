@@ -35,7 +35,7 @@ services:
     environment:
       NODE_ENV: production
       MAIL_TRANSPORT: smtp
-      PLATFORM_REQUIRE_MFA: "true"
+      PLATFORM_REQUIRE_MFA: ${PLATFORM_REQUIRE_MFA:-false}
       HOSTNAME: 0.0.0.0
       PORT: "3000"
     ports:
@@ -61,7 +61,7 @@ services:
     environment:
       NODE_ENV: production
       MAIL_TRANSPORT: smtp
-      PLATFORM_REQUIRE_MFA: "true"
+      PLATFORM_REQUIRE_MFA: ${PLATFORM_REQUIRE_MFA:-false}
     depends_on:
       postgres:
         condition: service_healthy

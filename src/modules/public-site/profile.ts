@@ -43,6 +43,41 @@ export const websiteProfileInput = z.strictObject({
 
 export type WebsiteProfile = z.infer<typeof websiteProfileInput>;
 
+const websiteFieldNames: Record<string, string> = {
+  displayName: "نام نمایشی",
+  shortDescription: "معرفی کوتاه",
+  about: "درباره مجموعه",
+  logoUrl: "نشانی لوگو",
+  coverUrl: "نشانی تصویر اصلی",
+  faviconUrl: "نشانی نشان مرورگر",
+  phone: "تلفن",
+  email: "ایمیل",
+  address: "نشانی",
+  websiteUrl: "نشانی وب‌سایت",
+  socialUrl: "شبکه اجتماعی",
+  contactHours: "ساعت پاسخ‌گویی",
+  footerDescription: "متن پایین صفحه",
+  primaryColor: "رنگ اصلی",
+  secondaryColor: "رنگ دوم",
+  accentColor: "رنگ تأکیدی",
+  heroEnabled: "نمایش معرفی",
+  featuredEnabled: "نمایش برنامه‌ها",
+  aboutEnabled: "نمایش درباره ما",
+  contactEnabled: "نمایش راه‌های ارتباطی",
+  cardStyle: "سبک کارت",
+  radiusStyle: "گردی گوشه‌ها",
+};
+
+export function parseWebsiteProfileInput(value: unknown): WebsiteProfile {
+  const parsed = websiteProfileInput.safeParse(value);
+  if (parsed.success) return parsed.data;
+  const path = String(parsed.error.issues[0]?.path[0] ?? "اطلاعات وب‌سایت");
+  throw new DomainError(
+    "VALIDATION_FAILED",
+    `مقدار «${websiteFieldNames[path] ?? "اطلاعات وب‌سایت"}» نامعتبر است.`,
+  );
+}
+
 const selectProfile = `SELECT display_name AS "displayName", short_description AS "shortDescription",
   about, logo_url AS "logoUrl", cover_url AS "coverUrl", favicon_url AS "faviconUrl",
   phone, email, address, website_url AS "websiteUrl", social_url AS "socialUrl",
@@ -74,7 +109,7 @@ export async function updateWebsiteProfile(
   if (actor.tenantId !== tenant.tenantId)
     throw new DomainError("FORBIDDEN", "Wrong tenant.");
   authorize(actor.permissions, "website.manage");
-  const value = websiteProfileInput.parse(input);
+  const value = parseWebsiteProfileInput(input);
   const client = await getTenantPool(tenant).connect();
   try {
     await client.query("BEGIN");
@@ -113,8 +148,8 @@ export async function updateWebsiteProfile(
     );
     await client.query(
       `INSERT INTO tenant_audit_logs (tenant_id, actor_id, action, target_type, target_id, request_id)
-       VALUES ($1,$2,'website.updated','WEBSITE',$1,$3)`,
-      [tenant.tenantId, actor.id, requestId],
+       VALUES ($1,$2,'website.updated','WEBSITE',$4,$3)`,
+      [tenant.tenantId, actor.id, requestId, tenant.tenantId],
     );
     await client.query("COMMIT");
     return value;

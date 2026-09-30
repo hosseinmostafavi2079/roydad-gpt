@@ -35,6 +35,12 @@ if (process.env.NODE_ENV === "production" || process.env.CI)
 const credentialPath = path.resolve(".demo-credentials.local");
 const credentialSchema = z.strictObject({
   platform: z.strictObject({ email: z.email(), password: z.string().min(24) }),
+  platformMfa: z
+    .strictObject({
+      secret: z.string().regex(/^[A-Z2-7]{32,64}$/),
+      backupCodes: z.array(z.string()).length(10),
+    })
+    .optional(),
   owner: z.strictObject({ email: z.email(), password: z.string().min(24) }),
   instructor: z.strictObject({
     email: z.email(),
@@ -46,7 +52,7 @@ const credentialSchema = z.strictObject({
   }),
 });
 const randomPassword = () => randomBytes(32).toString("base64url");
-const credentials = existsSync(credentialPath)
+const existingCredentials = existsSync(credentialPath)
   ? credentialSchema.parse(JSON.parse(readFileSync(credentialPath, "utf8")))
   : credentialSchema.parse({
       platform: {
@@ -63,6 +69,7 @@ const credentials = existsSync(credentialPath)
         password: randomPassword(),
       },
     });
+const { platformMfa: _previousMfa, ...credentials } = existingCredentials;
 const config = getServerConfig();
 for (const key of [
   "CONTROL_DATABASE_URL",
@@ -82,17 +89,19 @@ if (
   new URL(config.BETTER_AUTH_URL).hostname !== "localhost"
 )
   throw new Error("Demo setup requires localhost hostnames.");
-if (!existsSync(credentialPath))
-  writeFileSync(credentialPath, `${JSON.stringify(credentials, null, 2)}\n`, {
-    mode: 0o600,
-    flag: "wx",
-  });
-if (!existsSync(".env.development.local"))
-  writeFileSync(
-    ".env.development.local",
-    "# Local demo convenience; production configuration rejects this setting.\nPLATFORM_REQUIRE_MFA=false\n",
-    { mode: 0o600, flag: "wx" },
+writeFileSync(credentialPath, `${JSON.stringify(credentials, null, 2)}\n`, {
+  mode: 0o600,
+});
+const developmentEnvPath = ".env.development.local";
+if (existsSync(developmentEnvPath)) {
+  const developmentEnv = readFileSync(developmentEnvPath, "utf8");
+  const securedEnv = developmentEnv.replace(
+    /^PLATFORM_REQUIRE_MFA=true\s*$/m,
+    "PLATFORM_REQUIRE_MFA=false",
   );
+  if (securedEnv !== developmentEnv)
+    writeFileSync(developmentEnvPath, securedEnv, { mode: 0o600 });
+}
 
 async function ensurePlatformAdmin() {
   const pool = getControlPool();
@@ -139,6 +148,14 @@ async function ensurePlatformAdmin() {
     await client.query(`DELETE FROM platform_auth_sessions WHERE "userId"=$1`, [
       admin.auth_user_id,
     ]);
+    await client.query(
+      `DELETE FROM platform_admin_two_factors WHERE "userId"=$1`,
+      [admin.auth_user_id],
+    );
+    await client.query(
+      `UPDATE platform_auth_users SET "twoFactorEnabled"=false,"updatedAt"=now() WHERE id=$1`,
+      [admin.auth_user_id],
+    );
     await client.query("COMMIT");
     return admin.id;
   } catch (error) {
@@ -285,7 +302,7 @@ async function ensureDemoTenant(adminId: string) {
 async function ensureTenantUser(
   tenantId: string,
   databaseName: string,
-  identity: keyof typeof credentials,
+  identity: "platform" | "owner" | "instructor" | "participant",
   roleCode: string,
 ) {
   const profile = credentials[identity],
