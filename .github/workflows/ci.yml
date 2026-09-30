@@ -92,7 +92,7 @@ jobs:
             ...config,
             NODE_ENV: "production",
             SMTP_URL: "smtps://localhost:465",
-            MEDIA_S3_ENDPOINT: "http://minio:9000",
+            MEDIA_S3_ENDPOINT: "http://storage:9090",
             CONTROL_DATABASE_URL: containerUrl(config.CONTROL_DATABASE_URL),
             CONTROL_MIGRATION_DATABASE_URL: containerUrl(config.CONTROL_MIGRATION_DATABASE_URL),
             CONTROL_QUEUE_DATABASE_URL: containerUrl(config.CONTROL_QUEUE_DATABASE_URL),
@@ -115,7 +115,7 @@ jobs:
         run: docker compose config --quiet
 
       - name: Start PostgreSQL and local object storage
-        run: docker compose up -d postgres minio
+        run: docker compose up -d postgres storage
 
       - name: Wait for PostgreSQL
         run: |

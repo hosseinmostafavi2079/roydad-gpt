@@ -30,7 +30,7 @@ function storage() {
     !(
       config.MEDIA_S3_ALLOW_HTTP_LOCAL &&
       config.PLATFORM_BASE_DOMAIN === "localhost" &&
-      ["localhost", "127.0.0.1", "minio"].includes(endpoint.hostname)
+      ["localhost", "127.0.0.1", "storage"].includes(endpoint.hostname)
     )
   )
     throw new DomainError(

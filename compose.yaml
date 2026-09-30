@@ -26,19 +26,19 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z
+  storage:
+    image: adobe/s3mock:5.1.0
     restart: unless-stopped
-    command: server /data --address :9000
     environment:
-      MINIO_ROOT_USER: ${MEDIA_S3_ACCESS_KEY_ID:?Set local media access key}
-      MINIO_ROOT_PASSWORD: ${MEDIA_S3_SECRET_ACCESS_KEY:?Set local media secret}
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: ${MEDIA_S3_BUCKET:?Set local media bucket}
+      COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /s3mockroot
+      COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT: "true"
     ports:
-      - "127.0.0.1:59000:9000"
+      - "127.0.0.1:59000:9090"
     volumes:
-      - eventos-media:/data
+      - eventos-s3mock:/s3mockroot
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/favicon.ico"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -48,6 +48,7 @@ services:
   app:
     build: .
     image: eventos-local:latest
+    profiles: ["application"]
     restart: unless-stopped
     env_file:
       - .env.local-runtime
@@ -73,6 +74,7 @@ services:
 
   worker:
     image: eventos-local:latest
+    profiles: ["application"]
     restart: unless-stopped
     command: ["node", "--conditions=react-server", "--import=tsx", "scripts/provisioning-worker.ts"]
     env_file:
@@ -89,4 +91,4 @@ services:
 
 volumes:
   eventos-postgres:
-  eventos-media:
+  eventos-s3mock:

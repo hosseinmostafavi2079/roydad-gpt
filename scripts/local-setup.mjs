@@ -175,7 +175,7 @@ function createContainerEnv() {
   values.MAIL_TRANSPORT = "smtp";
   values.PLATFORM_REQUIRE_MFA =
     process.env.PLATFORM_REQUIRE_MFA === "true" ? "true" : "false";
-  values.MEDIA_S3_ENDPOINT = "http://minio:9000";
+  values.MEDIA_S3_ENDPOINT = "http://storage:9090";
   for (const key of [
     "MEDIA_S3_REGION",
     "MEDIA_S3_BUCKET",
@@ -197,7 +197,7 @@ function createContainerEnv() {
 createEnv();
 createContainerEnv();
 run("docker", ["info", "--format", "{{.ServerVersion}}"]);
-run("docker", ["compose", "up", "-d", "--wait", "postgres", "minio"]);
+run("docker", ["compose", "up", "-d", "--wait", "postgres", "storage"]);
 const scriptEnv = {
   ...process.env,
   NODE_ENV: "development",

@@ -24,7 +24,7 @@
     "demo:reset": "node --conditions=react-server --import=tsx scripts/demo-reset.ts",
     "local:setup": "node scripts/local-setup.mjs",
     "local:build": "docker compose build app worker",
-    "local:up": "docker compose up -d --no-build",
+    "local:up": "docker compose --profile application up -d --no-build",
     "local:down": "docker compose down",
     "local:logs": "docker compose logs -f app worker postgres",
     "worker:provisioning": "node --conditions=react-server --import=tsx scripts/provisioning-worker.ts",

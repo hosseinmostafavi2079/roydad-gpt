@@ -42,6 +42,7 @@ import {
   getTenantPool,
   tenantPoolCacheSize,
 } from "@/infrastructure/db/tenant/pool";
+import { getMediaObject } from "@/infrastructure/media/s3";
 import {
   getProvisioningBoss,
   provisioningQueueName,
@@ -655,18 +656,19 @@ describe("Phase 1 real PostgreSQL gates", () => {
       }),
     );
     expect(invalidSection.status).toBe(400);
+    const logoBytes = Uint8Array.from(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pXcAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    );
     const logo = await saveMedia(
       ownerContext,
       ownerActor,
       "WEBSITE_LOGO",
       ownerContext.tenantId,
       "image/png",
-      Uint8Array.from(
-        Buffer.from(
-          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pXcAAAAASUVORK5CYII=",
-          "base64",
-        ),
-      ),
+      logoBytes,
       randomUUID(),
     );
     expect(logo.url).toMatch(/^\/api\/media\//);
@@ -677,6 +679,17 @@ describe("Phase 1 real PostgreSQL gates", () => {
       { params: Promise.resolve({ id: logo.id }) },
     );
     expect(ownMedia.status).toBe(200);
+    expect(new Uint8Array(await ownMedia.arrayBuffer())).toEqual(logoBytes);
+    const storedLogo = await getTenantPool(ownerContext).query<{
+      object_key: string;
+    }>("SELECT object_key FROM tenant_media WHERE tenant_id=$1 AND id=$2", [
+      ownerContext.tenantId,
+      logo.id,
+    ]);
+    const logoObjectKey = storedLogo.rows[0]?.object_key;
+    expect(logoObjectKey).toBeDefined();
+    if (!logoObjectKey) throw new Error("Uploaded logo object key is missing.");
+    expect(await getMediaObject(logoObjectKey)).toEqual(logoBytes);
     const profileWithLogo = await putWebsiteProfile(
       websiteRequest({ ...websiteInput, logoUrl: logo.url }),
     );
@@ -1233,13 +1246,22 @@ describe("Phase 1 real PostgreSQL gates", () => {
       { params: Promise.resolve({ id: logo.id }) },
     );
     expect(wrongMedia.status).toBe(404);
-    await removeMedia(
+    const removedLogo = await removeMedia(
       ownerContext,
       ownerActor,
       "WEBSITE_LOGO",
       ownerContext.tenantId,
       randomUUID(),
     );
+    expect(removedLogo.removed).toBe(true);
+    await expect(getMediaObject(logoObjectKey)).rejects.toThrow();
+    const deletedMedia = await getPublicMedia(
+      new Request(`http://${slugA}.localhost:3000${logo.url}`, {
+        headers: { host: `${slugA}.localhost:3000` },
+      }),
+      { params: Promise.resolve({ id: logo.id }) },
+    );
+    expect(deletedMedia.status).toBe(404);
     expect(contextA.features.custom_domain).toBe(false);
     for (const tenantId of [first.tenant.id, second.tenant.id]) {
       await getControlPool().query(
