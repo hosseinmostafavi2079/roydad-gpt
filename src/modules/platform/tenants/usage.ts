@@ -16,7 +16,10 @@ export async function getTenantUsage(tenantId: string) {
   if (!row) throw new DomainError("NOT_FOUND", "Tenant not found.");
   if (!row.migration_version) return null;
   const phaseFive =
-    row.migration_version === "0008_phase5_attendance_certificates";
+    row.migration_version === "0008_phase5_attendance_certificates" ||
+    row.migration_version === "0009_phase6_payments" ||
+    row.migration_version === "0010_phase6_coupon_reservations" ||
+    row.migration_version === "0011_phase6_payment_lifecycle";
   const result = await getTenantPool({
     tenantId,
     databaseName: row.database_name,

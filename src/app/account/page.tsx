@@ -7,6 +7,7 @@ import { TenantSignOutButton } from "@/app/_components/tenant-sign-out-button";
 import { listOwnEnrollments } from "@/modules/enrollment/repository";
 import { listOwnAttendance } from "@/modules/attendance/repository";
 import { listCertificates } from "@/modules/certificates/repository";
+import { listOwnInvoices, listOwnPayments } from "@/modules/payments/finance";
 import { requireTenantActor } from "@/modules/tenant-identity/request-auth";
 import { publicPageContext } from "@/modules/public-site/page-context";
 import { DomainError } from "@/shared/errors/domain-error";
@@ -42,6 +43,9 @@ export default async function AccountPage() {
     actor.permissions.has("certificate.self.read")
       ? await listCertificates(scope, true)
       : [];
+  const [payments, invoices] = tenant.features.payments
+    ? await Promise.all([listOwnPayments(scope), listOwnInvoices(scope)])
+    : [[], []];
   return (
     <PublicSiteShell tenant={tenant} profile={profile}>
       <section className="public-page-header">
@@ -49,6 +53,40 @@ export default async function AccountPage() {
         <h1>سلام، {actor.name}</h1>
         <p>برنامه‌های ثبت‌نام‌شده شما در این مجموعه.</p>
       </section>
+      {tenant.features.payments && (
+        <>
+          <section className="public-section">
+            <h2>پرداخت‌های من</h2>
+            <ul>
+              {payments.map((payment) => (
+                <li key={payment.id}>
+                  <Link href={`/account/payments/${payment.id}`}>
+                    {payment.run_title}
+                  </Link>
+                  {" · "}
+                  {payment.payable_amount} {payment.currency} · {payment.state}
+                </li>
+              ))}
+            </ul>
+            {!payments.length && <p>پرداختی ثبت نشده است.</p>}
+          </section>
+          <section className="public-section">
+            <h2>فاکتورهای من</h2>
+            <ul>
+              {invoices.map((invoice) => (
+                <li key={invoice.id}>
+                  {invoice.invoice_number}
+                  {" · "}
+                  <a href={`/api/tenant/payments/invoices/${invoice.id}/pdf`}>
+                    دریافت PDF
+                  </a>
+                </li>
+              ))}
+            </ul>
+            {!invoices.length && <p>فاکتوری ثبت نشده است.</p>}
+          </section>
+        </>
+      )}
       <div className="public-account-actions">
         <span>{actor.email}</span>
         <TenantSignOutButton />

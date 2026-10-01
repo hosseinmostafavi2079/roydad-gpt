@@ -45,9 +45,12 @@ async function createEnrollment(
       registration_ends_at: Date | null;
       ends_at: Date;
       registration_form_schema: unknown;
+      price_amount: string;
+      price_currency: string;
     }>(
       `SELECT r.id, r.capacity, r.waitlist_enabled, r.registration_starts_at,
-       r.registration_ends_at, r.ends_at, r.registration_form_schema
+       r.registration_ends_at, r.ends_at, r.registration_form_schema,
+       r.price_amount, r.price_currency
        FROM program_runs r JOIN programs p ON p.tenant_id=r.tenant_id AND p.id=r.program_id
        WHERE r.tenant_id=$1 AND r.id=$2 AND r.state='PUBLISHED' AND p.status='ACTIVE'
        FOR UPDATE OF r`,
@@ -84,8 +87,12 @@ async function createEnrollment(
       run.registration_form_schema,
       submittedAnswers,
     );
+    const price = BigInt(run.price_amount);
+    if (price > 0n && !tenant.features.payments)
+      throw new DomainError("FEATURE_DISABLED", "Payments are unavailable.");
     const confirmed = await client.query<{ count: number }>(
-      `SELECT count(*)::int AS count FROM enrollments WHERE tenant_id=$1 AND run_id=$2 AND status='CONFIRMED'`,
+      `SELECT count(*)::int AS count FROM enrollments WHERE tenant_id=$1 AND run_id=$2
+       AND (status='CONFIRMED' OR (status='AWAITING_PAYMENT' AND payment_expires_at > now()))`,
       [tenant.tenantId, runId],
     );
     const hasCapacity = (confirmed.rows[0]?.count ?? 0) < run.capacity;
@@ -94,10 +101,14 @@ async function createEnrollment(
         "CAPACITY_REACHED",
         "ظرفیت این برنامه تکمیل شده است.",
       );
-    const status = hasCapacity ? "CONFIRMED" : "WAITLISTED";
+    const status = hasCapacity
+      ? price > 0n
+        ? "AWAITING_PAYMENT"
+        : "CONFIRMED"
+      : "WAITLISTED";
     const inserted = await client.query<{ id: string }>(
-      `INSERT INTO enrollments (tenant_id,run_id,participant_id,status,answers,form_schema_snapshot)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb) RETURNING id`,
+      `INSERT INTO enrollments (tenant_id,run_id,participant_id,status,answers,form_schema_snapshot,payment_expires_at)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7) RETURNING id`,
       [
         tenant.tenantId,
         runId,
@@ -105,8 +116,26 @@ async function createEnrollment(
         status,
         JSON.stringify(answers),
         JSON.stringify(form),
+        status === "AWAITING_PAYMENT"
+          ? new Date(Date.now() + 15 * 60_000)
+          : null,
       ],
     );
+    if (status === "AWAITING_PAYMENT") {
+      await client.query(
+        `INSERT INTO payments
+           (tenant_id,enrollment_id,participant_id,original_amount,payable_amount,currency,idempotency_key)
+         VALUES ($1,$2,$3,$4,$4,$5,$6)`,
+        [
+          tenant.tenantId,
+          inserted.rows[0]?.id,
+          participantId,
+          price.toString(),
+          run.price_currency,
+          `enrollment:${inserted.rows[0]?.id}`,
+        ],
+      );
+    }
     await client.query(
       `INSERT INTO tenant_audit_logs (tenant_id,actor_id,action,target_type,target_id,request_id,after_state)
        VALUES ($1,$2,'enrollment.created','ENROLLMENT',$3,$4,$5::jsonb)`,
@@ -119,7 +148,20 @@ async function createEnrollment(
       ],
     );
     await client.query("COMMIT");
-    return { id: inserted.rows[0]?.id, status };
+    return {
+      id: inserted.rows[0]?.id,
+      status,
+      ...(status === "AWAITING_PAYMENT"
+        ? {
+            paymentSummary: {
+              originalAmount: price.toString(),
+              discountAmount: "0",
+              payableAmount: price.toString(),
+              currency: run.price_currency,
+            },
+          }
+        : {}),
+    };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     if (

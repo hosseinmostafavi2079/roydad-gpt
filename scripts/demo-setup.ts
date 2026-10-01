@@ -513,6 +513,8 @@ async function seedContent(
             registrationEndsAt: null,
             deliveryMode: index === 0 ? "IN_PERSON" : "ONLINE",
             capacity: index === 0 ? 24 : 1,
+            priceAmount: 0,
+            priceCurrency: "IRR",
             minimumCapacity: null,
             waitlistEnabled: index === 1,
             venueId: index === 0 ? venueId : null,

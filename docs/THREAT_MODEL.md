@@ -43,7 +43,7 @@ Last updated for Phase 2.
 
 ## Deferred threat areas
 
-Payment callback forgery, QR replay, file uploads, public registration, participant privacy workflows, and business-record authorization across program/session/enrollment relationships belong to later phases. Future features must add resource-specific authorization before exposing those records. Production controls also depend on deployment infrastructure, backup testing, secret management, monitoring, and recovery procedures.
+Participant privacy workflows beyond current authenticated records and additional business-record authorization belong to later phases. Future features must add resource-specific authorization before exposing those records. Production controls also depend on deployment infrastructure, backup testing, secret management, monitoring, and recovery procedures.
 
 ## Attendance and certificate threat update
 
@@ -55,4 +55,14 @@ Payment callback forgery, QR replay, file uploads, public registration, particip
 | Public verification leaks private records | Random 192-bit code, trusted tenant host, tenant-local throttling, minimal response, revoked/invalid indistinguishable | Real-PostgreSQL verification/revocation test |
 | Private PDF or template crosses tenant | Tenant-derived object keys, tenant-scoped metadata lookups, authenticated download | Real-PostgreSQL storage/tenant test |
 
-Payment callback forgery remains deferred. Production operational controls still require deployment-specific review.
+## Payment threat update
+
+| Threat | Mitigation | Verification |
+|---|---|---|
+| Forged or tampered callback | Server-side provider verification, stored amount/currency comparison, tenant and attempt binding, unique invoice | Unit, PostgreSQL, and browser tampering tests |
+| Expiration races with late success | Payment/enrollment row locks; expired capacity and coupon remain released; late funds recorded for operator resolution | PostgreSQL race and browser expiration tests |
+| Coupon oversubscription or duplicate settlement | Active reservation counts against limit; single transactional redemption; replay idempotency | PostgreSQL concurrency/replay and browser duplicate callback tests |
+| Cross-participant financial access | Tenant-scoped owner query and private invoice PDF authorization | PostgreSQL and browser access-denial tests |
+| Provider outage or secret leakage | Capability-gated bounded reconciliation, retry backoff, encrypted config, redacted audit/log fields | Fake-provider outage test, config and source review |
+
+Production operational controls still require deployment-specific review.

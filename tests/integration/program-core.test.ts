@@ -1,9 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { applySqlMigrations } from "@/infrastructure/db/migrations/runner";
+import { getControlPool } from "@/infrastructure/db/control/pool";
 import { applyTenantPrismaMigrations } from "@/infrastructure/db/tenant/prisma-migrations";
 import {
   closeTenantPools,
@@ -29,6 +31,24 @@ import {
 } from "@/modules/program-core/repository";
 import { sessionInput } from "@/modules/program-core/schema";
 import { enrollParticipant } from "@/modules/enrollment/repository";
+import { applyCoupon, createCoupon } from "@/modules/payments/coupons";
+import {
+  encryptProviderConfig,
+  saveProviderConfiguration,
+  setProviderEnabled,
+} from "@/modules/payments/configuration";
+import { refundPayment } from "@/modules/payments/refunds";
+import { expirePaymentReservations } from "@/modules/payments/lifecycle";
+import {
+  getInvoiceForDownload,
+  getOwnPayment,
+} from "@/modules/payments/finance";
+import { registerPaymentProviderForTests } from "@/modules/payments/registry";
+import {
+  reconcileUnresolvedPayments,
+  startPaymentAttempt,
+  verifyPaymentAttempt,
+} from "@/modules/payments/service";
 import {
   checkInWithQr,
   getSessionAttendance,
@@ -211,6 +231,8 @@ function runInput(programId: string, venueId: string, instructorId: string) {
     registrationEndsAt: null,
     deliveryMode: "IN_PERSON" as const,
     capacity: 20,
+    priceAmount: 0,
+    priceCurrency: "IRR",
     minimumCapacity: 5,
     waitlistEnabled: false,
     venueId,
@@ -293,7 +315,7 @@ describe("Phase 3 real PostgreSQL program core", () => {
     await transitionProgram(s, programId, "ACTIVE");
     expect((await getProgram(s, programId)).status).toBe("ACTIVE");
     const migration = await getTenantPool(a).query<{ schema_version: string }>(
-      "SELECT schema_version FROM tenant_metadata WHERE tenant_id=$1 AND schema_version='0008_phase5_attendance_certificates'",
+      "SELECT schema_version FROM tenant_metadata WHERE tenant_id=$1 AND schema_version='0011_phase6_payment_lifecycle'",
       [a.tenantId],
     );
     expect(migration.rowCount).toBe(1);
@@ -560,6 +582,742 @@ describe("Phase 3 real PostgreSQL program core", () => {
       ),
     ).rejects.toMatchObject({ code: "FEATURE_DISABLED" });
   });
+
+  it("creates a trusted payment snapshot and reserves paid capacity", async () => {
+    const s = scope(a);
+    const startsAt = new Date(Date.now() + 120 * day);
+    const endsAt = new Date(startsAt.getTime() + day);
+    const run = await createRun(s, {
+      ...runInput(programId, venueId, a.instructorA),
+      startsAt,
+      endsAt,
+      capacity: 1,
+      minimumCapacity: null,
+      waitlistEnabled: true,
+      deliveryMode: "ONLINE",
+      venueId: null,
+    });
+    const paidRunId = String(run.id);
+    await createSession(s, {
+      runId: paidRunId,
+      title: "Paid test session",
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 60 * 60_000),
+      timezone: "Asia/Tehran",
+      deliveryMode: "ONLINE",
+      venueId: null,
+      roomId: null,
+      instructorIds: [a.instructorA],
+      notes: "Synthetic",
+    });
+    await getTenantPool(a).query(
+      "UPDATE program_runs SET price_amount=2500,price_currency='IRR' WHERE tenant_id=$1 AND id=$2",
+      [a.tenantId, paidRunId],
+    );
+    await transitionRun(s, paidRunId, "PUBLISHED");
+    const ids = [randomUUID(), randomUUID()];
+    for (const id of ids) {
+      await getTenantPool(a).query(
+        `INSERT INTO tenant_users (id,"tenantId",name,email,"emailVerified",status)
+         VALUES ($1,$2,'Paid Participant',$3,true,'ACTIVE')`,
+        [id, a.tenantId, `${id}@example.test`],
+      );
+      await getTenantPool(a).query(
+        "INSERT INTO tenant_participant_profiles (tenant_id,user_id,display_name) VALUES ($1,$2,'Paid Participant')",
+        [a.tenantId, id],
+      );
+    }
+    const tenant = {
+      tenantId: a.tenantId,
+      databaseName: a.databaseName,
+      features: {
+        registration: true,
+        courses: true,
+        events: true,
+        waitlist: true,
+        payments: true,
+      },
+    } as TenantContext;
+    const enroll = (id: string) =>
+      enrollParticipant(
+        {
+          tenant,
+          actor: {
+            id,
+            tenantId: a.tenantId,
+            email: `${id}@example.test`,
+            name: "Paid Participant",
+            authenticationLevel: "PASSWORD",
+            permissions: new Set<string>(),
+          },
+          requestId: randomUUID(),
+        },
+        paidRunId,
+        {},
+      );
+    const firstId = ids[0];
+    const secondId = ids[1];
+    if (!firstId || !secondId)
+      throw new Error("Participant fixture is incomplete.");
+    const first = await enroll(firstId);
+    const second = await enroll(secondId);
+    expect(first.status).toBe("AWAITING_PAYMENT");
+    expect(second.status).toBe("WAITLISTED");
+    const snapshot = await getTenantPool(a).query<{
+      original_amount: string;
+      payable_amount: string;
+      currency: string;
+    }>(
+      "SELECT original_amount,payable_amount,currency FROM payments WHERE tenant_id=$1 AND enrollment_id=$2",
+      [a.tenantId, first.id],
+    );
+    expect(snapshot.rows[0]).toMatchObject({
+      original_amount: "2500",
+      payable_amount: "2500",
+      currency: "IRR",
+    });
+  });
+
+  it("reserves a limited coupon once under concurrent paid checkouts", async () => {
+    const s = scope(a);
+    const startsAt = new Date(Date.now() + 140 * day);
+    const endsAt = new Date(startsAt.getTime() + day);
+    const run = await createRun(s, {
+      ...runInput(programId, venueId, a.instructorA),
+      startsAt,
+      endsAt,
+      capacity: 2,
+      minimumCapacity: null,
+      waitlistEnabled: false,
+      deliveryMode: "ONLINE",
+      venueId: null,
+      priceAmount: 10_000,
+      priceCurrency: "IRR",
+    });
+    const paidRunId = String(run.id);
+    await createSession(s, {
+      runId: paidRunId,
+      title: "Coupon test session",
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 60 * 60_000),
+      timezone: "Asia/Tehran",
+      deliveryMode: "ONLINE",
+      venueId: null,
+      roomId: null,
+      instructorIds: [a.instructorA],
+      notes: "Synthetic",
+    });
+    await transitionRun(s, paidRunId, "PUBLISHED");
+    const tenant = {
+      tenantId: a.tenantId,
+      databaseName: a.databaseName,
+      features: {
+        registration: true,
+        courses: true,
+        events: true,
+        waitlist: false,
+        payments: true,
+      },
+    } as TenantContext;
+    const couponScope = {
+      tenant,
+      actor: { ...s.actor, permissions: new Set(["payment.manage"]) },
+      requestId: randomUUID(),
+    };
+    const coupon = await createCoupon(couponScope, {
+      code: `LIMIT${randomUUID().slice(0, 8).toUpperCase()}`,
+      discountType: "FIXED",
+      discountValue: 1500n,
+      currency: "IRR",
+      maxUses: 1,
+      startsAt: null,
+      endsAt: null,
+    });
+    const enrollments = [];
+    for (let i = 0; i < 2; i++) {
+      const id = randomUUID();
+      await getTenantPool(a).query(
+        `INSERT INTO tenant_users (id,"tenantId",name,email,"emailVerified",status)
+         VALUES ($1,$2,'Coupon Participant',$3,true,'ACTIVE')`,
+        [id, a.tenantId, `${id}@example.test`],
+      );
+      await getTenantPool(a).query(
+        "INSERT INTO tenant_participant_profiles (tenant_id,user_id,display_name) VALUES ($1,$2,'Coupon Participant')",
+        [a.tenantId, id],
+      );
+      const participantScope = {
+        tenant,
+        actor: {
+          id,
+          tenantId: a.tenantId,
+          email: `${id}@example.test`,
+          name: "Coupon Participant",
+          authenticationLevel: "PASSWORD",
+          permissions: new Set<string>(),
+        },
+        requestId: randomUUID(),
+      };
+      const enrollment = await enrollParticipant(
+        participantScope,
+        paidRunId,
+        {},
+      );
+      enrollments.push({ participantScope, enrollment });
+    }
+    const results = await Promise.allSettled(
+      enrollments.map(({ participantScope, enrollment }) => {
+        if (!enrollment.id)
+          throw new Error("Enrollment fixture is incomplete.");
+        return applyCoupon(participantScope, enrollment.id, coupon.code);
+      }),
+    );
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      results.filter((result) => result.status === "rejected"),
+    ).toHaveLength(1);
+    const reservations = await getTenantPool(a).query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM coupon_reservations WHERE tenant_id=$1 AND coupon_id=$2 AND status='ACTIVE'",
+      [a.tenantId, coupon.id],
+    );
+    expect(reservations.rows[0]?.count).toBe(1);
+    const rejectedIndex = results.findIndex(
+      (result) => result.status === "rejected",
+    );
+    const unpaid = enrollments[rejectedIndex];
+    if (!unpaid?.enrollment.id)
+      throw new Error("Unpaid enrollment fixture is missing.");
+    const fullCoupon = await createCoupon(couponScope, {
+      code: `FULL${randomUUID().slice(0, 8).toUpperCase()}`,
+      discountType: "FIXED",
+      discountValue: 10_000n,
+      currency: "IRR",
+      maxUses: 1,
+      startsAt: null,
+      endsAt: null,
+    });
+    const fullyDiscounted = await applyCoupon(
+      unpaid.participantScope,
+      unpaid.enrollment.id,
+      fullCoupon.code,
+    );
+    expect(fullyDiscounted).toMatchObject({
+      payableAmount: "0",
+      status: "CONFIRMED",
+    });
+    const fullInvoice = await getTenantPool(a).query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM invoices i JOIN payments p ON p.tenant_id=i.tenant_id AND p.id=i.payment_id
+       WHERE i.tenant_id=$1 AND p.enrollment_id=$2`,
+      [a.tenantId, unpaid.enrollment.id],
+    );
+    expect(fullInvoice.rows[0]?.count).toBe(1);
+  });
+
+  it("verifies TEST attempts, preserves retries, issues one invoice, and refunds without crossing tenants", async () => {
+    const control = getControlPool();
+    await control.query(
+      `INSERT INTO tenants (id,slug,legal_name,display_name,status,plan_id,created_by)
+       SELECT $1,$2,'Payment Fixture','Payment Fixture','ACTIVE',id,$3 FROM plans WHERE code='foundation'`,
+      [a.tenantId, `pay-${a.tenantId.slice(0, 8)}`, randomUUID()],
+    );
+    try {
+      await control.query(
+        `INSERT INTO tenant_payment_provider_allowlist (tenant_id,provider_key,allowed)
+         VALUES ($1,'TEST',true)`,
+        [a.tenantId],
+      );
+      const s = scope(a);
+      const startsAt = new Date(Date.now() + 160 * day);
+      const endsAt = new Date(startsAt.getTime() + day);
+      const run = await createRun(s, {
+        ...runInput(programId, venueId, a.instructorA),
+        startsAt,
+        endsAt,
+        capacity: 1,
+        minimumCapacity: null,
+        waitlistEnabled: false,
+        deliveryMode: "ONLINE",
+        venueId: null,
+        priceAmount: 5000,
+        priceCurrency: "IRR",
+      });
+      const paidRunId = String(run.id);
+      await createSession(s, {
+        runId: paidRunId,
+        title: "Payment test session",
+        startsAt,
+        endsAt: new Date(startsAt.getTime() + 60 * 60_000),
+        timezone: "Asia/Tehran",
+        deliveryMode: "ONLINE",
+        venueId: null,
+        roomId: null,
+        instructorIds: [a.instructorA],
+        notes: "Synthetic",
+      });
+      await transitionRun(s, paidRunId, "PUBLISHED");
+      const participantId = randomUUID();
+      await getTenantPool(a).query(
+        `INSERT INTO tenant_users (id,"tenantId",name,email,"emailVerified",status)
+         VALUES ($1,$2,'Payment Participant',$3,true,'ACTIVE')`,
+        [participantId, a.tenantId, `${participantId}@example.test`],
+      );
+      await getTenantPool(a).query(
+        "INSERT INTO tenant_participant_profiles (tenant_id,user_id,display_name) VALUES ($1,$2,'Payment Participant')",
+        [a.tenantId, participantId],
+      );
+      const tenant = {
+        tenantId: a.tenantId,
+        databaseName: a.databaseName,
+        features: {
+          registration: true,
+          courses: true,
+          events: true,
+          waitlist: false,
+          payments: true,
+        },
+      } as TenantContext;
+      const ownerScope = {
+        tenant,
+        actor: {
+          ...s.actor,
+          permissions: new Set([
+            "settings.manage",
+            "payment.manage",
+            "refund.manage",
+          ]),
+        },
+        requestId: randomUUID(),
+      };
+      const participantScope = {
+        tenant,
+        actor: {
+          id: participantId,
+          tenantId: a.tenantId,
+          email: `${participantId}@example.test`,
+          name: "Payment Participant",
+          authenticationLevel: "PASSWORD",
+          permissions: new Set<string>(),
+        },
+        requestId: randomUUID(),
+      };
+      await saveProviderConfiguration(
+        tenant,
+        "TEST",
+        {},
+        ownerScope.actor,
+        ownerScope.requestId,
+      );
+      await setProviderEnabled(
+        tenant,
+        "TEST",
+        true,
+        ownerScope.actor,
+        ownerScope.requestId,
+      );
+      const enrolled = await enrollParticipant(participantScope, paidRunId, {});
+      if (!enrolled.id) throw new Error("Paid enrollment was not created.");
+      const callbackUrl =
+        "http://pay.localhost:3000/api/tenant/payments/callback/TEST";
+      const first = await startPaymentAttempt({
+        ...participantScope,
+        enrollmentId: enrolled.id,
+        providerKey: "TEST",
+        callbackUrl,
+      });
+      const failureProof = createHmac(
+        "sha256",
+        process.env.BETTER_AUTH_SECRET ?? "",
+      )
+        .update(`${first.paymentAttemptId}:FAILED`)
+        .digest("hex");
+      const failed = await verifyPaymentAttempt({
+        tenant,
+        attemptId: first.paymentAttemptId,
+        expectedProviderKey: "TEST",
+        callback: { outcome: "FAILED", proof: failureProof },
+        requestId: randomUUID(),
+      });
+      expect(failed.state).toBe("FAILED");
+      const second = await startPaymentAttempt({
+        ...participantScope,
+        enrollmentId: enrolled.id,
+        providerKey: "TEST",
+        callbackUrl,
+      });
+      if (!second.redirectUrl)
+        throw new Error("TEST redirect was not created.");
+      const callback = Object.fromEntries(
+        new URL(second.redirectUrl).searchParams,
+      );
+      const verified = await verifyPaymentAttempt({
+        tenant,
+        attemptId: second.paymentAttemptId,
+        expectedProviderKey: "TEST",
+        callback,
+        requestId: randomUUID(),
+      });
+      expect(verified.state).toBe("SUCCEEDED");
+      expect(
+        (
+          await verifyPaymentAttempt({
+            tenant,
+            attemptId: second.paymentAttemptId,
+            expectedProviderKey: "TEST",
+            callback,
+            requestId: randomUUID(),
+          })
+        ).state,
+      ).toBe("SUCCEEDED");
+      await expect(
+        verifyPaymentAttempt({
+          tenant: {
+            ...tenant,
+            tenantId: b.tenantId,
+            databaseName: b.databaseName,
+          },
+          attemptId: second.paymentAttemptId,
+          expectedProviderKey: "TEST",
+          callback,
+          requestId: randomUUID(),
+        }),
+      ).rejects.toThrow("not found");
+      const rows = await getTenantPool(a).query<{
+        status: string;
+        attempts: number;
+        invoices: number;
+      }>(
+        `SELECT e.status,
+           (SELECT count(*)::int FROM payment_attempts WHERE tenant_id=e.tenant_id AND payment_id=$3) AS attempts,
+           (SELECT count(*)::int FROM invoices WHERE tenant_id=e.tenant_id AND payment_id=$3) AS invoices
+         FROM enrollments e WHERE e.tenant_id=$1 AND e.id=$2`,
+        [a.tenantId, enrolled.id, second.paymentId],
+      );
+      expect(rows.rows[0]).toEqual({
+        status: "CONFIRMED",
+        attempts: 2,
+        invoices: 1,
+      });
+      await refundPayment(ownerScope, {
+        paymentId: second.paymentId,
+        amount: 5000n,
+        method: "PROVIDER",
+        reason: "Integration refund",
+      });
+      const refunded = await getTenantPool(a).query<{
+        status: string;
+        state: string;
+      }>(
+        `SELECT e.status,p.state FROM enrollments e JOIN payments p ON p.tenant_id=e.tenant_id AND p.enrollment_id=e.id
+         WHERE e.tenant_id=$1 AND e.id=$2`,
+        [a.tenantId, enrolled.id],
+      );
+      expect(refunded.rows[0]).toEqual({
+        status: "REFUNDED",
+        state: "REFUNDED",
+      });
+    } finally {
+      await control.query(
+        "DELETE FROM tenant_payment_provider_allowlist WHERE tenant_id=$1",
+        [a.tenantId],
+      );
+      await control.query("DELETE FROM tenants WHERE id=$1", [a.tenantId]);
+    }
+  });
+
+  it("expires capacity and coupons safely against a late callback, then reconciles a new payment once", async () => {
+    const s = scope(a);
+    const lifecycleProgram = await createProgram(s, {
+      ...programInput,
+      slug: `lifecycle-${randomUUID().slice(0, 8)}`,
+    });
+    await transitionProgram(s, String(lifecycleProgram.id), "ACTIVE");
+    const startsAt = new Date(Date.now() + 180 * day);
+    const endsAt = new Date(startsAt.getTime() + day);
+    const run = await createRun(s, {
+      ...runInput(String(lifecycleProgram.id), randomUUID(), a.instructorA),
+      startsAt,
+      endsAt,
+      capacity: 1,
+      minimumCapacity: null,
+      waitlistEnabled: false,
+      deliveryMode: "ONLINE",
+      venueId: null,
+      priceAmount: 8000,
+      priceCurrency: "IRR",
+    });
+    const paidRunId = String(run.id);
+    await createSession(s, {
+      runId: paidRunId,
+      title: "Expiry test session",
+      startsAt,
+      endsAt: new Date(startsAt.getTime() + 60 * 60_000),
+      timezone: "Asia/Tehran",
+      deliveryMode: "ONLINE",
+      venueId: null,
+      roomId: null,
+      instructorIds: [a.instructorA],
+      notes: "Synthetic",
+    });
+    await transitionRun(s, paidRunId, "PUBLISHED");
+    const tenant = {
+      tenantId: a.tenantId,
+      databaseName: a.databaseName,
+      features: {
+        registration: true,
+        courses: true,
+        events: true,
+        payments: true,
+      },
+    } as TenantContext;
+    const coupon = await createCoupon(
+      {
+        tenant,
+        actor: { ...s.actor, permissions: new Set(["payment.manage"]) },
+        requestId: randomUUID(),
+      },
+      {
+        code: `EXPIRE${randomUUID().slice(0, 8).toUpperCase()}`,
+        discountType: "FIXED",
+        discountValue: 1000n,
+        currency: "IRR",
+        maxUses: 1,
+        startsAt: null,
+        endsAt: null,
+      },
+    );
+    const participant = async () => {
+      const id = randomUUID();
+      await getTenantPool(a).query(
+        `INSERT INTO tenant_users (id,"tenantId",name,email,"emailVerified",status)
+         VALUES ($1,$2,'Lifecycle Participant',$3,true,'ACTIVE')`,
+        [id, a.tenantId, `${id}@example.test`],
+      );
+      await getTenantPool(a).query(
+        "INSERT INTO tenant_participant_profiles (tenant_id,user_id,display_name) VALUES ($1,$2,'Lifecycle Participant')",
+        [a.tenantId, id],
+      );
+      return {
+        tenant,
+        actor: {
+          id,
+          tenantId: a.tenantId,
+          email: `${id}@example.test`,
+          name: "Lifecycle Participant",
+          authenticationLevel: "PASSWORD" as const,
+          permissions: new Set<string>(),
+        },
+        requestId: randomUUID(),
+      };
+    };
+    const firstActor = await participant();
+    const first = await enrollParticipant(firstActor, paidRunId, {});
+    if (!first.id) throw new Error("Enrollment fixture is incomplete.");
+    await applyCoupon(firstActor, first.id, coupon.code);
+    const firstPayment = await getTenantPool(a).query<{ id: string }>(
+      "SELECT id FROM payments WHERE tenant_id=$1 AND enrollment_id=$2",
+      [a.tenantId, first.id],
+    );
+    const firstPaymentId = firstPayment.rows[0]?.id;
+    if (!firstPaymentId) throw new Error("Payment fixture is incomplete.");
+    const firstAttemptId = randomUUID();
+    await getTenantPool(a).query(
+      `INSERT INTO payment_attempts
+         (tenant_id,id,payment_id,attempt_number,provider_key,encrypted_config,state,provider_authority)
+       VALUES ($1,$2,$3,1,'TEST',$4,'REQUIRES_REDIRECT',$5)`,
+      [
+        a.tenantId,
+        firstAttemptId,
+        firstPaymentId,
+        encryptProviderConfig(a.tenantId, "TEST", {}),
+        firstAttemptId,
+      ],
+    );
+    await getTenantPool(a).query(
+      "UPDATE enrollments SET payment_expires_at=now()-interval '1 minute' WHERE tenant_id=$1 AND id=$2",
+      [a.tenantId, first.id],
+    );
+    const proof = createHmac("sha256", process.env.BETTER_AUTH_SECRET ?? "")
+      .update(`${firstAttemptId}:SUCCEEDED`)
+      .digest("hex");
+    const race = await Promise.allSettled([
+      expirePaymentReservations(tenant, randomUUID()),
+      verifyPaymentAttempt({
+        tenant,
+        attemptId: firstAttemptId,
+        expectedProviderKey: "TEST",
+        callback: { outcome: "SUCCEEDED", proof },
+        requestId: randomUUID(),
+      }),
+    ]);
+    expect(race.every((result) => result.status === "fulfilled")).toBe(true);
+    expect(
+      (await expirePaymentReservations(tenant, randomUUID())).expired,
+    ).toBe(0);
+    const expired = await getTenantPool(a).query<{
+      enrollment_status: string;
+      payment_state: string;
+      coupon_status: string;
+      used_count: number;
+      invoice_count: number;
+    }>(
+      `SELECT e.status AS enrollment_status,p.state AS payment_state,
+         cr.status AS coupon_status,c.used_count,
+         (SELECT count(*)::int FROM invoices i WHERE i.tenant_id=p.tenant_id AND i.payment_id=p.id) AS invoice_count
+       FROM payments p JOIN enrollments e ON e.tenant_id=p.tenant_id AND e.id=p.enrollment_id
+       JOIN coupon_reservations cr ON cr.tenant_id=p.tenant_id AND cr.payment_id=p.id
+       JOIN coupons c ON c.tenant_id=cr.tenant_id AND c.id=cr.coupon_id
+       WHERE p.tenant_id=$1 AND p.id=$2`,
+      [a.tenantId, firstPaymentId],
+    );
+    expect(expired.rows[0]).toEqual({
+      enrollment_status: "EXPIRED",
+      payment_state: "SUCCEEDED",
+      coupon_status: "RELEASED",
+      used_count: 0,
+      invoice_count: 1,
+    });
+    const secondActor = await participant();
+    const second = await enrollParticipant(secondActor, paidRunId, {});
+    expect(second.status).toBe("AWAITING_PAYMENT");
+    if (!second.id) throw new Error("Second enrollment is incomplete.");
+    await applyCoupon(secondActor, second.id, coupon.code);
+    const secondPayment = await getTenantPool(a).query<{ id: string }>(
+      "SELECT id FROM payments WHERE tenant_id=$1 AND enrollment_id=$2",
+      [a.tenantId, second.id],
+    );
+    const secondPaymentId = secondPayment.rows[0]?.id;
+    if (!secondPaymentId) throw new Error("Second payment is incomplete.");
+    let providerUnavailable = true;
+    const fake = {
+      key: "RECONCILE_FAKE",
+      displayName: "Reconcile fake",
+      configSchema: z.strictObject({}),
+      capabilities: {
+        supportsRedirectPayment: false,
+        supportsWebhook: false,
+        supportsServerVerification: false,
+        supportsRefund: false,
+        supportsPartialRefund: false,
+        supportsPaymentStatusQuery: true,
+        supportsSettlementQuery: false,
+        supportsSandbox: false,
+      },
+      async createPayment() {
+        return { state: "PENDING" as const };
+      },
+      async queryPayment(input: { amount: bigint; currency: string }) {
+        if (providerUnavailable) throw new Error("Temporary provider outage.");
+        return {
+          state: "SUCCEEDED" as const,
+          verifiedAmount: input.amount,
+          verifiedCurrency: input.currency,
+          providerTransactionId: "reconciled-transaction",
+        };
+      },
+    };
+    const unregister = registerPaymentProviderForTests(fake);
+    try {
+      await getTenantPool(a).query(
+        `INSERT INTO payment_attempts
+           (tenant_id,payment_id,attempt_number,provider_key,encrypted_config,state)
+         VALUES ($1,$2,1,'RECONCILE_FAKE',$3,'PENDING')`,
+        [
+          a.tenantId,
+          secondPaymentId,
+          encryptProviderConfig(a.tenantId, "RECONCILE_FAKE", {}),
+        ],
+      );
+      expect(
+        (
+          await reconcileUnresolvedPayments(
+            tenant,
+            randomUUID(),
+            50,
+            "RECONCILE_FAKE",
+          )
+        ).failed,
+      ).toBe(1);
+      expect(
+        (
+          await reconcileUnresolvedPayments(
+            tenant,
+            randomUUID(),
+            50,
+            "RECONCILE_FAKE",
+          )
+        ).checked,
+      ).toBe(0);
+      const deferred = await getTenantPool(a).query<{
+        reconcile_failures: number;
+        later: boolean;
+      }>(
+        `SELECT reconcile_failures,next_reconcile_at > now() AS later FROM payment_attempts
+         WHERE tenant_id=$1 AND payment_id=$2`,
+        [a.tenantId, secondPaymentId],
+      );
+      expect(deferred.rows[0]).toMatchObject({
+        reconcile_failures: 1,
+        later: true,
+      });
+      providerUnavailable = false;
+      await getTenantPool(a).query(
+        "UPDATE payment_attempts SET next_reconcile_at=now()-interval '1 second' WHERE tenant_id=$1 AND payment_id=$2",
+        [a.tenantId, secondPaymentId],
+      );
+      expect(
+        (
+          await reconcileUnresolvedPayments(
+            tenant,
+            randomUUID(),
+            50,
+            "RECONCILE_FAKE",
+          )
+        ).updated,
+      ).toBe(1);
+      expect(
+        (
+          await reconcileUnresolvedPayments(
+            tenant,
+            randomUUID(),
+            50,
+            "RECONCILE_FAKE",
+          )
+        ).checked,
+      ).toBe(0);
+      const settled = await getTenantPool(a).query<{
+        enrollment_status: string;
+        invoice_count: number;
+        used_count: number;
+      }>(
+        `SELECT e.status AS enrollment_status,c.used_count,
+           (SELECT count(*)::int FROM invoices i WHERE i.tenant_id=p.tenant_id AND i.payment_id=p.id) AS invoice_count
+         FROM payments p JOIN enrollments e ON e.tenant_id=p.tenant_id AND e.id=p.enrollment_id
+         JOIN coupons c ON c.tenant_id=p.tenant_id AND c.id=p.coupon_id
+         WHERE p.tenant_id=$1 AND p.id=$2`,
+        [a.tenantId, secondPaymentId],
+      );
+      expect(settled.rows[0]).toEqual({
+        enrollment_status: "CONFIRMED",
+        invoice_count: 1,
+        used_count: 1,
+      });
+      const invoice = await getTenantPool(a).query<{ id: string }>(
+        "SELECT id FROM invoices WHERE tenant_id=$1 AND payment_id=$2",
+        [a.tenantId, secondPaymentId],
+      );
+      const invoiceId = invoice.rows[0]?.id;
+      if (!invoiceId) throw new Error("Reconciled invoice is missing.");
+      await expect(
+        getInvoiceForDownload({ tenant, actor: firstActor.actor }, invoiceId),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      await expect(
+        getOwnPayment({ tenant, actor: firstActor.actor }, secondPaymentId),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    } finally {
+      unregister();
+    }
+  }, 120_000);
 
   it("enforces attendance, QR replay, certificate issuance, storage, revocation and tenant boundaries", async () => {
     const pool = getTenantPool(a);

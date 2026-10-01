@@ -8,11 +8,13 @@ import { Client } from "pg";
 import { currentTotp } from "../helpers/totp";
 import { workerDiagnostics } from "../helpers/worker-diagnostics";
 import { gregorianWallToJalali } from "@/modules/program-core/dates";
+import { runPhase6BrowserFlows } from "./payment-flows";
 
 const tinyPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pXcAAAAASUVORK5CYII=",
   "base64",
 );
+const e2ePort = Number(process.env.EVENTOS_E2E_PORT ?? "3000");
 async function setJalali(
   page: import("@playwright/test").Page,
   index: number,
@@ -215,7 +217,7 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
   request,
   browser,
 }) => {
-  test.setTimeout(420_000);
+  test.setTimeout(600_000);
   const email = process.env.EVENTOS_E2E_ADMIN_EMAIL;
   const password = process.env.EVENTOS_E2E_ADMIN_PASSWORD;
   expect(email).toBeTruthy();
@@ -396,12 +398,26 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
             { key: "attendance", enabled: true },
             { key: "qr_attendance", enabled: true },
             { key: "certificates", enabled: true },
+            { key: "payments", enabled: true },
           ],
         }),
       });
       return response.status;
     }, tenantId);
     expect(crmEnabled).toBe(200);
+    expect(
+      await page.evaluate(async (id) => {
+        const response = await fetch(
+          `/api/platform/tenants/${id}/payment-providers`,
+          {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ providerKey: "TEST", allowed: true }),
+          },
+        );
+        return response.status;
+      }, tenantId),
+    ).toBe(200);
 
     const e2eState = JSON.parse(
       readFileSync(
@@ -428,7 +444,7 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
     const inviteToken = new URL(invitation.inviteUrl).searchParams.get("token");
     if (!inviteToken)
       throw new Error("The owner activation link was malformed.");
-    const tenantOrigin = `http://${slug}.localhost:3000`;
+    const tenantOrigin = `http://${slug}.localhost:${e2ePort}`;
     const invitationUrl = `${tenantOrigin}/accept-invitation?token=${encodeURIComponent(inviteToken)}`;
     await page.goto(invitationUrl);
     await page.getByLabel("گذرواژهٔ تازه").fill("tenant owner e2e password");
@@ -668,7 +684,7 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
         .getByLabel("گذرواژه", { exact: true })
         .fill("portal e2e password long");
       await portalPage.getByRole("button", { name: "ورود امن" }).click();
-      await portalPage.waitForURL("**/dashboard");
+      await portalPage.waitForURL("**/dashboard", { timeout: 15_000 });
       await expect(
         portalPage.getByRole("heading", { name: `سلام ${name}` }),
       ).toBeVisible();
@@ -907,6 +923,15 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       ),
     ).toBe(0);
     await publicContext.close();
+    await runPhase6BrowserFlows({
+      ownerPage: page,
+      participantPage: phase5ParticipantSession.page,
+      otherParticipantPage: phase3InstructorSession.page,
+      otherParticipantEmail: phase3InstructorEmail,
+      tenantOrigin,
+      tenantId,
+      sourceRunId: phase3RunId,
+    });
     await page.goto(`${tenantOrigin}/calendar`);
     await expect(page.getByText(phase3SessionTitle)).toBeVisible();
 
@@ -1079,14 +1104,14 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
         async () => (await fetch("/api/tenant/roles")).status,
       ),
     ).toBe(401);
-    await page.goto("http://localhost:3000/platform");
+    await page.goto(`http://localhost:${e2ePort}/platform`);
 
     const authenticatedStatus = await page.evaluate(
       async () => (await fetch("/api/platform/tenants")).status,
     );
     expect(authenticatedStatus).toBe(200);
 
-    await page.goto("http://localhost:3000/platform/tenants/new");
+    await page.goto(`http://localhost:${e2ePort}/platform/tenants/new`);
     const secondSlug = `e2e-${randomUUID().slice(0, 8)}`;
     saveTenantState(null, secondSlug);
     await page.getByLabel("نام نمایشی سازمان").fill("EventOS E2E Tenant B");
@@ -1125,7 +1150,7 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
     );
     if (!secondToken) throw new Error("Tenant B owner link was malformed.");
 
-    const secondOrigin = `http://${secondSlug}.localhost:3000`;
+    const secondOrigin = `http://${secondSlug}.localhost:${e2ePort}`;
     const secondContext = await browser.newContext();
     const secondPage = await secondContext.newPage();
     await secondPage.goto(
@@ -1164,30 +1189,33 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
     ).toBe(404);
     expect(
       (
-        await request.get(`http://127.0.0.1:3000${firstCoverUrl}`, {
-          headers: { host: `${secondSlug}.localhost:3000` },
+        await request.get(`http://127.0.0.1:${e2ePort}${firstCoverUrl}`, {
+          headers: { host: `${secondSlug}.localhost:${e2ePort}` },
         })
       ).status(),
     ).toBe(404);
     await secondContext.close();
     const crossTenantSession = await request.get(
-      "http://127.0.0.1:3000/api/tenant/identity/staff",
+      `http://127.0.0.1:${e2ePort}/api/tenant/identity/staff`,
       {
         headers: {
-          host: `${secondSlug}.localhost:3000`,
+          host: `${secondSlug}.localhost:${e2ePort}`,
           cookie: `${ownerCookie.name}=${ownerCookie.value}`,
         },
       },
     );
     expect(crossTenantSession.status()).toBe(401);
     const wrongHostAcceptance = await request.post(
-      "http://127.0.0.1:3000/api/tenant/invitations/accept",
+      `http://127.0.0.1:${e2ePort}/api/tenant/invitations/accept`,
       {
         data: {
           token: wrongHostToken,
           password: "wrong host attempt password",
         },
-        headers: { host: `${secondSlug}.localhost:3000`, origin: secondOrigin },
+        headers: {
+          host: `${secondSlug}.localhost:${e2ePort}`,
+          origin: secondOrigin,
+        },
       },
     );
     expect(wrongHostAcceptance.status()).toBe(400);

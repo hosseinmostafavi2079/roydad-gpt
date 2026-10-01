@@ -405,6 +405,8 @@ model ProgramRun {
   registrationEndsAt   DateTime? @map("registration_ends_at") @db.Timestamptz(6)
   deliveryMode         String    @map("delivery_mode") @db.VarChar(16)
   capacity             Int
+  priceAmount          BigInt    @default(0) @map("price_amount")
+  priceCurrency        String    @default("IRR") @map("price_currency") @db.VarChar(3)
   minimumCapacity      Int?      @map("minimum_capacity")
   waitlistEnabled      Boolean   @default(false) @map("waitlist_enabled")
   state                String    @default("DRAFT") @db.VarChar(16)
@@ -427,6 +429,7 @@ model Enrollment {
   runId              String   @map("run_id") @db.Uuid
   participantId      String   @map("participant_id") @db.VarChar(64)
   status             String   @db.VarChar(16)
+  paymentExpiresAt   DateTime? @map("payment_expires_at") @db.Timestamptz(6)
   answers            Json     @default("{}") @db.JsonB
   formSchemaSnapshot Json     @map("form_schema_snapshot") @db.JsonB
   registeredAt       DateTime @default(now()) @map("registered_at") @db.Timestamptz(6)
@@ -437,6 +440,142 @@ model Enrollment {
   @@index([tenantId, runId, status, registeredAt], map: "enrollments_run_status_idx")
   @@index([tenantId, participantId, registeredAt(sort: Desc)], map: "enrollments_participant_idx")
   @@map("enrollments")
+}
+
+model PaymentProviderConfig {
+  tenantId        String   @map("tenant_id") @db.Uuid
+  providerKey     String   @map("provider_key") @db.VarChar(40)
+  enabled         Boolean  @default(false)
+  encryptedConfig Bytes    @map("encrypted_config")
+  updatedBy       String   @map("updated_by") @db.VarChar(64)
+  updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, providerKey])
+  @@map("payment_provider_configs")
+}
+
+model Coupon {
+  tenantId      String    @map("tenant_id") @db.Uuid
+  id            String    @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code          String    @db.VarChar(64)
+  discountType  String    @map("discount_type") @db.VarChar(12)
+  discountValue BigInt    @map("discount_value")
+  currency      String    @db.VarChar(3)
+  maxUses       Int?      @map("max_uses")
+  usedCount     Int       @default(0) @map("used_count")
+  startsAt      DateTime? @map("starts_at") @db.Timestamptz(6)
+  endsAt        DateTime? @map("ends_at") @db.Timestamptz(6)
+  enabled       Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@unique([tenantId, code])
+  @@map("coupons")
+}
+
+model CouponReservation {
+  tenantId       String   @map("tenant_id") @db.Uuid
+  paymentId      String   @map("payment_id") @db.Uuid
+  couponId       String   @map("coupon_id") @db.Uuid
+  discountAmount BigInt   @map("discount_amount")
+  status         String   @default("ACTIVE") @db.VarChar(12)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, paymentId])
+  @@map("coupon_reservations")
+}
+
+model Payment {
+  tenantId       String    @map("tenant_id") @db.Uuid
+  id             String    @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  enrollmentId   String    @map("enrollment_id") @db.Uuid
+  participantId  String    @map("participant_id") @db.VarChar(64)
+  originalAmount BigInt    @map("original_amount")
+  discountAmount BigInt    @default(0) @map("discount_amount")
+  payableAmount  BigInt    @map("payable_amount")
+  paidAmount     BigInt    @default(0) @map("paid_amount")
+  currency       String    @db.VarChar(3)
+  couponId       String?   @map("coupon_id") @db.Uuid
+  state          String    @default("CREATED") @db.VarChar(20)
+  idempotencyKey String    @map("idempotency_key") @db.VarChar(128)
+  succeededAt    DateTime? @map("succeeded_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@unique([tenantId, enrollmentId])
+  @@unique([tenantId, idempotencyKey])
+  @@map("payments")
+}
+
+model PaymentAttempt {
+  tenantId              String    @map("tenant_id") @db.Uuid
+  id                    String    @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentId             String    @map("payment_id") @db.Uuid
+  attemptNumber         Int       @map("attempt_number")
+  providerKey           String    @map("provider_key") @db.VarChar(40)
+  encryptedConfig       Bytes     @map("encrypted_config")
+  state                 String    @default("CREATED") @db.VarChar(20)
+  providerAuthority     String?   @map("provider_authority") @db.VarChar(255)
+  providerTransactionId String?   @map("provider_transaction_id") @db.VarChar(255)
+  providerReferenceId   String?   @map("provider_reference_id") @db.VarChar(255)
+  failureCode           String?   @map("failure_code") @db.VarChar(80)
+  lastCheckedAt         DateTime? @map("last_checked_at") @db.Timestamptz(6)
+  reconcileFailures     Int       @default(0) @map("reconcile_failures")
+  nextReconcileAt       DateTime? @map("next_reconcile_at") @db.Timestamptz(6)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@unique([tenantId, paymentId, attemptNumber])
+  @@unique([tenantId, providerKey, providerAuthority])
+  @@map("payment_attempts")
+}
+
+model Invoice {
+  tenantId      String   @map("tenant_id") @db.Uuid
+  id            String   @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentId     String   @map("payment_id") @db.Uuid
+  enrollmentId  String   @map("enrollment_id") @db.Uuid
+  invoiceNumber String   @map("invoice_number") @db.VarChar(64)
+  snapshot      Json     @db.JsonB
+  issuedAt      DateTime @default(now()) @map("issued_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@unique([tenantId, paymentId])
+  @@unique([tenantId, invoiceNumber])
+  @@map("invoices")
+}
+
+model Refund {
+  tenantId         String    @map("tenant_id") @db.Uuid
+  id               String    @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  paymentId        String    @map("payment_id") @db.Uuid
+  paymentAttemptId String    @map("payment_attempt_id") @db.Uuid
+  method           String    @db.VarChar(8)
+  status           String    @db.VarChar(16)
+  amount           BigInt
+  currency         String    @db.VarChar(3)
+  reason           String    @db.VarChar(500)
+  reference        String?   @db.VarChar(255)
+  actorId          String    @map("actor_id") @db.VarChar(64)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt      DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  @@id([tenantId, id])
+  @@map("refunds")
+}
+
+model PaymentProviderEvent {
+  tenantId         String   @map("tenant_id") @db.Uuid
+  providerKey      String   @map("provider_key") @db.VarChar(40)
+  eventId          String   @map("event_id") @db.VarChar(255)
+  paymentAttemptId String   @map("payment_attempt_id") @db.Uuid
+  receivedAt       DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  @@id([tenantId, providerKey, eventId])
+  @@map("payment_provider_events")
 }
 
 model RunInstructor {

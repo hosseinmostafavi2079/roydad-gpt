@@ -89,6 +89,22 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  payment-worker:
+    image: eventos-local:latest
+    profiles: ["application"]
+    restart: unless-stopped
+    command: ["node", "--conditions=react-server", "--import=tsx", "scripts/payment-maintenance-worker.ts"]
+    env_file:
+      - .env.local-runtime
+    environment:
+      NODE_ENV: production
+      MAIL_TRANSPORT: smtp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   eventos-postgres:
   eventos-s3mock:

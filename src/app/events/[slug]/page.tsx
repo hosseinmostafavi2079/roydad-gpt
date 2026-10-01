@@ -100,6 +100,12 @@ export default async function EventDetailPage({ params }: Props) {
         <aside className="public-detail-aside">
           <h2>اطلاعات برگزاری</h2>
           <dl>
+            <dt>هزینه ثبت‌نام</dt>
+            <dd>
+              {BigInt(run.priceAmount) === 0n
+                ? "رایگان"
+                : `${Number(run.priceAmount).toLocaleString("fa-IR")} ${run.priceCurrency}`}
+            </dd>
             <dt>آغاز</dt>
             <dd>{formatDate(run.startsAt)}</dd>
             <dt>پایان</dt>
@@ -126,18 +132,26 @@ export default async function EventDetailPage({ params }: Props) {
             )}
           </dl>
           {tenant.features.registration &&
+          (BigInt(run.priceAmount) === 0n || tenant.features.payments) &&
           open &&
           (!capacityFull ||
             (run.waitlistEnabled && tenant.features.waitlist)) &&
           form.success ? (
-            <PublicEnrollmentForm runId={run.id} form={form.data} />
+            <PublicEnrollmentForm
+              runId={run.id}
+              form={form.data}
+              priceAmount={run.priceAmount}
+              priceCurrency={run.priceCurrency}
+            />
           ) : (
             <p className="public-empty">
               {!tenant.features.registration
                 ? "ثبت‌نام این برنامه فعال نیست."
-                : !open
-                  ? "زمان ثبت‌نام این برنامه به پایان رسیده یا هنوز آغاز نشده است."
-                  : "ظرفیت این برنامه تکمیل شده است."}
+                : BigInt(run.priceAmount) > 0n && !tenant.features.payments
+                  ? "پرداخت برای این مجموعه فعال نیست."
+                  : !open
+                    ? "زمان ثبت‌نام این برنامه به پایان رسیده یا هنوز آغاز نشده است."
+                    : "ظرفیت این برنامه تکمیل شده است."}
             </p>
           )}
         </aside>

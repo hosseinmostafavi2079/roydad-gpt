@@ -24,6 +24,8 @@ type Run = {
   registration_starts_at: string | null;
   registration_ends_at: string | null;
   capacity: number;
+  price_amount: string;
+  price_currency: string;
   delivery_mode: string;
   minimum_capacity: number | null;
   waitlist_enabled: boolean;
@@ -117,6 +119,8 @@ export function RunsManager({
           : null,
         deliveryMode: value(data, "deliveryMode"),
         capacity: Number(value(data, "capacity")),
+        priceAmount: Number(value(data, "priceAmount")),
+        priceCurrency: value(data, "priceCurrency") || "IRR",
         minimumCapacity: value(data, "minimumCapacity")
           ? Number(value(data, "minimumCapacity"))
           : null,
@@ -311,6 +315,30 @@ export function RunsManager({
                 min="1"
                 name="minimumCapacity"
                 defaultValue={editing?.minimum_capacity ?? ""}
+              />
+            </label>
+            <label className="field">
+              <span className="label">مبلغ ثبت‌نام (۰ برای رایگان)</span>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                step="1"
+                max="1000000000000"
+                name="priceAmount"
+                defaultValue={editing?.price_amount ?? "0"}
+                required
+              />
+            </label>
+            <label className="field">
+              <span className="label">واحد پول</span>
+              <input
+                className="input"
+                name="priceCurrency"
+                maxLength={3}
+                pattern="[A-Z]{3}"
+                defaultValue={editing?.price_currency ?? "IRR"}
+                required
               />
             </label>
             <label className="field">

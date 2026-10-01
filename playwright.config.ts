@@ -14,6 +14,10 @@ process.env.EVENTOS_TEST_MAIL_OUTBOX ||= path.join(
 process.env.MAIL_TRANSPORT = "test";
 process.env.PLATFORM_REQUIRE_MFA =
   process.env.EVENTOS_E2E_REQUIRE_PLATFORM_MFA === "true" ? "true" : "false";
+const e2ePort = Number(process.env.EVENTOS_E2E_PORT ?? "3000");
+if (!Number.isInteger(e2ePort) || e2ePort < 1024 || e2ePort > 65535)
+  throw new Error("EVENTOS_E2E_PORT must be an unprivileged TCP port.");
+process.env.BETTER_AUTH_URL = `http://localhost:${e2ePort}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -29,7 +33,7 @@ export default defineConfig({
   globalSetup: "./tests/e2e/global-setup.ts",
   globalTeardown: "./tests/e2e/global-teardown.ts",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: `http://localhost:${e2ePort}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     ...devices["Desktop Chrome"],
@@ -44,13 +48,13 @@ export default defineConfig({
   webServer: {
     command:
       "node --import=./scripts/e2e-server-pid.mjs .next/standalone/server.js",
-    url: "http://localhost:3000/api/health/live",
+    url: `http://localhost:${e2ePort}/api/health/live`,
     env: {
       ...process.env,
       NODE_ENV: "production",
       MAIL_TRANSPORT: "test",
       SMTP_URL: process.env.SMTP_URL || "smtps://localhost:465",
-      PORT: "3000",
+      PORT: String(e2ePort),
       EVENTOS_E2E_SERVER_PID_FILE: "tests/.e2e-server.json",
     },
     reuseExistingServer: false,

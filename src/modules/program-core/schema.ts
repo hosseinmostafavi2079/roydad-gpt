@@ -66,6 +66,11 @@ export const runInput = z
     registrationEndsAt: isoInstant.nullable().default(null),
     deliveryMode: z.enum(deliveryModes),
     capacity: z.number().int().positive().max(100000),
+    priceAmount: z.number().int().min(0).max(1_000_000_000_000).default(0),
+    priceCurrency: z
+      .string()
+      .regex(/^[A-Z]{3}$/)
+      .default("IRR"),
     minimumCapacity: z
       .number()
       .int()

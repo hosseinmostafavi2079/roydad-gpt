@@ -55,6 +55,13 @@ const navItems = [
     group: "عملیات",
   },
   {
+    href: "/finance",
+    title: "امور مالی",
+    permission: "finance.read",
+    feature: "payments" as const,
+    group: "عملیات",
+  },
+  {
     href: "/staff",
     title: "کارکنان",
     permission: "staff.read",

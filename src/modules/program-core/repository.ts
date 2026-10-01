@@ -540,8 +540,8 @@ export async function createRun(scope: Scope, input: RunInput): Promise<Row> {
     );
     const result = await client.query(
       `INSERT INTO program_runs (tenant_id,program_id,title,starts_at,ends_at,registration_starts_at,registration_ends_at,
-         delivery_mode,capacity,minimum_capacity,waitlist_enabled,venue_id,notes,created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+         delivery_mode,capacity,minimum_capacity,waitlist_enabled,venue_id,notes,created_by,price_amount,price_currency)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
       [
         scope.tenant.tenantId,
         input.programId,
@@ -557,6 +557,8 @@ export async function createRun(scope: Scope, input: RunInput): Promise<Row> {
         input.venueId,
         input.notes,
         scope.actor.id,
+        input.priceAmount,
+        input.priceCurrency,
       ],
     );
     const row = result.rows[0];
@@ -627,7 +629,8 @@ export async function updateRun(
     );
     const result = await client.query(
       `UPDATE program_runs SET title=$3,starts_at=$4,ends_at=$5,registration_starts_at=$6,registration_ends_at=$7,
-      delivery_mode=$8,capacity=$9,minimum_capacity=$10,waitlist_enabled=$11,venue_id=$12,notes=$13,updated_at=now()
+      delivery_mode=$8,capacity=$9,minimum_capacity=$10,waitlist_enabled=$11,venue_id=$12,notes=$13,
+      price_amount=$14,price_currency=$15,updated_at=now()
       WHERE tenant_id=$1 AND id=$2 RETURNING *`,
       [
         scope.tenant.tenantId,
@@ -643,6 +646,8 @@ export async function updateRun(
         input.waitlistEnabled,
         input.venueId,
         input.notes,
+        input.priceAmount,
+        input.priceCurrency,
       ],
     );
     await client.query(

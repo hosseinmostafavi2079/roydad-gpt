@@ -164,3 +164,22 @@ The project brief calls commerce Phase 5 and operations Phase 6. This request ex
 Local gate: `pnpm check` passed (11 pre-existing lint advisories); 43/43 unit tests, 11/11 real PostgreSQL integration tests, production build, Linux Docker image build and healthy app startup, 2/2 Playwright tests, Prisma validation, production dependency audit, and pinned Gitleaks source scan passed. GitHub Actions has not run on this patch, so Phase 5 remains open.
 
 Do not start payments or other Phase 6 work. Do not mark this requested phase complete until local gates and GitHub Actions pass.
+
+# Phase 6 — Payment architecture (in progress)
+
+The subsequent payment-architecture request authorizes work on payments. Phase 5's local implementation record above remains unchanged; GitHub confirmation is still required. Do not mark Phase 6 complete yet.
+
+- [x] Add a provider-neutral contract, central registry, capability checks, TEST adapter limited to local/CI, and a second fake-adapter unit test.
+- [x] Add forward-only financial schema with price snapshots, attempts, provider identifiers, coupons, invoices, refunds, encrypted provider configuration, and platform provider allowlist.
+- [x] Add paid enrollment reservation, server-authoritative payment initialization, verified callback handling, idempotent invoice issuance, refund method records, and reconciliation primitives.
+- [x] Add tenant-scoped coupon issuance, transactional reservation/redemption, bounded usage under concurrent checkout, and discount snapshots.
+- [x] Add a generic webhook ingestion route with adapter signature-verification contract and event IDs; the installed TEST adapter does not use webhooks.
+- [x] Schedule bounded, tenant-scoped reconciliation with capability checks, backoff, and idempotent settlement; expire unpaid reservations and release capacity/coupons safely.
+- [x] Complete platform/tenant payment configuration and operator finance UI, participant payment status/invoices, and refund management.
+- [x] Add real-PostgreSQL payment attempt failure/retry, verified success, duplicate callback, invoice, API refund, tenant isolation, and coupon concurrency tests.
+- [x] Add browser coverage for free/paid enrollment, coupons, provider administration, failure/pending/expiration, duplicate callback, finance/refund, participant isolation, and amount tampering.
+- [ ] Pass full local gates and GitHub Actions before enabling production payments or marking Phase 6 complete.
+
+Local architecture gate so far: after the final webhook change, `pnpm check` passed with 11 pre-existing lint advisories; unit tests passed 46/46; real PostgreSQL integration passed 14/14; the production build and Prisma validation passed. Five existing local tenant databases upgraded through `0010_phase6_coupon_reservations`, and a repeat migration run was idempotent. The production dependency audit found no known vulnerabilities. Pinned Gitleaks found no leaks in `src`, `prisma`, `scripts`, `tests`, and `docs`. Playwright passed 2/2 earlier during this implementation, before the final coupon/webhook edits; a later rerun was blocked because the local app and a separate `next dev` process occupied port 3000. GitHub Actions has not run on this payment patch.
+
+Final local Phase 6 gate: `pnpm check` passed with 11 pre-existing lint advisories; unit tests passed 47/47; real PostgreSQL integration tests passed 15/15 after updating migration count assertions for `0011_phase6_payment_lifecycle`; the production build, Prisma validation, and Compose configuration passed; final Playwright passed 2/2, including free/paid enrollment, coupons, payment outcomes, expiration, duplicate callback, finance/refund, participant isolation, and tampering rejection. The production dependency audit found no known vulnerabilities. Pinned Gitleaks found no leaks in `src`, `prisma`, `scripts`, `tests`, `docs`, `compose.yaml`, `package.json`, `playwright.config.ts`, and `TASKS.md`. GitHub Actions has not run on this uncommitted payment patch, so Phase 6 remains open.
