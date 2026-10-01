@@ -9,6 +9,7 @@ import { currentTotp } from "../helpers/totp";
 import { workerDiagnostics } from "../helpers/worker-diagnostics";
 import { gregorianWallToJalali } from "@/modules/program-core/dates";
 import { runPhase6BrowserFlows } from "./payment-flows";
+import { runPilotAuthBrowserFlows } from "./pilot-auth-flows";
 
 const tinyPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pXcAAAAASUVORK5CYII=",
@@ -399,6 +400,7 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
             { key: "qr_attendance", enabled: true },
             { key: "certificates", enabled: true },
             { key: "payments", enabled: true },
+            { key: "email_otp", enabled: true },
           ],
         }),
       });
@@ -715,10 +717,11 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       "Unrelated E2E Instructor",
       unrelatedInstructorEmail,
     );
+    const phase5ParticipantEmail = `participant-${randomUUID()}@example.test`;
     const phase5ParticipantSession = await invitePortalIdentity(
       "participants",
       "E2E Participant Identity",
-      `participant-${randomUUID()}@example.test`,
+      phase5ParticipantEmail,
       true,
     );
     if (!phase5ParticipantSession)
@@ -898,7 +901,7 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       `${tenantOrigin}/events/${phase3RunId}`,
     );
     await phase5ParticipantSession.page
-      .getByRole("button", { name: "ثبت‌نام در برنامه" })
+      .getByRole("button", { name: "ثبت‌نام در دوره" })
       .click();
     await expect(
       phase5ParticipantSession.page.getByRole("status"),
@@ -931,6 +934,14 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       tenantOrigin,
       tenantId,
       sourceRunId: phase3RunId,
+    });
+    await runPilotAuthBrowserFlows({
+      browser,
+      tenantId,
+      tenantOrigin,
+      sourceRunId: phase3RunId,
+      participantEmail: phase5ParticipantEmail,
+      mailOutboxPath: e2eState.mailOutboxPath ?? "",
     });
     await page.goto(`${tenantOrigin}/calendar`);
     await expect(page.getByText(phase3SessionTitle)).toBeVisible();

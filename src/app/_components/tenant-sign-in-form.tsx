@@ -1,15 +1,18 @@
 "use client";
 
 import { createAuthClient } from "better-auth/react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { safeParticipantDestination } from "@/modules/tenant-identity/auth-destination";
 
 export function TenantSignInForm({
   otpEnabled = false,
   passwordEnabled = true,
+  googleEnabled = false,
   next = "/dashboard",
 }: {
   otpEnabled?: boolean;
   passwordEnabled?: boolean;
+  googleEnabled?: boolean;
   next?: string;
 }) {
   const [email, setEmail] = useState("");
@@ -21,6 +24,35 @@ export function TenantSignInForm({
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setInterval(
+      () => setCooldown((value) => Math.max(0, value - 1)),
+      1000,
+    );
+    return () => clearInterval(timer);
+  }, [cooldown]);
+
+  async function signInWithGoogle() {
+    setBusy(true);
+    setError("");
+    try {
+      const auth = createAuthClient({ basePath: "/api/tenant-auth" });
+      const destination = safeParticipantDestination(next) ?? "/account";
+      const result = await auth.signIn.social({
+        provider: "google",
+        callbackURL: destination,
+        errorCallbackURL: `/login?participant=1&next=${encodeURIComponent(destination)}`,
+      });
+      if (result.error) throw new Error("Google sign-in failed");
+      if (result.data?.redirect === false) window.location.assign(destination);
+    } catch {
+      setError("ورود با گوگل انجام نشد. دوباره تلاش کنید.");
+      setBusy(false);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -72,6 +104,7 @@ export function TenantSignInForm({
       );
       if (!response.ok) throw new Error("code request failed");
       setSent(true);
+      setCooldown(60);
     } catch {
       setError("درخواست کد انجام نشد. کمی بعد دوباره تلاش کنید.");
     } finally {
@@ -81,6 +114,21 @@ export function TenantSignInForm({
 
   return (
     <form onSubmit={submit} aria-label="فرم ورود به سازمان">
+      {googleEnabled && (
+        <>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            disabled={busy}
+            onClick={signInWithGoogle}
+          >
+            ادامه با گوگل
+          </button>
+          <p className="hint" aria-hidden="true">
+            یا با ایمیل ادامه دهید
+          </p>
+        </>
+      )}
       {otpEnabled && passwordEnabled && (
         <div className="auth-tabs">
           <button
@@ -95,7 +143,7 @@ export function TenantSignInForm({
             aria-pressed={mode === "otp"}
             onClick={() => setMode("otp")}
           >
-            ورود با کد ایمیلی
+            ورود با کد یکبارمصرف
           </button>
         </div>
       )}
@@ -130,7 +178,9 @@ export function TenantSignInForm({
             className="input"
             inputMode="numeric"
             autoComplete="one-time-code"
-            maxLength={8}
+            maxLength={6}
+            minLength={6}
+            pattern="[0-9]{6}"
             value={otp}
             onChange={(event) => setOtp(event.target.value)}
             required
@@ -138,14 +188,19 @@ export function TenantSignInForm({
           <button
             type="button"
             className="btn btn-secondary"
-            disabled={busy || !email}
+            disabled={busy || !email || cooldown > 0}
             onClick={sendOtp}
           >
-            {sent ? "ارسال دوباره کد" : "دریافت کد"}
+            {cooldown > 0
+              ? `ارسال دوباره تا ${cooldown} ثانیه`
+              : sent
+                ? "ارسال دوباره کد"
+                : "دریافت کد"}
           </button>
           {sent && (
             <p className="hint">
-              اگر حسابی با این ایمیل وجود داشته باشد، کد ارسال شده است.
+              اگر حسابی با این ایمیل وجود داشته باشد، کد ارسال شده است. کد شش
+              رقمی تا پنج دقیقه معتبر است.
             </p>
           )}
         </div>

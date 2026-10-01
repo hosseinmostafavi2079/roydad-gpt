@@ -5,11 +5,13 @@ import type { RegistrationForm } from "@/modules/enrollment/form";
 
 export function PublicEnrollmentForm({
   runId,
+  eventPath,
   form,
   priceAmount,
   priceCurrency,
 }: {
   runId: string;
+  eventPath: string;
   form: RegistrationForm;
   priceAmount: string;
   priceCurrency: string;
@@ -55,7 +57,7 @@ export function PublicEnrollmentForm({
       });
       if (response.status === 401) {
         window.location.assign(
-          `/login?participant=1&next=${encodeURIComponent(`/events/${runId}`)}`,
+          `/login?participant=1&next=${encodeURIComponent(eventPath)}`,
         );
         return;
       }
@@ -262,7 +264,7 @@ export function PublicEnrollmentForm({
         ),
       )}
       <button type="submit" className="public-button" disabled={busy}>
-        {busy ? "در حال بررسی…" : "ثبت‌نام در برنامه"}
+        {busy ? "در حال بررسی…" : "ثبت‌نام در دوره"}
       </button>
       <p role="status">{result}</p>
       {pendingEnrollmentId && providers.length > 0 && (

@@ -183,3 +183,14 @@ The subsequent payment-architecture request authorizes work on payments. Phase 5
 Local architecture gate so far: after the final webhook change, `pnpm check` passed with 11 pre-existing lint advisories; unit tests passed 46/46; real PostgreSQL integration passed 14/14; the production build and Prisma validation passed. Five existing local tenant databases upgraded through `0010_phase6_coupon_reservations`, and a repeat migration run was idempotent. The production dependency audit found no known vulnerabilities. Pinned Gitleaks found no leaks in `src`, `prisma`, `scripts`, `tests`, and `docs`. Playwright passed 2/2 earlier during this implementation, before the final coupon/webhook edits; a later rerun was blocked because the local app and a separate `next dev` process occupied port 3000. GitHub Actions has not run on this payment patch.
 
 Final local Phase 6 gate: `pnpm check` passed with 11 pre-existing lint advisories; unit tests passed 47/47; real PostgreSQL integration tests passed 15/15 after updating migration count assertions for `0011_phase6_payment_lifecycle`; the production build, Prisma validation, and Compose configuration passed; final Playwright passed 2/2, including free/paid enrollment, coupons, payment outcomes, expiration, duplicate callback, finance/refund, participant isolation, and tampering rejection. The production dependency audit found no known vulnerabilities. Pinned Gitleaks found no leaks in `src`, `prisma`, `scripts`, `tests`, `docs`, `compose.yaml`, `package.json`, `playwright.config.ts`, and `TASKS.md`. GitHub Actions has not run on this uncommitted payment patch, so Phase 6 remains open.
+
+# Pilot Step 1 — Registration and login UX (in progress)
+
+- [x] Preserve a strict local event destination through password login, email OTP, and account registration.
+- [x] Add tenant-host-bound Google sign-in with exact configured callback origins and verified-email account linking through Better Auth.
+- [x] Add a Persian password/OTP/Google sign-in page, six-digit OTP entry and resend cooldown, and participant dashboard sections gated by features.
+- [x] Pass focused browser, mobile, and verified-linking scenarios and the local code, database, build, and Playwright gates.
+- [x] Complete the local Gitleaks scan.
+- [ ] Confirm the GitHub Actions quality gate after pushing before marking this pilot complete.
+
+Pilot Step 1 local result: focused Playwright passed 1/1; the full run passed 2/2. Unit tests passed 49/49 and real PostgreSQL integration tests passed 15/15. `pnpm check`, `pnpm build`, Prisma tenant schema validation, and the production dependency audit passed. The local Docker daemon stopped responding during its Gitleaks attempt; the official Gitleaks v8.30.0 Windows archive was verified against its published SHA-256 and scanned all 334 tracked and new files with no leaks. GitHub Actions has not run on this patch.

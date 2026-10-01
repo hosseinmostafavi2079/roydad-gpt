@@ -4,6 +4,11 @@ import { notFound } from "next/navigation";
 import { ParticipantRegisterForm } from "@/app/_components/participant-register-form";
 import { PublicSiteShell } from "@/app/_components/public-site";
 import { publicPageContext } from "@/modules/public-site/page-context";
+import { googleOAuthEnabledForOrigin } from "@/modules/tenant-identity/google-config";
+import {
+  safeParticipantDestination,
+  participantLoginPath,
+} from "@/modules/tenant-identity/auth-destination";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -11,9 +16,19 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function RegisterPage() {
-  const { tenant, profile } = await publicPageContext();
-  if (!tenant.features.registration || !tenant.features.password_login)
+export default async function RegisterPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { tenant, profile, origin } = await publicPageContext();
+  const googleEnabled = googleOAuthEnabledForOrigin(origin);
+  const next =
+    safeParticipantDestination((await searchParams).next) ?? "/account";
+  if (
+    !tenant.features.registration ||
+    (!tenant.features.password_login && !googleEnabled)
+  )
     notFound();
   return (
     <PublicSiteShell tenant={tenant} profile={profile}>
@@ -22,9 +37,13 @@ export default async function RegisterPage() {
         <h1>ثبت‌نام در مجموعه</h1>
         <p>برای شرکت در برنامه‌ها یک حساب بسازید.</p>
       </section>
-      <ParticipantRegisterForm />
+      <ParticipantRegisterForm
+        next={next}
+        passwordEnabled={tenant.features.password_login}
+        googleEnabled={googleEnabled}
+      />
       <p className="public-auth-help">
-        حساب دارید؟ <Link href="/login?participant=1">وارد شوید</Link>
+        حساب دارید؟ <Link href={participantLoginPath(next)}>وارد شوید</Link>
       </p>
     </PublicSiteShell>
   );

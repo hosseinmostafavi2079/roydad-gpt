@@ -3,10 +3,36 @@
 import { createAuthClient } from "better-auth/react";
 import { useState, type FormEvent } from "react";
 
-export function ParticipantRegisterForm() {
+export function ParticipantRegisterForm({
+  next,
+  passwordEnabled,
+  googleEnabled,
+}: {
+  next: string;
+  passwordEnabled: boolean;
+  googleEnabled: boolean;
+}) {
   const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
+  async function registerWithGoogle() {
+    setBusy(true);
+    setError("");
+    try {
+      const auth = createAuthClient({ basePath: "/api/tenant-auth" });
+      const result = await auth.signIn.social({
+        provider: "google",
+        callbackURL: next,
+        errorCallbackURL: `/login?participant=1&next=${encodeURIComponent(next)}`,
+        requestSignUp: true,
+      });
+      if (result.error) throw new Error("Google registration failed");
+      if (result.data?.redirect === false) window.location.assign(next);
+    } catch {
+      setError("ثبت‌نام با گوگل انجام نشد. دوباره تلاش کنید.");
+      setBusy(false);
+    }
+  }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -18,7 +44,7 @@ export function ParticipantRegisterForm() {
         name: String(form.get("name") || "").trim(),
         email: String(form.get("email") || "").trim(),
         password: String(form.get("password") || ""),
-        callbackURL: "/login?participant=1",
+        callbackURL: `/login?participant=1&next=${encodeURIComponent(next)}`,
       });
       if (result.error) throw new Error("Registration failed");
       setSubmitted(true);
@@ -37,46 +63,63 @@ export function ParticipantRegisterForm() {
     );
   return (
     <form className="public-register-form" onSubmit={submit}>
+      {googleEnabled && (
+        <button
+          className="public-button"
+          type="button"
+          disabled={busy}
+          onClick={registerWithGoogle}
+        >
+          ادامه با گوگل
+        </button>
+      )}
+      {googleEnabled && passwordEnabled && (
+        <p className="hint">یا با ایمیل ثبت‌نام کنید</p>
+      )}
       {error && (
         <p role="alert" className="alert alert-error">
           {error}
         </p>
       )}
-      <label>
-        نام و نام خانوادگی
-        <input
-          name="name"
-          required
-          minLength={2}
-          maxLength={120}
-          autoComplete="name"
-        />
-      </label>
-      <label>
-        ایمیل
-        <input
-          name="email"
-          type="email"
-          required
-          maxLength={320}
-          dir="ltr"
-          autoComplete="email"
-        />
-      </label>
-      <label>
-        گذرواژه
-        <input
-          name="password"
-          type="password"
-          required
-          minLength={12}
-          maxLength={128}
-          autoComplete="new-password"
-        />
-      </label>
-      <button className="public-button" type="submit" disabled={busy}>
-        {busy ? "در حال ثبت‌نام…" : "ایجاد حساب"}
-      </button>
+      {passwordEnabled && (
+        <>
+          <label>
+            نام و نام خانوادگی
+            <input
+              name="name"
+              required
+              minLength={2}
+              maxLength={120}
+              autoComplete="name"
+            />
+          </label>
+          <label>
+            ایمیل
+            <input
+              name="email"
+              type="email"
+              required
+              maxLength={320}
+              dir="ltr"
+              autoComplete="email"
+            />
+          </label>
+          <label>
+            گذرواژه
+            <input
+              name="password"
+              type="password"
+              required
+              minLength={12}
+              maxLength={128}
+              autoComplete="new-password"
+            />
+          </label>
+          <button className="public-button" type="submit" disabled={busy}>
+            {busy ? "در حال ثبت‌نام…" : "ایجاد حساب"}
+          </button>
+        </>
+      )}
     </form>
   );
 }

@@ -463,6 +463,25 @@ export async function listOwnAttendance(scope: Scope) {
   };
 }
 
+export async function getNextOwnSession(scope: Scope) {
+  requireAttendance(scope, "attendance.self.read");
+  const result = await getTenantPool(scope.tenant).query<{
+    id: string;
+    title: string;
+    run_title: string;
+    starts_at: Date;
+  }>(
+    `SELECT s.id,s.title,r.title AS run_title,s.starts_at
+     FROM enrollments e JOIN program_runs r ON r.tenant_id=e.tenant_id AND r.id=e.run_id
+     JOIN program_sessions s ON s.tenant_id=r.tenant_id AND s.run_id=r.id
+     WHERE e.tenant_id=$1 AND e.participant_id=$2 AND e.status IN ('CONFIRMED','COMPLETED')
+       AND s.starts_at > now() AND s.status='SCHEDULED'
+     ORDER BY s.starts_at,s.id LIMIT 1`,
+    [scope.tenant.tenantId, scope.actor.id],
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function listParticipantAttendanceReports(scope: Scope, page = 1) {
   requireAttendance(scope, "attendance.view");
   if (await instructorOnly(getTenantPool(scope.tenant), scope))

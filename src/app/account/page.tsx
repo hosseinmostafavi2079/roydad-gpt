@@ -5,7 +5,10 @@ import { redirect } from "next/navigation";
 import { PublicSiteShell, formatDate } from "@/app/_components/public-site";
 import { TenantSignOutButton } from "@/app/_components/tenant-sign-out-button";
 import { listOwnEnrollments } from "@/modules/enrollment/repository";
-import { listOwnAttendance } from "@/modules/attendance/repository";
+import {
+  getNextOwnSession,
+  listOwnAttendance,
+} from "@/modules/attendance/repository";
 import { listCertificates } from "@/modules/certificates/repository";
 import { listOwnInvoices, listOwnPayments } from "@/modules/payments/finance";
 import { requireTenantActor } from "@/modules/tenant-identity/request-auth";
@@ -38,6 +41,7 @@ export default async function AccountPage() {
     tenant.features.attendance && actor.permissions.has("attendance.self.read")
       ? await listOwnAttendance(scope)
       : null;
+  const nextSession = attendance ? await getNextOwnSession(scope) : null;
   const certificates =
     tenant.features.certificates &&
     actor.permissions.has("certificate.self.read")
@@ -131,6 +135,51 @@ export default async function AccountPage() {
           </p>
         )}
       </section>
+      {attendance && (
+        <section className="public-section">
+          <h2>جلسه بعدی</h2>
+          {nextSession ? (
+            <p>
+              {nextSession.run_title} · {nextSession.title} ·{" "}
+              {formatDate(nextSession.starts_at)}
+            </p>
+          ) : (
+            <p>جلسه پیش‌رو ندارید.</p>
+          )}
+        </section>
+      )}
+      {tenant.features.registration && (
+        <section className="public-section">
+          <h2>ثبت‌نام‌های در انتظار</h2>
+          {enrollments.filter(
+            (entry) =>
+              entry.status === "WAITLISTED" ||
+              entry.status === "AWAITING_PAYMENT",
+          ).length ? (
+            <ul>
+              {enrollments
+                .filter(
+                  (entry) =>
+                    entry.status === "WAITLISTED" ||
+                    entry.status === "AWAITING_PAYMENT",
+                )
+                .map((entry) => (
+                  <li key={String(entry.id)}>
+                    <Link href={`/events/${entry.run_id}`}>
+                      {String(entry.title)}
+                    </Link>{" "}
+                    ·{" "}
+                    {entry.status === "WAITLISTED"
+                      ? "فهرست انتظار"
+                      : "در انتظار پرداخت"}
+                  </li>
+                ))}
+            </ul>
+          ) : (
+            <p>ثبت‌نام در انتظاری ندارید.</p>
+          )}
+        </section>
+      )}
       {attendance ? (
         <section className="public-section">
           <h2>حضور من</h2>
@@ -152,7 +201,8 @@ export default async function AccountPage() {
           </ul>
         </section>
       ) : null}
-      {certificates.length ? (
+      {tenant.features.certificates &&
+      actor.permissions.has("certificate.self.read") ? (
         <section className="public-section">
           <h2>گواهی‌های من</h2>
           <ul>
@@ -169,6 +219,7 @@ export default async function AccountPage() {
               </li>
             ))}
           </ul>
+          {!certificates.length && <p>گواهی‌ای صادر نشده است.</p>}
         </section>
       ) : null}
     </PublicSiteShell>

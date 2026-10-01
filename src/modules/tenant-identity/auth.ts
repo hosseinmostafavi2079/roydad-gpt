@@ -17,6 +17,11 @@ import { logger } from "@/infrastructure/logging/logger";
 import type { resolveTenantContext } from "@/modules/tenants/resolver";
 import { getServerConfig } from "@/shared/config/env";
 import { canAuthenticateTenantUser } from "@/modules/tenant-identity/policy";
+import {
+  googleOAuthEnabledForOrigin,
+  googleMockEnabled,
+} from "@/modules/tenant-identity/google-config";
+import { parseE2eGoogleIdentity } from "@/modules/tenant-identity/e2e-google";
 
 export type TenantContext = Awaited<ReturnType<typeof resolveTenantContext>>;
 const authCache = new Map<string, ReturnType<typeof betterAuth>>();
@@ -30,6 +35,11 @@ export function getTenantAuth(context: TenantContext, origin: string) {
     return cached;
   }
   const pool = getTenantPool(context);
+  const googleClientId = process.env.GOOGLE_CLIENT_ID ?? "";
+  const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET ?? "";
+  const isGoogleRequest = (url: string | undefined) =>
+    Boolean(url?.includes("/callback/google")) ||
+    (googleMockEnabled() && Boolean(url?.includes("/sign-in/social")));
   const options: BetterAuthOptions = {
     appName: context.branding.brandName,
     baseURL: origin,
@@ -104,7 +114,63 @@ export function getTenantAuth(context: TenantContext, origin: string) {
         },
       },
     },
-    account: { modelName: "tenant_auth_accounts" },
+    account: {
+      modelName: "tenant_auth_accounts",
+      encryptOAuthTokens: true,
+      accountLinking: {
+        enabled: true,
+        disableImplicitLinking: false,
+        requireLocalEmailVerified: true,
+        allowDifferentEmails: false,
+        trustedProviders: [],
+      },
+    },
+    socialProviders: googleOAuthEnabledForOrigin(origin)
+      ? {
+          google: {
+            clientId: googleClientId,
+            clientSecret: googleClientSecret,
+            ...(googleMockEnabled()
+              ? {
+                  verifyIdToken: async (token: string) =>
+                    parseE2eGoogleIdentity(token, context.tenantId) !== null,
+                  getUserInfo: async (tokens: {
+                    idToken?: string | undefined;
+                  }) => {
+                    const identity = parseE2eGoogleIdentity(
+                      tokens.idToken ?? "",
+                      context.tenantId,
+                    );
+                    if (!identity) return null;
+                    return {
+                      user: {
+                        name: identity.name,
+                        email: identity.email,
+                        image: undefined,
+                        emailVerified: identity.emailVerified,
+                      },
+                      data: {
+                        aud: googleClientId,
+                        azp: googleClientId,
+                        sub: identity.sub,
+                        email: identity.email,
+                        email_verified: identity.emailVerified,
+                        exp: Math.floor(identity.exp / 1000),
+                        family_name: "",
+                        given_name: identity.name,
+                        iat: Math.floor(Date.now() / 1000),
+                        iss: "https://accounts.google.com",
+                        name: identity.name,
+                        nbf: Math.floor(Date.now() / 1000),
+                        picture: "",
+                      },
+                    };
+                  },
+                }
+              : {}),
+          },
+        }
+      : {},
     verification: {
       modelName: "tenant_auth_verifications",
       storeIdentifier: "hashed",
@@ -185,9 +251,36 @@ export function getTenantAuth(context: TenantContext, origin: string) {
     databaseHooks: {
       user: {
         create: {
-          before: async (user) => ({
-            data: { ...user, tenantId: context.tenantId, status: "ACTIVE" },
-          }),
+          before: async (user, hookContext) => {
+            if (isGoogleRequest(hookContext?.request?.url)) {
+              if (!context.features.registration) return false;
+              const count = await pool.query<{ count: number }>(
+                "SELECT count(*)::int AS count FROM tenant_participant_profiles WHERE tenant_id=$1",
+                [context.tenantId],
+              );
+              if (
+                (count.rows[0]?.count ?? 0) >= context.limits.max_participants
+              )
+                return false;
+            }
+            return {
+              data: { ...user, tenantId: context.tenantId, status: "ACTIVE" },
+            };
+          },
+          after: async (user, hookContext) => {
+            if (!isGoogleRequest(hookContext?.request?.url)) return;
+            await pool.query(
+              `INSERT INTO tenant_participant_profiles (tenant_id,user_id,display_name)
+               VALUES ($1,$2,$3) ON CONFLICT (tenant_id,user_id) DO NOTHING`,
+              [context.tenantId, user.id, user.name],
+            );
+            await pool.query(
+              `INSERT INTO tenant_user_roles (tenant_id,user_id,role_id)
+               SELECT $1,$2,id FROM tenant_roles WHERE tenant_id=$1 AND code='participant'
+               ON CONFLICT DO NOTHING`,
+              [context.tenantId, user.id],
+            );
+          },
         },
       },
       session: {
@@ -224,7 +317,9 @@ export function getTenantAuth(context: TenantContext, origin: string) {
                   "/sign-in/email-otp",
                 )
                   ? "EMAIL_OTP"
-                  : "PASSWORD",
+                  : isGoogleRequest(hookContext?.request?.url)
+                    ? "GOOGLE"
+                    : "PASSWORD",
               },
             };
           },

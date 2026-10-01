@@ -12,6 +12,10 @@ process.env.EVENTOS_TEST_MAIL_OUTBOX ||= path.join(
   `eventos-e2e-mail-${randomUUID()}.jsonl`,
 );
 process.env.MAIL_TRANSPORT = "test";
+process.env.GOOGLE_CLIENT_ID ||= "eventos-e2e-google-client";
+process.env.GOOGLE_CLIENT_SECRET ||= randomBytes(32).toString("hex");
+process.env.GOOGLE_OAUTH_ALLOWED_ORIGINS ||= "e2e-local-tenants";
+process.env.EVENTOS_E2E_GOOGLE_MOCK = "true";
 process.env.PLATFORM_REQUIRE_MFA =
   process.env.EVENTOS_E2E_REQUIRE_PLATFORM_MFA === "true" ? "true" : "false";
 const e2ePort = Number(process.env.EVENTOS_E2E_PORT ?? "3000");

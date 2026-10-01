@@ -8,10 +8,16 @@ import { getControlPool } from "@/infrastructure/db/control/pool";
 import type { PoolClient } from "pg";
 import { jsonResponse, requestIdFrom } from "@/shared/http/api-response";
 import { DomainError } from "@/shared/errors/domain-error";
+import { googleOAuthEnabledForOrigin } from "@/modules/tenant-identity/google-config";
+import { safeParticipantDestination } from "@/modules/tenant-identity/auth-destination";
 
 export const runtime = "nodejs";
 
-const allowedGetPaths = new Set(["/get-session", "/verify-email"]);
+const allowedGetPaths = new Set([
+  "/get-session",
+  "/verify-email",
+  "/callback/google",
+]);
 const allowedPostPaths = new Set([
   "/sign-in/email",
   "/sign-up/email",
@@ -20,7 +26,20 @@ const allowedPostPaths = new Set([
   "/reset-password",
   "/email-otp/send-verification-otp",
   "/sign-in/email-otp",
+  "/sign-in/social",
 ]);
+
+function safeGoogleErrorDestination(value: unknown): boolean {
+  if (typeof value !== "string" || !value.startsWith("/login?")) return false;
+  const parsed = new URL(value, "http://localhost");
+  return (
+    parsed.pathname === "/login" &&
+    parsed.origin === "http://localhost" &&
+    parsed.searchParams.get("participant") === "1" &&
+    parsed.searchParams.size === 2 &&
+    safeParticipantDestination(parsed.searchParams.get("next")) !== null
+  );
+}
 
 async function readAuthRequestBody(request: Request): Promise<string> {
   const maximumBytes = 65_536;
@@ -91,7 +110,11 @@ async function cleanResponse(
       { status: response.status, headers },
     );
   }
-  if (path !== "/sign-in/email" && path !== "/sign-in/email-otp")
+  if (
+    path !== "/sign-in/email" &&
+    path !== "/sign-in/email-otp" &&
+    path !== "/sign-in/social"
+  )
     return new Response(response.body, { status: response.status, headers });
   try {
     const body: unknown = await response.json();
@@ -109,8 +132,22 @@ async function cleanResponse(
           image: user.image ?? null,
         }
       : undefined;
+    const social = path === "/sign-in/social";
+    const redirectUrl =
+      social &&
+      value?.redirect === true &&
+      typeof value.url === "string" &&
+      value.url.startsWith("https://accounts.google.com/")
+        ? value.url
+        : undefined;
     return jsonResponse(
-      { ...(safeUser ? { user: safeUser } : {}), redirect: false },
+      social
+        ? {
+            ...(safeUser ? { user: safeUser } : {}),
+            redirect: Boolean(redirectUrl),
+            ...(redirectUrl ? { url: redirectUrl } : {}),
+          }
+        : { ...(safeUser ? { user: safeUser } : {}), redirect: false },
       { status: response.status, headers },
     );
   } catch {
@@ -139,6 +176,13 @@ async function handle(request: Request): Promise<Response> {
       throw new DomainError("NOT_FOUND", "Authentication endpoint not found.");
     }
     if (request.method !== "GET") assertTenantSameOrigin(request, origin);
+    const socialPath =
+      path === "/sign-in/social" || path === "/callback/google";
+    if (socialPath && !googleOAuthEnabledForOrigin(origin))
+      throw new DomainError(
+        "FEATURE_DISABLED",
+        "Google sign-in is unavailable.",
+      );
     if (
       (path === "/sign-in/email" || path === "/sign-up/email") &&
       !tenant.features.password_login
@@ -165,6 +209,42 @@ async function handle(request: Request): Promise<Response> {
           "LIMIT_REACHED",
           "ظرفیت ثبت‌نام حساب‌های جدید تکمیل شده است.",
         );
+    }
+    if (path === "/sign-in/social") {
+      const body = await readAuthRequestBody(request.clone());
+      let input: {
+        provider?: unknown;
+        callbackURL?: unknown;
+        errorCallbackURL?: unknown;
+        requestSignUp?: unknown;
+      };
+      try {
+        input = JSON.parse(body) as typeof input;
+      } catch {
+        throw new DomainError(
+          "VALIDATION_FAILED",
+          "Invalid social sign-in request.",
+        );
+      }
+      if (
+        input.provider !== "google" ||
+        !safeParticipantDestination(input.callbackURL) ||
+        (input.errorCallbackURL !== undefined &&
+          !safeGoogleErrorDestination(input.errorCallbackURL)) ||
+        (input.requestSignUp !== undefined && input.requestSignUp !== true)
+      )
+        throw new DomainError(
+          "VALIDATION_FAILED",
+          "Invalid social sign-in request.",
+        );
+    }
+    if (path === "/callback/google") {
+      signupLock = await getControlPool().connect();
+      signupLockKey = `participant-signup:${tenant.tenantId}`;
+      await signupLock.query(
+        "SELECT pg_advisory_lock(hashtextextended($1,0))",
+        [signupLockKey],
+      );
     }
     const otpPath =
       path === "/email-otp/send-verification-otp" ||
@@ -217,6 +297,15 @@ async function handle(request: Request): Promise<Response> {
         ? await auth.api.getSession({ headers: request.headers })
         : null;
     const response = await auth.handler(authRequest);
+    if (
+      path === "/email-otp/send-verification-otp" &&
+      response.status !== 429 &&
+      response.status < 500
+    ) {
+      const headers = new Headers(response.headers);
+      headers.set("cache-control", "private, no-store, max-age=0");
+      return jsonResponse({ success: true }, { status: 200, headers });
+    }
     if (path === "/sign-up/email" && response.ok) {
       const payload = (await response.clone().json()) as {
         user?: { id?: unknown; name?: unknown };
@@ -227,6 +316,12 @@ async function handle(request: Request): Promise<Response> {
            SELECT "tenantId", id, name FROM tenant_users
            WHERE "tenantId"=$1 AND id=$2
            ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+          [tenant.tenantId, payload.user.id],
+        );
+        await getTenantPool(tenant).query(
+          `INSERT INTO tenant_user_roles (tenant_id,user_id,role_id)
+           SELECT $1,$2,id FROM tenant_roles WHERE tenant_id=$1 AND code='participant'
+           ON CONFLICT DO NOTHING`,
           [tenant.tenantId, payload.user.id],
         );
       }

@@ -139,6 +139,7 @@ export default async function EventDetailPage({ params }: Props) {
           form.success ? (
             <PublicEnrollmentForm
               runId={run.id}
+              eventPath={`/events/${run.id}`}
               form={form.data}
               priceAmount={run.priceAmount}
               priceCurrency={run.priceCurrency}

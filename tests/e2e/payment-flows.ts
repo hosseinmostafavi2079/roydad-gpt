@@ -92,7 +92,7 @@ export async function runPhase6BrowserFlows(input: BrowserFlow): Promise<void> {
           item.request().method() === "POST",
       );
       await participantPage
-        .getByRole("button", { name: "ثبت‌نام در برنامه" })
+        .getByRole("button", { name: "ثبت‌نام در دوره" })
         .click();
       const payload = (await (await response).json()) as {
         data: {
