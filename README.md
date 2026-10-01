@@ -77,4 +77,10 @@ Open `http://localhost:3000/sign-in` for the Platform Super Admin, or `http://de
 
 `PLATFORM_REQUIRE_MFA=false` is the default for local and production use. Set it to `true` explicitly to restore mandatory Platform Admin TOTP enrollment and challenge. Run `pnpm local:setup` and rebuild the app after changing this setting. Configure a real TLS `SMTP_URL` in ignored `.env` and rerun `pnpm local:setup` before issuing new invitations; without SMTP, delivery fails safely. Docker never selects the test mail transport.
 
+### Tenant Google sign-in
+
+Tenant login and registration share `/login`; `/register` redirects to its registration mode. Google appears only when the tenant's `google_login` feature is enabled **and** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and an exact matching origin in `GOOGLE_OAUTH_ALLOWED_ORIGINS` are configured. In Platform Admin, enable **ورود با گوگل** for that tenant after configuring the server. The same gate applies to the server OAuth endpoints.
+
+For local Docker use, put real credentials in ignored `.env`, set `GOOGLE_OAUTH_ALLOWED_ORIGINS` to the tenant's exact browser origin (for example `http://demo.localhost:3000` if accepted by your Google OAuth client), and register the exact callback URI `http://demo.localhost:3000/api/tenant-auth/callback/google` in a Google **Web application** OAuth client. Google may reject HTTP origins other than its localhost exception; in that case, use a controlled HTTPS development domain and its exact callback. Run `pnpm local:setup` after editing `.env`; the script copies the Google values into ignored `.env.local-runtime` for the Docker app. Rebuild and restart the app. Without real credentials, the Google option stays unavailable. The signed Google identity mock is isolated to Playwright and must not be configured for normal local use.
+
 To remove only the local demo tenant and its generated credentials, stop `pnpm dev` and run `pnpm demo:reset --confirm-demo`. The reset refuses production, CI, nonlocal database hosts, other tenant slugs, and missing explicit confirmation. Then run `pnpm demo:setup` to recreate it. Production never creates demo users.

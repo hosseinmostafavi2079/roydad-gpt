@@ -33,6 +33,7 @@ const featureGroups = [
     items: [
       ["password_login", "ورود با رمز عبور"],
       ["email_otp", "ورود با کد ایمیلی"],
+      ["google_login", "ورود با گوگل"],
       ["sms", "پیامک"],
       ["email", "ایمیل"],
       ["crm", "مدیریت ارتباط"],

@@ -3,10 +3,19 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { once } from "node:events";
-import { expect, test } from "@playwright/test";
+import {
+  expect,
+  request as apiRequest,
+  test,
+  type APIRequestContext,
+  type Browser,
+  type BrowserContext,
+  type Page,
+} from "@playwright/test";
 import { Client } from "pg";
 import { currentTotp } from "../helpers/totp";
 import { workerDiagnostics } from "../helpers/worker-diagnostics";
+import { reportCleanupFailures } from "../helpers/cleanup-failures";
 import { gregorianWallToJalali } from "@/modules/program-core/dates";
 import { runPhase6BrowserFlows } from "./payment-flows";
 import { runPilotAuthBrowserFlows } from "./pilot-auth-flows";
@@ -152,73 +161,15 @@ async function stopWorker(child: ChildProcess): Promise<void> {
   }
 }
 
-test("platform admin password login respects the MFA setting", async ({
-  page,
-}) => {
-  const email = process.env.EVENTOS_E2E_ADMIN_EMAIL;
-  const password = process.env.EVENTOS_E2E_ADMIN_PASSWORD;
-  if (!email || !password)
-    throw new Error("E2E admin credentials are missing.");
-  if (process.env.PLATFORM_REQUIRE_MFA !== "true") {
-    const client = new Client({
-      connectionString: process.env.CONTROL_DATABASE_URL,
-    });
-    await client.connect();
-    try {
-      await client.query(
-        `UPDATE platform_auth_users SET "twoFactorEnabled"=true WHERE email=$1`,
-        [email],
-      );
-    } finally {
-      await client.end();
-    }
-  }
-  await page.goto("/sign-in");
-  await page.getByLabel("ایمیل سازمانی").fill(email);
-  await page.getByLabel("گذرواژه", { exact: true }).fill(password);
-  await page.getByRole("button", { name: "ورود امن به پلتفرم" }).click();
-  if (process.env.PLATFORM_REQUIRE_MFA === "true") {
-    await page.waitForURL("**/platform/security/mfa");
-    const enableResponse = page.waitForResponse((response) =>
-      response.url().includes("/api/auth/two-factor/enable"),
-    );
-    await page.getByLabel("گذرواژهٔ فعلی").fill(password);
-    await page
-      .getByRole("button", { name: "راه‌اندازی احراز هویت دو‌مرحله‌ای" })
-      .click();
-    const setup = (await (await enableResponse).json()) as { totpURI: string };
-    const secret = new URL(setup.totpURI).searchParams.get("secret");
-    if (!secret) throw new Error("TOTP enrollment returned no secret.");
-    const enrollmentCode = currentTotp(secret);
-    await page.getByLabel("کد شش‌رقمی برنامه").fill(enrollmentCode);
-    await page.getByRole("button", { name: "فعال‌سازی و ورود به پنل" }).click();
-    await page.waitForURL("**/platform");
-    await page.getByRole("button", { name: "خروج امن" }).click();
-    await page.waitForURL("**/sign-in");
-    await page.getByLabel("ایمیل سازمانی").fill(email);
-    await page.getByLabel("گذرواژه", { exact: true }).fill(password);
-    await page.getByRole("button", { name: "ورود امن به پلتفرم" }).click();
-    await expect(page.getByLabel("کد برنامهٔ احراز هویت")).toBeVisible();
-    await expect
-      .poll(() => currentTotp(secret), { timeout: 35_000 })
-      .not.toBe(enrollmentCode);
-    await page.getByLabel("کد برنامهٔ احراز هویت").fill(currentTotp(secret));
-    await page.getByRole("button", { name: "تأیید و ورود" }).click();
-  } else {
-    await expect(page.getByLabel("کد برنامهٔ احراز هویت")).toHaveCount(0);
-  }
-  await page.waitForURL("**/platform");
-  await expect(
-    page.getByRole("heading", { name: "به پنل EventOS خوش آمدید" }),
-  ).toBeVisible();
-});
-
-test("platform and tenant users retain configurable MFA, isolation, RBAC, invitations, and portal boundaries", async ({
+async function* tenantJourney({
   page,
   request,
   browser,
-}) => {
-  test.setTimeout(600_000);
+}: {
+  page: Page;
+  request: APIRequestContext;
+  browser: Browser;
+}): AsyncGenerator<string, void, unknown> {
   const email = process.env.EVENTOS_E2E_ADMIN_EMAIL;
   const password = process.env.EVENTOS_E2E_ADMIN_PASSWORD;
   expect(email).toBeTruthy();
@@ -230,6 +181,7 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
   const failWorker = await startWorker(true);
   let retryWorker: ChildProcess | undefined;
   let tenantId: string | null = null;
+  let originalError: unknown;
   try {
     await page.goto("/sign-in");
     await page.waitForLoadState("networkidle");
@@ -387,6 +339,33 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
     await page.getByLabel("رنگ تأکیدی").fill("#C99047");
     await page.getByRole("button", { name: "ذخیرهٔ برند" }).click();
     await expect(page.getByText("تنظیمات برند ذخیره شد.")).toBeVisible();
+    const googleDisabledContext = await browser.newContext();
+    try {
+      const googleDisabledPage = await googleDisabledContext.newPage();
+      await googleDisabledPage.goto(
+        `http://${slug}.localhost:${e2ePort}/login`,
+      );
+      await expect(
+        googleDisabledPage.getByRole("button", { name: "ادامه با گوگل" }),
+      ).toHaveCount(0);
+      expect(
+        await googleDisabledPage.evaluate(
+          async () =>
+            (
+              await fetch("/api/tenant-auth/sign-in/social", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  provider: "google",
+                  callbackURL: "/auth/continue",
+                }),
+              })
+            ).status,
+        ),
+      ).toBe(403);
+    } finally {
+      await googleDisabledContext.close();
+    }
     const crmEnabled = await page.evaluate(async (id) => {
       const response = await fetch(`/api/platform/tenants/${id}/features`, {
         method: "PATCH",
@@ -401,12 +380,31 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
             { key: "certificates", enabled: true },
             { key: "payments", enabled: true },
             { key: "email_otp", enabled: true },
+            { key: "google_login", enabled: true },
           ],
         }),
       });
       return response.status;
     }, tenantId);
     expect(crmEnabled).toBe(200);
+    const googleEnabledContext = await browser.newContext();
+    try {
+      const googleEnabledPage = await googleEnabledContext.newPage();
+      await googleEnabledPage.goto(`http://${slug}.localhost:${e2ePort}/login`);
+      await expect
+        .poll(
+          async () => {
+            await googleEnabledPage.reload();
+            return googleEnabledPage
+              .getByRole("button", { name: "ادامه با گوگل" })
+              .count();
+          },
+          { timeout: 20_000, intervals: [1_000] },
+        )
+        .toBe(1);
+    } finally {
+      await googleEnabledContext.close();
+    }
     expect(
       await page.evaluate(async (id) => {
         const response = await fetch(
@@ -540,6 +538,8 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
     await expect(
       page.getByRole("heading", { name: "Read-only staff" }),
     ).toBeVisible();
+
+    yield "provisioning and tenant branding";
 
     const staffName = "E2E Read Only Staff";
     const staffEmail = `staff-${randomUUID()}@example.test`;
@@ -686,9 +686,15 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
         .getByLabel("گذرواژه", { exact: true })
         .fill("portal e2e password long");
       await portalPage.getByRole("button", { name: "ورود امن" }).click();
-      await portalPage.waitForURL("**/dashboard", { timeout: 15_000 });
+      await portalPage.waitForURL(
+        collection === "participants" ? "**/account" : "**/dashboard",
+        { timeout: 15_000 },
+      );
       await expect(
-        portalPage.getByRole("heading", { name: `سلام ${name}` }),
+        portalPage.getByRole("heading", {
+          name:
+            collection === "participants" ? `سلام، ${name}` : `سلام ${name}`,
+        }),
       ).toBeVisible();
       expect(
         await portalPage.evaluate(
@@ -726,6 +732,8 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
     );
     if (!phase5ParticipantSession)
       throw new Error("Participant session fixture was incomplete.");
+
+    yield "tenant RBAC and invited identities";
 
     const phase3ProgramTitle = `کارگاه آزمایشی ${randomUUID().slice(0, 8)}`;
     const phase3RunTitle = `اجرای آزمایشی ${randomUUID().slice(0, 8)}`;
@@ -926,6 +934,8 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       ),
     ).toBe(0);
     await publicContext.close();
+    yield "program creation and public enrollment";
+
     await runPhase6BrowserFlows({
       ownerPage: page,
       participantPage: phase5ParticipantSession.page,
@@ -935,6 +945,8 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       tenantId,
       sourceRunId: phase3RunId,
     });
+    yield "payment browser flows";
+
     await runPilotAuthBrowserFlows({
       browser,
       tenantId,
@@ -943,6 +955,8 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       participantEmail: phase5ParticipantEmail,
       mailOutboxPath: e2eState.mailOutboxPath ?? "",
     });
+    yield "pilot authentication flows";
+
     await page.goto(`${tenantOrigin}/calendar`);
     await expect(page.getByText(phase3SessionTitle)).toBeVisible();
 
@@ -1094,6 +1108,8 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
     await verificationContext.close();
     await phase5ParticipantSession.context.close();
 
+    yield "attendance and certificates";
+
     const wrongHostEmail = `wrong-host-${randomUUID()}@example.test`;
     await page.goto(`${tenantOrigin}/staff`);
     await page.locator("#invite-name").fill("Wrong Host Invite");
@@ -1237,9 +1253,78 @@ test("platform and tenant users retain configurable MFA, isolation, RBAC, invita
       async () => (await fetch("/api/platform/tenants")).status,
     );
     expect(revokedStatus).toBe(401);
+  } catch (error) {
+    originalError = error;
+    throw error;
   } finally {
-    await stopWorker(failWorker).catch(() => undefined);
-    if (retryWorker) await stopWorker(retryWorker).catch(() => undefined);
+    const stops = await Promise.allSettled([
+      stopWorker(failWorker),
+      ...(retryWorker ? [stopWorker(retryWorker)] : []),
+    ]);
     if (tenantId) saveTenantState(tenantId, null);
+    const failures = stops.filter((result) => result.status === "rejected");
+    reportCleanupFailures(
+      "Provisioning worker cleanup failed",
+      failures,
+      originalError,
+    );
+  }
+}
+
+test.describe("platform and tenant journey", () => {
+  test.describe.configure({ mode: "serial" });
+  let sharedContext: BrowserContext;
+  let anonymousRequest: APIRequestContext;
+  let journey: AsyncGenerator<string, void, unknown>;
+  let journeyError: unknown;
+
+  test.beforeAll(async ({ browser }) => {
+    sharedContext = await browser.newContext();
+    anonymousRequest = await apiRequest.newContext({
+      baseURL: `http://localhost:${e2ePort}`,
+    });
+    const page = await sharedContext.newPage();
+    journey = tenantJourney({ page, request: anonymousRequest, browser });
+  });
+
+  test.afterAll(async () => {
+    let finalizationError: unknown;
+    try {
+      if (journey) await journey.return();
+    } catch (error) {
+      finalizationError = error;
+    }
+    const closed = await Promise.allSettled([
+      ...(sharedContext ? [sharedContext.close()] : []),
+      ...(anonymousRequest ? [anonymousRequest.dispose()] : []),
+    ]);
+    const failures = closed
+      .filter((result) => result.status === "rejected")
+      .map((result) => result.reason);
+    if (finalizationError) failures.push(finalizationError);
+    reportCleanupFailures("Journey cleanup failed", failures, journeyError);
+  });
+
+  const phases = [
+    "provisioning and tenant branding",
+    "tenant RBAC and invited identities",
+    "program creation and public enrollment",
+    "payment browser flows",
+    "pilot authentication flows",
+    "attendance and certificates",
+    "tenant isolation and session revocation",
+  ];
+  for (const [index, phase] of phases.entries()) {
+    test(phase, async () => {
+      test.setTimeout(240_000);
+      try {
+        const result = await journey.next();
+        expect(result.done).toBe(index === phases.length - 1);
+        if (!result.done) expect(result.value).toBe(phase);
+      } catch (error) {
+        journeyError = error;
+        throw error;
+      }
+    });
   }
 });

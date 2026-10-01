@@ -2,18 +2,21 @@
 
 import { createAuthClient } from "better-auth/react";
 import { useEffect, useState, type FormEvent } from "react";
-import { safeParticipantDestination } from "@/modules/tenant-identity/auth-destination";
+import {
+  authContinuePath,
+  safeParticipantDestination,
+} from "@/modules/tenant-identity/auth-destination";
 
 export function TenantSignInForm({
   otpEnabled = false,
   passwordEnabled = true,
   googleEnabled = false,
-  next = "/dashboard",
+  next,
 }: {
   otpEnabled?: boolean;
   passwordEnabled?: boolean;
   googleEnabled?: boolean;
-  next?: string;
+  next?: string | null;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,11 +43,11 @@ export function TenantSignInForm({
     setError("");
     try {
       const auth = createAuthClient({ basePath: "/api/tenant-auth" });
-      const destination = safeParticipantDestination(next) ?? "/account";
+      const destination = authContinuePath(next);
       const result = await auth.signIn.social({
         provider: "google",
         callbackURL: destination,
-        errorCallbackURL: `/login?participant=1&next=${encodeURIComponent(destination)}`,
+        errorCallbackURL: `/login?participant=1&next=${encodeURIComponent(safeParticipantDestination(next) ?? "/account")}`,
       });
       if (result.error) throw new Error("Google sign-in failed");
       if (result.data?.redirect === false) window.location.assign(destination);
@@ -67,17 +70,17 @@ export function TenantSignInForm({
           body: JSON.stringify({ email, otp }),
         });
         if (!response.ok) throw new Error("invalid code");
-        window.location.assign(next);
+        window.location.assign(authContinuePath(next));
         return;
       }
       const auth = createAuthClient({ basePath: "/api/tenant-auth" });
       const result = await auth.signIn.email({
         email,
         password,
-        callbackURL: next,
+        callbackURL: authContinuePath(next),
       });
       if (result.error) throw new Error("ایمیل یا گذرواژه درست نیست.");
-      window.location.assign(next);
+      window.location.assign(authContinuePath(next));
     } catch {
       setError(
         mode === "otp"

@@ -9,7 +9,10 @@ import type { PoolClient } from "pg";
 import { jsonResponse, requestIdFrom } from "@/shared/http/api-response";
 import { DomainError } from "@/shared/errors/domain-error";
 import { googleOAuthEnabledForOrigin } from "@/modules/tenant-identity/google-config";
-import { safeParticipantDestination } from "@/modules/tenant-identity/auth-destination";
+import {
+  safeParticipantDestination,
+  safeAuthCallbackDestination,
+} from "@/modules/tenant-identity/auth-destination";
 
 export const runtime = "nodejs";
 
@@ -178,7 +181,10 @@ async function handle(request: Request): Promise<Response> {
     if (request.method !== "GET") assertTenantSameOrigin(request, origin);
     const socialPath =
       path === "/sign-in/social" || path === "/callback/google";
-    if (socialPath && !googleOAuthEnabledForOrigin(origin))
+    if (
+      socialPath &&
+      (!tenant.features.google_login || !googleOAuthEnabledForOrigin(origin))
+    )
       throw new DomainError(
         "FEATURE_DISABLED",
         "Google sign-in is unavailable.",
@@ -228,7 +234,7 @@ async function handle(request: Request): Promise<Response> {
       }
       if (
         input.provider !== "google" ||
-        !safeParticipantDestination(input.callbackURL) ||
+        !safeAuthCallbackDestination(input.callbackURL) ||
         (input.errorCallbackURL !== undefined &&
           !safeGoogleErrorDestination(input.errorCallbackURL)) ||
         (input.requestSignUp !== undefined && input.requestSignUp !== true)

@@ -97,7 +97,7 @@ export function TenantCreateForm({ plans }: { plans: Plan[] }) {
             required
             minLength={2}
             maxLength={63}
-            pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?"
+            pattern="[a-z0-9](?:(?:[a-z0-9]|-){0,61}[a-z0-9])?"
             value={slug}
             onChange={(event) => setSlug(event.target.value.toLowerCase())}
             aria-describedby="slug-hint"

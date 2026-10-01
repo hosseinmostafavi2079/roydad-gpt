@@ -2,6 +2,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { expect, type Browser, type Page } from "@playwright/test";
 import { Client } from "pg";
+import { reportCleanupFailures } from "../helpers/cleanup-failures";
 
 type Input = {
   browser: Browser;
@@ -91,6 +92,7 @@ export async function runPilotAuthBrowserFlows(input: Input): Promise<void> {
   const db = new Client({ connectionString: url.toString() });
   await db.connect();
   const contexts: Array<{ close(): Promise<void> }> = [];
+  let originalError: unknown;
   try {
     const cloneRun = async (label: string) => {
       const title = `${label} ${randomUUID().slice(0, 8)}`;
@@ -229,18 +231,21 @@ export async function runPilotAuthBrowserFlows(input: Input): Promise<void> {
         }
       | undefined;
     for (let attempt = 0; attempt < 3; attempt++) {
-      initiation = await googlePage.evaluate(async (callbackURL) => {
-        const response = await fetch("/api/tenant-auth/sign-in/social", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ provider: "google", callbackURL }),
-        });
-        return {
-          status: response.status,
-          body: (await response.json()) as { url?: string },
-          headers: Object.fromEntries(response.headers.entries()),
-        };
-      }, googleRun.path);
+      initiation = await googlePage.evaluate(
+        async (callbackURL) => {
+          const response = await fetch("/api/tenant-auth/sign-in/social", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ provider: "google", callbackURL }),
+          });
+          return {
+            status: response.status,
+            body: (await response.json()) as { url?: string },
+            headers: Object.fromEntries(response.headers.entries()),
+          };
+        },
+        `/auth/continue?next=${encodeURIComponent(googleRun.path)}`,
+      );
       if (initiation.status !== 429) break;
       await waitForAuthRateLimit(db);
     }
@@ -269,9 +274,9 @@ export async function runPilotAuthBrowserFlows(input: Input): Promise<void> {
     });
     await mockGoogleIdentity(googlePage, unverified);
     await clickGoogleWithRateLimit(googlePage, db);
-    await expect(googlePage.locator(".login-card [role=alert]")).toContainText(
-      "ورود با گوگل انجام نشد",
-    );
+    await expect(
+      googlePage.locator(".tenant-auth-card [role=alert]"),
+    ).toContainText("ورود با گوگل انجام نشد");
     await googlePage.unroute("**/api/tenant-auth/sign-in/social");
     const verified = signedGoogleIdentity({
       tenantId: input.tenantId,
@@ -333,10 +338,23 @@ export async function runPilotAuthBrowserFlows(input: Input): Promise<void> {
       `${input.tenantOrigin}/login?participant=1&next=${encodeURIComponent("//evil.example")}`,
     );
     await expect(
-      maliciousPage.locator('a[href="/register?next=%2Faccount"]'),
+      maliciousPage.locator('a[href="/login?mode=register"]'),
     ).toBeVisible();
+  } catch (error) {
+    originalError = error;
+    throw error;
   } finally {
-    for (const context of contexts) await context.close();
-    await db.end();
+    const results = await Promise.allSettled([
+      ...contexts.map((context) => context.close()),
+      db.end(),
+    ]);
+    const failures = results
+      .filter((result) => result.status === "rejected")
+      .map((result) => result.reason);
+    reportCleanupFailures(
+      "Pilot browser cleanup failed",
+      failures,
+      originalError,
+    );
   }
 }

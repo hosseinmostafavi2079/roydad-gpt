@@ -71,6 +71,7 @@ const featureNames: Record<string, string> = {
   waitlist: "فهرست انتظار",
   password_login: "ورود با رمز عبور",
   email_otp: "ورود با کد ایمیلی",
+  google_login: "ورود با گوگل",
   courses: "دوره‌ها",
   events: "رویدادها",
   attendance: "حضور و غیاب",
@@ -104,7 +105,14 @@ const featureGroups = [
   },
   {
     title: "ارتباطات",
-    keys: ["password_login", "email_otp", "crm", "sms", "email"],
+    keys: [
+      "password_login",
+      "email_otp",
+      "google_login",
+      "crm",
+      "sms",
+      "email",
+    ],
   },
   {
     title: "سازمان و امکانات پیشرفته",

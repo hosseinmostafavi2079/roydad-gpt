@@ -154,6 +154,9 @@ function createContainerEnv() {
     "TENANT_POOL_IDLE_TIMEOUT_MS",
     "TENANT_POOL_ACQUIRE_TIMEOUT_MS",
     "TRUSTED_PROXY_CIDRS",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GOOGLE_OAUTH_ALLOWED_ORIGINS",
   ])
     values[key] = process.env[key] ?? "";
   if (

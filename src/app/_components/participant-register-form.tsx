@@ -2,6 +2,7 @@
 
 import { createAuthClient } from "better-auth/react";
 import { useState, type FormEvent } from "react";
+import { authContinuePath } from "@/modules/tenant-identity/auth-destination";
 
 export function ParticipantRegisterForm({
   next,
@@ -22,12 +23,13 @@ export function ParticipantRegisterForm({
       const auth = createAuthClient({ basePath: "/api/tenant-auth" });
       const result = await auth.signIn.social({
         provider: "google",
-        callbackURL: next,
+        callbackURL: authContinuePath(next),
         errorCallbackURL: `/login?participant=1&next=${encodeURIComponent(next)}`,
         requestSignUp: true,
       });
       if (result.error) throw new Error("Google registration failed");
-      if (result.data?.redirect === false) window.location.assign(next);
+      if (result.data?.redirect === false)
+        window.location.assign(authContinuePath(next));
     } catch {
       setError("ثبت‌نام با گوگل انجام نشد. دوباره تلاش کنید.");
       setBusy(false);
@@ -65,7 +67,7 @@ export function ParticipantRegisterForm({
     <form className="public-register-form" onSubmit={submit}>
       {googleEnabled && (
         <button
-          className="public-button"
+          className="btn btn-secondary"
           type="button"
           disabled={busy}
           onClick={registerWithGoogle}
@@ -74,7 +76,7 @@ export function ParticipantRegisterForm({
         </button>
       )}
       {googleEnabled && passwordEnabled && (
-        <p className="hint">یا با ایمیل ثبت‌نام کنید</p>
+        <p className="tenant-auth-divider">یا با ایمیل</p>
       )}
       {error && (
         <p role="alert" className="alert alert-error">
@@ -115,7 +117,7 @@ export function ParticipantRegisterForm({
               autoComplete="new-password"
             />
           </label>
-          <button className="public-button" type="submit" disabled={busy}>
+          <button className="btn btn-primary" type="submit" disabled={busy}>
             {busy ? "در حال ثبت‌نام…" : "ایجاد حساب"}
           </button>
         </>

@@ -6,6 +6,7 @@ const featureNames: Record<string, string> = {
   waitlist: "فهرست انتظار",
   password_login: "ورود با رمز عبور",
   email_otp: "ورود با کد ایمیلی",
+  google_login: "ورود با گوگل",
   courses: "دوره‌ها",
   events: "رویدادها",
   attendance: "حضور و غیاب",

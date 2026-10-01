@@ -6,6 +6,8 @@ Deployment configuration is still under implementation. No production deployment
 
 ## Required separation and secrets
 
+For tenant Google OAuth in production, provide `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` through the deployment secret store, and list each permitted HTTPS tenant origin exactly in `GOOGLE_OAUTH_ALLOWED_ORIGINS` (comma-separated, no paths or wildcards). Register `<origin>/api/tenant-auth/callback/google` exactly in the Google Web application OAuth client. Enable the tenant's `google_login` feature explicitly; credentials alone do not enable sign-in. Keep the CI-only `EVENTOS_E2E_GOOGLE_MOCK` setting out of production. An unconfigured provider or disabled tenant feature denies the server OAuth endpoint.
+
 - Control-plane database URL: limited to control-plane migrations and application access as configured.
 - Provisioning database URL: isolated database-creation/migration identity; unavailable to browser bundles and web request logging.
 - Tenant runtime and migration access: least-privilege identities, TLS, connection limits, and explicit network allow-lists.

@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   participantLoginPath,
   safeParticipantDestination,
+  authContinuePath,
+  safeAuthCallbackDestination,
+  roleAwareTenantDestination,
 } from "../../src/modules/tenant-identity/auth-destination";
 import { googleOAuthEnabledForOrigin } from "../../src/modules/tenant-identity/google-config";
+import { featureSetSchema } from "../../src/modules/platform/plans/schema";
 
 describe("pilot participant auth destinations", () => {
   it("preserves only local account and event paths", () => {
@@ -53,5 +57,37 @@ describe("pilot participant auth destinations", () => {
         else process.env[key] = value;
       }
     }
+  });
+
+  it("routes by server roles and accepts only exact local OAuth callbacks", () => {
+    expect(
+      roleAwareTenantDestination(["participant"], "/events/course-2026"),
+    ).toBe("/events/course-2026");
+    expect(roleAwareTenantDestination(["participant"], "//evil.test")).toBe(
+      "/account",
+    );
+    expect(
+      roleAwareTenantDestination(["instructor"], "/events/course-2026"),
+    ).toBe("/dashboard");
+    expect(roleAwareTenantDestination(["organization_owner"], "/account")).toBe(
+      "/dashboard",
+    );
+    expect(roleAwareTenantDestination(["support"], undefined)).toBe(
+      "/dashboard",
+    );
+    expect(
+      safeAuthCallbackDestination(authContinuePath("/events/course-2026")),
+    ).toBe(true);
+    expect(safeAuthCallbackDestination("/auth/continue?next=//evil.test")).toBe(
+      false,
+    );
+    expect(safeAuthCallbackDestination("//evil.test/auth/continue")).toBe(
+      false,
+    );
+  });
+
+  it("keeps tenant Google login disabled until explicitly enabled", () => {
+    expect(featureSetSchema.shape.google_login.parse(undefined)).toBe(false);
+    expect(featureSetSchema.shape.google_login.parse(true)).toBe(true);
   });
 });

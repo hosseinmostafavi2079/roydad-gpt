@@ -1,22 +1,29 @@
-import { redirect, notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { headers } from "next/headers";
+import Link from "next/link";
+import { TenantAuthShell } from "@/app/_components/tenant-auth-shell";
 import { TenantSignInForm } from "@/app/_components/tenant-sign-in-form";
+import { ParticipantRegisterForm } from "@/app/_components/participant-register-form";
 import { getTenantAuth } from "@/modules/tenant-identity/auth";
 import { resolveTenantFromHeaders } from "@/modules/tenant-identity/request-auth";
 import { DomainError } from "@/shared/errors/domain-error";
-import { safeParticipantDestination } from "@/modules/tenant-identity/auth-destination";
+import {
+  authContinuePath,
+  safeParticipantDestination,
+} from "@/modules/tenant-identity/auth-destination";
 import { googleOAuthEnabledForOrigin } from "@/modules/tenant-identity/google-config";
+import { getWebsiteProfile } from "@/modules/public-site/profile";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
-  title: "ورود سازمان",
+  title: "ورود یا ثبت‌نام",
   robots: { index: false, follow: false },
 };
 
 export default async function TenantLoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; participant?: string }>;
+  searchParams: Promise<{ next?: string; mode?: string; participant?: string }>;
 }) {
   const requestHeaders = await headers();
   let context: Awaited<ReturnType<typeof resolveTenantFromHeaders>>;
@@ -26,56 +33,63 @@ export default async function TenantLoginPage({
     if (error instanceof DomainError) notFound();
     throw error;
   }
+  const query = await searchParams;
+  const next = safeParticipantDestination(query.next);
+  const mode =
+    query.mode === "register" && context.tenant.features.registration
+      ? "register"
+      : "login";
   const session = await getTenantAuth(
     context.tenant,
     context.origin,
-  ).api.getSession({ headers: requestHeaders });
-  const query = await searchParams;
-  const safeNext =
-    safeParticipantDestination(query.next) ??
-    (query.participant === "1" ? "/account" : "/dashboard");
-  if (session) redirect(safeNext);
+  ).api.getSession({
+    headers: requestHeaders,
+  });
+  if (session) redirect(authContinuePath(next));
+  const profile = context.tenant.features.public_website
+    ? await getWebsiteProfile(context.tenant)
+    : null;
+  const googleEnabled =
+    context.tenant.features.google_login &&
+    googleOAuthEnabledForOrigin(context.origin);
+  const nextQuery = next ? `&next=${encodeURIComponent(next)}` : "";
   return (
-    <main className="login-page">
-      <section className="login-art">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            E
-          </span>
-          <span className="brand-name">
-            {context.tenant.branding.brandName}
-            <span className="brand-caption">فضای امن سازمان</span>
-          </span>
-        </div>
-        <div className="login-art-copy">
-          <div className="eyebrow" style={{ color: "#e9c36d" }}>
-            ورود کاربران
-          </div>
-          <h1>به فضای سازمان خود خوش آمدید.</h1>
-          <p>ورود امن به حساب سازمانی و ابزارهای مجاز شما.</p>
-        </div>
-        <div className="login-art-footer">EventOS · فضای سازمان</div>
-      </section>
-      <section className="login-form-side">
-        <div className="login-card">
-          <div className="eyebrow">ورود سازمانی</div>
-          <h2>ورود به {context.tenant.branding.brandName}</h2>
-          <p>با ایمیل خود وارد شوید و ثبت‌نام را ادامه دهید.</p>
-          <TenantSignInForm
-            otpEnabled={context.tenant.features.email_otp}
-            passwordEnabled={context.tenant.features.password_login}
-            googleEnabled={googleOAuthEnabledForOrigin(context.origin)}
-            next={safeNext}
-          />
-          {context.tenant.features.registration && (
-            <p className="hint" style={{ marginTop: 15 }}>
-              <a href={`/register?next=${encodeURIComponent(safeNext)}`}>
-                حساب ندارید؟ ثبت‌نام کنید.
-              </a>
-            </p>
-          )}
-        </div>
-      </section>
-    </main>
+    <TenantAuthShell
+      brandName={context.tenant.branding.brandName}
+      primaryColor={context.tenant.branding.primaryColor}
+      logoUrl={profile?.logoUrl}
+      welcomeText={profile?.shortDescription}
+    >
+      <nav className="tenant-auth-modes" aria-label="ورود یا ثبت‌نام">
+        <Link
+          aria-current={mode === "login" ? "page" : undefined}
+          href={`/login?mode=login${nextQuery}`}
+        >
+          ورود
+        </Link>
+        {context.tenant.features.registration && (
+          <Link
+            aria-current={mode === "register" ? "page" : undefined}
+            href={`/login?mode=register${nextQuery}`}
+          >
+            ثبت‌نام
+          </Link>
+        )}
+      </nav>
+      {mode === "register" ? (
+        <ParticipantRegisterForm
+          next={next ?? "/account"}
+          passwordEnabled={context.tenant.features.password_login}
+          googleEnabled={googleEnabled}
+        />
+      ) : (
+        <TenantSignInForm
+          otpEnabled={context.tenant.features.email_otp}
+          passwordEnabled={context.tenant.features.password_login}
+          googleEnabled={googleEnabled}
+          next={next}
+        />
+      )}
+    </TenantAuthShell>
   );
 }

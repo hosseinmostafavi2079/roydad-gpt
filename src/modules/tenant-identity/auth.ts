@@ -19,7 +19,7 @@ import { getServerConfig } from "@/shared/config/env";
 import { canAuthenticateTenantUser } from "@/modules/tenant-identity/policy";
 import {
   googleOAuthEnabledForOrigin,
-  googleMockEnabled,
+  googleMockEnabledForOrigin,
 } from "@/modules/tenant-identity/google-config";
 import { parseE2eGoogleIdentity } from "@/modules/tenant-identity/e2e-google";
 
@@ -27,7 +27,10 @@ export type TenantContext = Awaited<ReturnType<typeof resolveTenantContext>>;
 const authCache = new Map<string, ReturnType<typeof betterAuth>>();
 
 export function getTenantAuth(context: TenantContext, origin: string) {
-  const key = `${context.tenantId}:${context.databaseName}:${origin}`;
+  const googleEnabled =
+    context.features.google_login && googleOAuthEnabledForOrigin(origin);
+  const googleMock = googleMockEnabledForOrigin(origin);
+  const key = `${context.tenantId}:${context.databaseName}:${origin}:${googleEnabled}`;
   const cached = authCache.get(key);
   if (cached) {
     authCache.delete(key);
@@ -39,7 +42,7 @@ export function getTenantAuth(context: TenantContext, origin: string) {
   const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET ?? "";
   const isGoogleRequest = (url: string | undefined) =>
     Boolean(url?.includes("/callback/google")) ||
-    (googleMockEnabled() && Boolean(url?.includes("/sign-in/social")));
+    (googleMock && Boolean(url?.includes("/sign-in/social")));
   const options: BetterAuthOptions = {
     appName: context.branding.brandName,
     baseURL: origin,
@@ -125,12 +128,12 @@ export function getTenantAuth(context: TenantContext, origin: string) {
         trustedProviders: [],
       },
     },
-    socialProviders: googleOAuthEnabledForOrigin(origin)
+    socialProviders: googleEnabled
       ? {
           google: {
             clientId: googleClientId,
             clientSecret: googleClientSecret,
-            ...(googleMockEnabled()
+            ...(googleMock
               ? {
                   verifyIdToken: async (token: string) =>
                     parseE2eGoogleIdentity(token, context.tenantId) !== null,

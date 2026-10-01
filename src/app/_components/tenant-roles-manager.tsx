@@ -197,7 +197,7 @@ export function TenantRolesManager({
                 required
                 minLength={2}
                 maxLength={80}
-                pattern="[a-z][a-z0-9_-]{1,79}"
+                pattern="[a-z](?:[a-z0-9]|_|-){1,79}"
                 value={code}
                 onChange={(event) => setCode(event.target.value.toLowerCase())}
               />
