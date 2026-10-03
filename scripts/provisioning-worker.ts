@@ -386,7 +386,11 @@ async function checkPublicRoutes(
   tenantId: string,
   hostname: string,
 ): Promise<void> {
-  const base = new URL(tenantOrigin(hostname));
+  const base = new URL(
+    config.NODE_ENV === "test" && process.env.EVENTOS_TEST_PUBLIC_PROBE_ORIGIN
+      ? process.env.EVENTOS_TEST_PUBLIC_PROBE_ORIGIN
+      : tenantOrigin(hostname),
+  );
   for (const path of ["/", "/login"]) {
     let status: number | undefined;
     try {

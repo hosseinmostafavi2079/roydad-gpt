@@ -127,6 +127,7 @@ function startWorker(failurePhase?: string): Promise<ChildProcess> {
         ...process.env,
         NODE_ENV: "test",
         LOG_LEVEL: "warn",
+        EVENTOS_TEST_PUBLIC_PROBE_ORIGIN: "http://127.0.0.1:1",
         ...(failurePhase ? { EVENTOS_TEST_FAIL_PHASE: failurePhase } : {}),
       },
       stdio: ["pipe", "pipe", "pipe", "ipc"],
@@ -262,8 +263,19 @@ async function waitForState(
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
+  const last = await getControlPool().query<{
+    state: string;
+    error_code: string | null;
+  }>(
+    "SELECT state, error_code FROM provisioning_jobs WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 1",
+    [tenantId],
+  );
+  const logs = workerProcesses
+    .map((child) => workerOutput.get(child) ?? "")
+    .join("\n")
+    .slice(-2500);
   throw new Error(
-    `Tenant ${tenantId} did not reach ${expected} within 45 seconds.`,
+    `Tenant ${tenantId} did not reach ${expected} within 45 seconds; state=${last.rows[0]?.state ?? "missing"}; error=${last.rows[0]?.error_code ?? "none"}; worker logs: ${logs}`,
   );
 }
 
