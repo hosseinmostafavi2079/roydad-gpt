@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import type { TenantContext } from "@/modules/tenant-identity/auth";
 import type { WebsiteProfile } from "@/modules/public-site/profile";
 import type { PublicRun } from "@/modules/public-site/repository";
+import { listInformationPages } from "@/modules/public-site/content";
 
 function formatDate(date: Date): string {
   return new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
@@ -11,7 +12,7 @@ function formatDate(date: Date): string {
   }).format(date);
 }
 
-export function PublicSiteShell({
+export async function PublicSiteShell({
   tenant,
   profile,
   children,
@@ -21,11 +22,21 @@ export function PublicSiteShell({
   children: ReactNode;
 }) {
   const title = profile.displayName || tenant.branding.brandName;
+  const pages = await listInformationPages(tenant);
+  const menu = {
+    home: { href: "/", label: "خانه" },
+    events: { href: "/events", label: "دوره‌ها و رویدادها" },
+    instructors: { href: "/instructors", label: "مدرس‌ها" },
+    about: { href: "/about", label: "درباره ما" },
+    contact: { href: "/contact", label: "تماس با ما" },
+    faq: { href: "/faq", label: "سوالات متداول" },
+  };
   const style = {
     "--public-primary": profile.primaryColor,
     "--public-secondary": profile.secondaryColor,
     "--public-accent": profile.accentColor,
     "--public-background": profile.siteSettings.backgroundColor,
+    "--public-surface": profile.siteSettings.surfaceColor,
     "--public-text": profile.siteSettings.textColor,
     "--public-radius":
       profile.radiusStyle === "LARGE"
@@ -36,7 +47,7 @@ export function PublicSiteShell({
   } as CSSProperties;
   return (
     <div
-      className={`public-site ${profile.siteSettings.fontPreset === "TAHOMA" ? "public-font-tahoma" : ""} ${profile.siteSettings.buttonStyle === "OUTLINE" ? "public-buttons-outline" : ""}`}
+      className={`public-site public-template-${profile.siteSettings.template.toLowerCase()} public-width-${profile.siteSettings.contentWidth.toLowerCase()} public-spacing-${profile.siteSettings.spacing.toLowerCase()} ${profile.siteSettings.fontPreset === "TAHOMA" ? "public-font-tahoma" : ""} ${profile.siteSettings.buttonStyle === "OUTLINE" ? "public-buttons-outline" : ""}`}
       dir="rtl"
       style={style}
     >
@@ -50,10 +61,18 @@ export function PublicSiteShell({
           <strong>{title}</strong>
         </Link>
         <nav aria-label="ناوبری سایت">
-          <Link href="/">خانه</Link>
-          <Link href="/events">دوره‌ها و رویدادها</Link>
-          <Link href="/about">درباره ما</Link>
-          <Link href="/contact">تماس با ما</Link>
+          {profile.siteSettings.menuOrder
+            .filter((key) => profile.siteSettings.menuEnabled[key])
+            .map((key) => (
+              <Link href={menu[key].href} key={key}>
+                {menu[key].label}
+              </Link>
+            ))}
+          {pages.slice(0, 6).map((page) => (
+            <Link href={`/pages/${page.slug}`} key={page.id}>
+              {page.title}
+            </Link>
+          ))}
         </nav>
         <Link className="public-account-link" href="/account">
           حساب من
@@ -72,9 +91,19 @@ export function PublicSiteShell({
   );
 }
 
-export function PublicRunCard({ run }: { run: PublicRun }) {
+export function PublicRunCard({
+  run,
+  preset = "VISUAL",
+  showPaidPrice = false,
+}: {
+  run: PublicRun;
+  preset?: "COMPACT" | "VISUAL" | "DETAILED";
+  showPaidPrice?: boolean;
+}) {
   return (
-    <article className="public-run-card">
+    <article
+      className={`public-run-card public-run-card-${preset.toLowerCase()}`}
+    >
       <div className="public-run-art" aria-hidden="true">
         {run.coverUrl ? (
           <img src={run.coverUrl} alt="" loading="lazy" />
@@ -102,6 +131,18 @@ export function PublicRunCard({ run }: { run: PublicRun }) {
                 : "حضوری"}
           </span>
           {run.instructor && <span>{run.instructor}</span>}
+          {run.category && <span>{run.category}</span>}
+          {run.confirmedCount >= run.capacity && <span>ظرفیت تکمیل</span>}
+          {run.confirmedCount < run.capacity &&
+            BigInt(run.priceAmount) === 0n && <span>رایگان</span>}
+          {run.confirmedCount < run.capacity &&
+            BigInt(run.priceAmount) > 0n &&
+            showPaidPrice && (
+              <span>
+                {Number(run.priceAmount).toLocaleString("fa-IR")}{" "}
+                {run.priceCurrency}
+              </span>
+            )}
         </div>
         <Link className="public-text-link" href={`/events/${run.slug}`}>
           مشاهده جزئیات ←

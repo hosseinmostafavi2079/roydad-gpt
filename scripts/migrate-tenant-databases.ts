@@ -78,6 +78,8 @@ for (const tenant of tenants.rows) {
       tenant.migration_version !== "0008_phase5_attendance_certificates" &&
       tenant.migration_version !== "0009_phase6_payments" &&
       tenant.migration_version !== "0010_phase6_coupon_reservations" &&
+      tenant.migration_version !== "0011_phase6_payment_lifecycle" &&
+      tenant.migration_version !== "0012_pilot_public_site" &&
       tenant.migration_version !== tenantCurrentMigrationVersion
     ) {
       throw new Error("Tenant migration version requires review.");

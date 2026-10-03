@@ -30,7 +30,11 @@ function assertMediaAccess(
     throw new DomainError("FORBIDDEN", "رسانه متعلق به این مجموعه نیست.");
   authorize(
     actor.permissions,
-    kind.startsWith("PROGRAM_") ? "program.update" : "website.manage",
+    kind.startsWith("PROGRAM_")
+      ? "program.update"
+      : kind.startsWith("INSTRUCTOR_")
+        ? "instructor.update"
+        : "website.manage",
   );
 }
 
@@ -65,6 +69,20 @@ async function saveMediaCore(
       );
       if (!program.rowCount)
         throw new DomainError("NOT_FOUND", "برنامه یافت نشد.");
+    } else if (kind.startsWith("INSTRUCTOR_")) {
+      const instructor = await client.query(
+        "SELECT 1 FROM tenant_instructor_public_profiles WHERE tenant_id=$1 AND id=$2",
+        [tenant.tenantId, resourceId],
+      );
+      if (!instructor.rowCount)
+        throw new DomainError("NOT_FOUND", "مدرس یافت نشد.");
+    } else if (kind === "WEBSITE_GALLERY") {
+      const item = await client.query(
+        "SELECT 1 FROM tenant_site_entries WHERE tenant_id=$1 AND id=$2 AND kind='GALLERY'",
+        [tenant.tenantId, resourceId],
+      );
+      if (!item.rowCount)
+        throw new DomainError("NOT_FOUND", "تصویر گالری یافت نشد.");
     } else if (resourceId !== tenant.tenantId) {
       throw new DomainError("FORBIDDEN", "رسانه متعلق به این مجموعه نیست.");
     }
@@ -162,7 +180,12 @@ export async function removeMedia(
   requestId: string,
 ) {
   assertMediaAccess(tenant, actor, kind);
-  if (!kind.startsWith("PROGRAM_") && resourceId !== tenant.tenantId)
+  if (
+    !kind.startsWith("PROGRAM_") &&
+    !kind.startsWith("INSTRUCTOR_") &&
+    kind !== "WEBSITE_GALLERY" &&
+    resourceId !== tenant.tenantId
+  )
     throw new DomainError("FORBIDDEN", "رسانه متعلق به این مجموعه نیست.");
   const pool = getTenantPool(tenant);
   const removed = await pool.query<MediaRow>(

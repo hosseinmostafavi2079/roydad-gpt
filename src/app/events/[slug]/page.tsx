@@ -2,11 +2,20 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PublicSiteShell, formatDate } from "@/app/_components/public-site";
+import { StructuredData } from "@/app/_components/structured-data";
 import { PublicEnrollmentForm } from "@/app/_components/public-enrollment-form";
 import { registrationFormSchema } from "@/modules/enrollment/form";
 import { publicPageContext } from "@/modules/public-site/page-context";
-import { getPublicRun } from "@/modules/public-site/repository";
-import { publicMetadata } from "@/modules/public-site/metadata";
+import { listSiteEntries } from "@/modules/public-site/content";
+import {
+  getPublicRun,
+  getPublicRunSessions,
+  listPublicRuns,
+} from "@/modules/public-site/repository";
+import {
+  publicCanonical,
+  publicMetadata,
+} from "@/modules/public-site/metadata";
 
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ slug: string }> };
@@ -15,21 +24,32 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   try {
     const { tenant, profile, origin } = await publicPageContext();
     const run = await getPublicRun(tenant, (await params).slug);
-    return publicMetadata(
+    const metadata = publicMetadata(
       tenant,
       profile,
       origin,
       `/events/${run.slug}`,
-      `${run.title} | ${profile.displayName || tenant.branding.brandName}`,
-      run.summary,
+      run.seoTitle ||
+        `${run.title} | ${profile.displayName || tenant.branding.brandName}`,
+      run.seoDescription || run.summary,
     );
+    if (run.canonicalPath)
+      metadata.alternates = {
+        canonical: publicCanonical(tenant, origin, run.canonicalPath),
+      };
+    if (run.ogImageUrl)
+      metadata.openGraph = {
+        ...metadata.openGraph,
+        images: [{ url: new URL(run.ogImageUrl, origin).toString() }],
+      };
+    return metadata;
   } catch {
     return { robots: { index: false } };
   }
 }
 
 export default async function EventDetailPage({ params }: Props) {
-  const { tenant, profile } = await publicPageContext();
+  const { tenant, profile, origin } = await publicPageContext();
   let run: Awaited<ReturnType<typeof getPublicRun>>;
   try {
     run = await getPublicRun(tenant, (await params).slug);
@@ -37,14 +57,51 @@ export default async function EventDetailPage({ params }: Props) {
     notFound();
   }
   const form = registrationFormSchema.safeParse(run.registrationFormSchema);
+  const [sessions, related, faqs] = await Promise.all([
+    getPublicRunSessions(tenant, run.id),
+    run.category
+      ? listPublicRuns(tenant, "", { category: run.category })
+      : Promise.resolve([]),
+    profile.siteSettings.sections.faq
+      ? listSiteEntries(tenant, "FAQ")
+      : Promise.resolve([]),
+  ]);
+  const relatedRuns = related.filter((item) => item.id !== run.id).slice(0, 3);
   const now = Date.now();
   const open =
     run.endsAt.getTime() > now &&
     (!run.registrationStartsAt || run.registrationStartsAt.getTime() <= now) &&
     (!run.registrationEndsAt || run.registrationEndsAt.getTime() > now);
   const capacityFull = run.confirmedCount >= run.capacity;
+  const canRegister =
+    tenant.features.registration &&
+    (BigInt(run.priceAmount) === 0n || tenant.features.payments) &&
+    open &&
+    (!capacityFull || (run.waitlistEnabled && tenant.features.waitlist)) &&
+    form.success;
+  const priceLabel =
+    BigInt(run.priceAmount) === 0n
+      ? "رایگان"
+      : `${Number(run.priceAmount).toLocaleString("fa-IR")} ${run.priceCurrency}`;
+  const eventSchema = {
+    "@context": "https://schema.org",
+    "@type": "Event",
+    name: run.title,
+    startDate: run.startsAt.toISOString(),
+    endDate: run.endsAt.toISOString(),
+    url: `${origin}/events/${run.slug}`,
+    description: run.summary || undefined,
+    eventAttendanceMode:
+      run.deliveryMode === "ONLINE"
+        ? "https://schema.org/OnlineEventAttendanceMode"
+        : run.deliveryMode === "HYBRID"
+          ? "https://schema.org/MixedEventAttendanceMode"
+          : "https://schema.org/OfflineEventAttendanceMode",
+    ...(run.venue ? { location: { "@type": "Place", name: run.venue } } : {}),
+  };
   return (
     <PublicSiteShell tenant={tenant} profile={profile}>
+      <StructuredData value={eventSchema} />
       <div className="public-detail">
         <div className="public-detail-main">
           {run.coverUrl && (
@@ -76,7 +133,7 @@ export default async function EventDetailPage({ params }: Props) {
           )}
           <section>
             <h2>درباره برنامه</h2>
-            <p>{run.description || "توضیحات این برنامه به‌زودی تکمیل می‌شود."}</p>
+            {run.description && <p>{run.description}</p>}
           </section>
           {run.audience && (
             <section>
@@ -96,16 +153,95 @@ export default async function EventDetailPage({ params }: Props) {
               <p>{run.prerequisites}</p>
             </section>
           )}
+          {sessions.length > 0 && (
+            <section>
+              <h2>برنامه جلسات</h2>
+              <ol className="public-session-list">
+                {sessions.map((session) => (
+                  <li key={session.id}>
+                    <strong>{session.title}</strong>
+                    <span>
+                      {formatDate(session.startsAt)} تا{" "}
+                      {formatDate(session.endsAt)}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+          {run.instructorSlug && (
+            <section className="public-event-instructor">
+              <h2>مدرس</h2>
+              <div className="public-instructor-summary">
+                {run.instructorPhotoUrl && (
+                  <img
+                    src={run.instructorPhotoUrl}
+                    alt={`تصویر ${run.instructor}`}
+                    loading="lazy"
+                  />
+                )}
+                <div>
+                  <h3>{run.instructor}</h3>
+                  {run.instructorTitle && <p>{run.instructorTitle}</p>}
+                  {run.instructorShortBio && <p>{run.instructorShortBio}</p>}
+                  {Boolean(run.instructorSpecialties?.length) && (
+                    <p>{run.instructorSpecialties?.join(" · ")}</p>
+                  )}
+                  <Link
+                    className="public-text-link"
+                    href={`/instructors/${run.instructorSlug}`}
+                  >
+                    مشاهده رزومه کامل مدرس ←
+                  </Link>
+                </div>
+              </div>
+            </section>
+          )}
+          {run.venue && (
+            <section>
+              <h2>محل برگزاری</h2>
+              <p>{run.venue}</p>
+            </section>
+          )}
+          {relatedRuns.length > 0 && (
+            <section>
+              <h2>برنامه‌های مرتبط</h2>
+              <div className="public-run-grid">
+                {relatedRuns.map((item) => (
+                  <article className="public-run-card" key={item.id}>
+                    <div className="public-run-body">
+                      <h3>
+                        <Link href={`/events/${item.slug}`}>{item.title}</Link>
+                      </h3>
+                      <p>{formatDate(item.startsAt)}</p>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+          {faqs.length > 0 && (
+            <section>
+              <h2>سوالات متداول</h2>
+              <div className="public-faq-list">
+                {faqs.map(
+                  (item) =>
+                    item.content.kind === "FAQ" && (
+                      <details key={item.id}>
+                        <summary>{item.content.question}</summary>
+                        <p>{item.content.answer}</p>
+                      </details>
+                    ),
+                )}
+              </div>
+            </section>
+          )}
         </div>
-        <aside className="public-detail-aside">
+        <aside className="public-detail-aside" id="registration">
           <h2>اطلاعات برگزاری</h2>
           <dl>
             <dt>هزینه ثبت‌نام</dt>
-            <dd>
-              {BigInt(run.priceAmount) === 0n
-                ? "رایگان"
-                : `${Number(run.priceAmount).toLocaleString("fa-IR")} ${run.priceCurrency}`}
-            </dd>
+            <dd>{priceLabel}</dd>
             <dt>آغاز</dt>
             <dd>{formatDate(run.startsAt)}</dd>
             <dt>پایان</dt>
@@ -131,12 +267,7 @@ export default async function EventDetailPage({ params }: Props) {
               </>
             )}
           </dl>
-          {tenant.features.registration &&
-          (BigInt(run.priceAmount) === 0n || tenant.features.payments) &&
-          open &&
-          (!capacityFull ||
-            (run.waitlistEnabled && tenant.features.waitlist)) &&
-          form.success ? (
+          {canRegister && form.success ? (
             <PublicEnrollmentForm
               runId={run.id}
               eventPath={`/events/${run.id}`}
@@ -157,6 +288,14 @@ export default async function EventDetailPage({ params }: Props) {
           )}
         </aside>
       </div>
+      {canRegister && (
+        <div className="public-mobile-register">
+          <span>{priceLabel}</span>
+          <a className="public-button" href="#registration">
+            ثبت‌نام در دوره
+          </a>
+        </div>
+      )}
     </PublicSiteShell>
   );
 }

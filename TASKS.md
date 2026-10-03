@@ -210,3 +210,18 @@ Pilot Step 1 follow-up: unified branded tenant login and registration at `/login
 - [ ] Confirm GitHub Actions after pushing before marking Pilot Step 2 complete.
 
 Final migration-aware local rerun passed: `pnpm check`, 56/56 unit, 16/16 real PostgreSQL integration, production build, and 9/9 Playwright. The first final browser attempt stalled on platform sign-out after Chrome reported `net::ERR_NETWORK_CHANGED`; a complete rerun passed including sign-out and teardown. Prisma validation, dependency audit, and Gitleaks passed earlier in this patch and are rerun for the final files. GitHub Actions has not run on this uncommitted change.
+
+# Pilot Step 3 — Tenant public sites and instructor profiles (local gate in progress)
+
+- [x] Add controlled website templates, design tokens, navigation and homepage section ordering, public event discovery and richer event details.
+- [x] Add structured FAQ, testimonials, gallery, information pages and safe text/list/CTA blocks with tenant-scoped writes.
+- [x] Separate explicitly published instructor profiles and optional PDF resumes from private staff accounts; add directory, profile editor, public pages and event summaries.
+- [x] Add tenant, event and instructor SEO metadata with local canonical paths and Organization/Event/Person structured data.
+- [x] Apply forward-only tenant migrations `0012_pilot_public_site` and `0013_pilot_public_seo`; preserve existing website settings through normalization.
+- [x] Pass focused unit (6/6), PostgreSQL (1/1) and first three browser phases (3/3) during implementation.
+- [x] Pass the final local code, unit, PostgreSQL, build, Playwright, Prisma, audit and Gitleaks gate on the final files.
+- [ ] Confirm GitHub Actions after pushing. Do not mark the step complete before that gate.
+
+Website settings use atomic validated saves. Information pages and public instructor profiles have draft/published state; a separate draft revision and publish action for the entire website was deferred because changing existing website profile persistence would broaden the tenant configuration path. Editors must save website changes to preview them publicly.
+
+Final local gate: `pnpm check` passed with 24 lint advisories, 62/62 unit tests, 16/16 real PostgreSQL integration tests, production build, 9/9 Playwright tests, Prisma tenant schema validation, production dependency audit with no known vulnerabilities, and Gitleaks v8.30.0 across 11 project targets with no leaks. The first integration pass caught two stale migration-version assumptions; both were corrected and the full integration suite passed. GitHub Actions has not run on this uncommitted step.

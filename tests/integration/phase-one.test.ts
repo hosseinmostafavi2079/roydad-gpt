@@ -5,6 +5,7 @@ import os from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
 import { Client } from "pg";
 import { resolveTxt } from "node:dns/promises";
 import {
@@ -79,6 +80,17 @@ import { PUT as putWebsiteProfile } from "@/app/api/tenant/website/route";
 import { getWebsiteProfile } from "@/modules/public-site/profile";
 import { saveMedia, removeMedia } from "@/modules/media/repository";
 import { GET as getPublicMedia } from "@/app/api/media/[id]/route";
+import {
+  getInformationPage,
+  listSiteEntries,
+  saveInformationPage,
+  saveSiteEntry,
+} from "@/modules/public-site/content";
+import {
+  getPublicInstructor,
+  listPublicInstructors,
+  saveInstructorProfile,
+} from "@/modules/public-site/instructors";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 
@@ -269,9 +281,31 @@ async function removeTenantFixtures(): Promise<void> {
       );
       const name = result.rows[0]?.database_name;
       if (name && /^eventos_t_[0-9a-f]{32}$/.test(name)) {
-        await provisioner.query(
-          `DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`,
-        );
+        const deadline = Date.now() + 15_000;
+        let sessions: {
+          pid: number;
+          application_name: string;
+          state: string | null;
+        }[] = [];
+        do {
+          sessions = (
+            await provisioner.query<{
+              pid: number;
+              application_name: string;
+              state: string | null;
+            }>(
+              "SELECT pid,application_name,state FROM pg_stat_activity WHERE datname=$1 AND pid<>pg_backend_pid()",
+              [name],
+            )
+          ).rows;
+          if (!sessions.length) break;
+          await delay(150);
+        } while (Date.now() < deadline);
+        if (sessions.length)
+          throw new Error(
+            `Tenant fixture still has sessions: ${JSON.stringify(sessions)}`,
+          );
+        await provisioner.query(`DROP DATABASE IF EXISTS "${name}"`);
       }
       const client = await getControlPool().connect();
       try {
@@ -684,9 +718,9 @@ describe("Phase 1 real PostgreSQL gates", () => {
         "SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL",
       );
       const appRows = await migrationCheck.query<{ count: number }>(
-        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0011_phase6_payment_lifecycle'",
+        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0013_pilot_public_seo'",
       );
-      expect(prismaRows.rows[0]?.count).toBe(12);
+      expect(prismaRows.rows[0]?.count).toBe(14);
       expect(appRows.rows[0]?.count).toBe(1);
     } finally {
       await migrationCheck.end();
@@ -826,6 +860,151 @@ describe("Phase 1 real PostgreSQL gates", () => {
       websiteRequest({ ...websiteInput, logoUrl: logo.url }),
     );
     expect(profileWithLogo.status).toBe(200);
+    const faq = await saveSiteEntry(
+      ownerContext,
+      ownerActor,
+      {
+        enabled: true,
+        order: 1,
+        content: {
+          kind: "FAQ",
+          question: "زمان شروع چیست؟",
+          answer: "در صفحه رویداد اعلام می‌شود.",
+        },
+      },
+      randomUUID(),
+    );
+    expect((await listSiteEntries(ownerContext, "FAQ"))[0]?.id).toBe(faq.id);
+    const informationPage = await saveInformationPage(
+      ownerContext,
+      ownerActor,
+      {
+        slug: "registration-rules",
+        title: "قوانین ثبت‌نام",
+        published: false,
+        seoTitle: "قوانین ثبت‌نام",
+        metaDescription: "",
+        blocks: [{ id: randomUUID(), type: "text", text: "قوانین این مجموعه" }],
+      },
+      randomUUID(),
+    );
+    await expect(
+      getInformationPage(ownerContext, informationPage.slug),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const publishedPage = await saveInformationPage(
+      ownerContext,
+      ownerActor,
+      { ...informationPage, published: true },
+      randomUUID(),
+    );
+    expect(
+      (await getInformationPage(ownerContext, publishedPage.slug)).title,
+    ).toBe("قوانین ثبت‌نام");
+    await getTenantPool(ownerContext).query(
+      `INSERT INTO tenant_instructor_profiles (tenant_id,user_id,display_name) VALUES ($1,$2,'Public Test Teacher')`,
+      [ownerContext.tenantId, ownerActor.id],
+    );
+    const instructorContent = {
+      name: "Public Test Teacher",
+      title: "Senior Instructor",
+      shortBio: "Visible bio",
+      biography: "Visible biography",
+      specialties: ["Teaching"],
+      yearsExperience: 8,
+      experience: [],
+      education: [],
+      certifications: [],
+      honors: [],
+      books: [],
+      publications: [],
+      projects: [],
+      websiteUrl: "",
+      linkedInUrl: "",
+      photoUrl: "",
+      resumeUrl: "",
+      showResume: false,
+      showExperience: true,
+      showEducation: true,
+      showWorks: true,
+      seoTitle: "",
+      metaDescription: "",
+      canonicalPath: "",
+    };
+    const draftInstructor = await saveInstructorProfile(
+      ownerContext,
+      ownerActor,
+      ownerActor.id,
+      {
+        slug: "public-test-teacher",
+        published: false,
+        content: instructorContent,
+      },
+      randomUUID(),
+    );
+    expect(await listPublicInstructors(ownerContext)).toEqual([]);
+    await expect(
+      getPublicInstructor(ownerContext, draftInstructor.slug),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const publishedInstructor = await saveInstructorProfile(
+      ownerContext,
+      ownerActor,
+      ownerActor.id,
+      {
+        slug: "public-test-teacher",
+        published: true,
+        content: instructorContent,
+      },
+      randomUUID(),
+    );
+    expect(
+      (await getPublicInstructor(ownerContext, publishedInstructor.slug)).name,
+    ).toBe("Public Test Teacher");
+    expect(
+      JSON.stringify(
+        await getPublicInstructor(ownerContext, publishedInstructor.slug),
+      ),
+    ).not.toContain(ownerEmail);
+    const resume = await saveMedia(
+      ownerContext,
+      ownerActor,
+      "INSTRUCTOR_RESUME",
+      publishedInstructor.id,
+      "application/pdf",
+      Uint8Array.from(Buffer.from("%PDF-1.4\n1 0 obj\nendobj\n%%EOF")),
+      randomUUID(),
+    );
+    const hiddenResume = await getPublicMedia(
+      new Request(`${websiteOrigin}${resume.url}`, {
+        headers: { host: `${slugA}.localhost:3000` },
+      }),
+      { params: Promise.resolve({ id: resume.id }) },
+    );
+    expect(hiddenResume.status).toBe(401);
+    await saveInstructorProfile(
+      ownerContext,
+      ownerActor,
+      ownerActor.id,
+      {
+        slug: "public-test-teacher",
+        published: true,
+        content: {
+          ...instructorContent,
+          resumeUrl: resume.url,
+          showResume: true,
+        },
+      },
+      randomUUID(),
+    );
+    const publicResume = await getPublicMedia(
+      new Request(`${websiteOrigin}${resume.url}`, {
+        headers: { host: `${slugA}.localhost:3000` },
+      }),
+      { params: Promise.resolve({ id: resume.id }) },
+    );
+    expect(publicResume.status).toBe(200);
+    expect(publicResume.headers.get("content-disposition")).toContain(
+      "attachment",
+    );
     const unauthenticatedWebsite = await putWebsiteProfile(
       websiteRequest(websiteInput, ""),
     );
@@ -1378,6 +1557,21 @@ describe("Phase 1 real PostgreSQL gates", () => {
       { params: Promise.resolve({ id: logo.id }) },
     );
     expect(wrongMedia.status).toBe(404);
+    expect(await listPublicInstructors(contextB)).toEqual([]);
+    expect(await listSiteEntries(contextB, "FAQ")).toEqual([]);
+    await expect(
+      getInformationPage(contextB, publishedPage.slug),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      getPublicInstructor(contextB, publishedInstructor.slug),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const wrongResume = await getPublicMedia(
+      new Request(`http://${slugB}.localhost:3000${resume.url}`, {
+        headers: { host: `${slugB}.localhost:3000` },
+      }),
+      { params: Promise.resolve({ id: resume.id }) },
+    );
+    expect(wrongResume.status).toBe(404);
     const removedLogo = await removeMedia(
       ownerContext,
       ownerActor,
@@ -1732,7 +1926,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       [created.tenant.id, created.tenant.id],
     );
     expect(firstUpgrade.rows[0]).toEqual({
-      migration_version: "0011_phase6_payment_lifecycle",
+      migration_version: "0013_pilot_public_seo",
       audit_count: 1,
     });
 
@@ -1773,9 +1967,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
            (SELECT count(*)::int FROM tenant_schema_migrations) AS identity_rows,
            (SELECT count(*)::int FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS prisma_rows`,
       );
-      expect(metadata.rows[0]?.schema_version).toBe(
-        "0011_phase6_payment_lifecycle",
-      );
+      expect(metadata.rows[0]?.schema_version).toBe("0013_pilot_public_seo");
       expect(identity.rows[0]).toEqual({
         roles: 11,
         permissions: 49,
@@ -1784,7 +1976,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       expect(history.rows[0]).toEqual({
         phase1_rows: 1,
         identity_rows: 2,
-        prisma_rows: 12,
+        prisma_rows: 14,
       });
     } finally {
       await upgraded.end();

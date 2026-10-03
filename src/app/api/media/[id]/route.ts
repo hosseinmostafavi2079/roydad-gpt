@@ -5,7 +5,7 @@ import {
   resolveTenantRequest,
   requireTenantActor,
 } from "@/modules/tenant-identity/request-auth";
-import { type MediaRow } from "@/modules/media/repository";
+import type { MediaRow } from "@/modules/media/repository";
 import { DomainError } from "@/shared/errors/domain-error";
 import { errorResponse } from "@/shared/http/api-response";
 
@@ -22,7 +22,18 @@ export async function GET(
     const row = await getTenantPool(tenant).query<
       MediaRow & { public_visible: boolean }
     >(
-      `SELECT m.*, CASE WHEN m.purpose LIKE 'WEBSITE_%' THEN true
+      `SELECT m.*, CASE
+        WHEN m.purpose='WEBSITE_GALLERY' THEN EXISTS (SELECT 1 FROM tenant_site_entries entry
+          WHERE entry.tenant_id=m.tenant_id AND entry.id=m.resource_id AND entry.kind='GALLERY'
+          AND entry.enabled AND entry.content->>'imageUrl'='/api/media/' || m.id::text)
+        WHEN m.purpose LIKE 'WEBSITE_%' THEN true
+        WHEN m.purpose='INSTRUCTOR_PHOTO' THEN EXISTS (SELECT 1 FROM tenant_instructor_public_profiles profile
+          WHERE profile.tenant_id=m.tenant_id AND profile.id=m.resource_id AND profile.published
+          AND profile.content->>'photoUrl'='/api/media/' || m.id::text)
+        WHEN m.purpose='INSTRUCTOR_RESUME' THEN EXISTS (SELECT 1 FROM tenant_instructor_public_profiles profile
+          WHERE profile.tenant_id=m.tenant_id AND profile.id=m.resource_id AND profile.published
+          AND profile.content->>'resumeUrl'='/api/media/' || m.id::text
+          AND profile.content->>'showResume'='true')
         ELSE EXISTS (SELECT 1 FROM programs p JOIN program_runs r ON r.tenant_id=p.tenant_id AND r.program_id=p.id
           WHERE p.tenant_id=m.tenant_id AND p.id=m.resource_id AND p.status='ACTIVE' AND r.state='PUBLISHED') END AS public_visible
        FROM tenant_media m WHERE m.tenant_id=$1 AND m.id=$2`,
@@ -34,7 +45,11 @@ export async function GET(
       const actor = await requireTenantActor(tenant, origin, request.headers);
       if (
         actor.tenantId !== tenant.tenantId ||
-        !actor.permissions.has("program.read")
+        !(media.purpose.startsWith("INSTRUCTOR_")
+          ? actor.permissions.has("instructor.update")
+          : media.purpose === "WEBSITE_GALLERY"
+            ? actor.permissions.has("website.manage")
+            : actor.permissions.has("program.read"))
       )
         throw new DomainError("FORBIDDEN", "دسترسی به رسانه مجاز نیست.");
     }
@@ -59,7 +74,10 @@ export async function GET(
       headers: {
         "Content-Type": media.content_type,
         "Content-Length": String(bytes.length),
-        "Content-Disposition": "inline",
+        "Content-Disposition":
+          media.purpose === "INSTRUCTOR_RESUME"
+            ? "attachment; filename=resume.pdf"
+            : "inline",
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-store",
         "Accept-Ranges": "bytes",

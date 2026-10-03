@@ -4,9 +4,15 @@ import { getServerConfig } from "@/shared/config/env";
 import { normalizeHostHeader } from "@/modules/tenants/host";
 import { resolveTenantContext } from "@/modules/tenants/resolver";
 import { PublicRunCard, PublicSiteShell } from "@/app/_components/public-site";
+import { StructuredData } from "@/app/_components/structured-data";
 import { getWebsiteProfile } from "@/modules/public-site/profile";
 import { listPublicRuns } from "@/modules/public-site/repository";
-import { publicMetadata } from "@/modules/public-site/metadata";
+import {
+  publicCanonical,
+  publicMetadata,
+} from "@/modules/public-site/metadata";
+import { listPublicInstructors } from "@/modules/public-site/instructors";
+import { listSiteEntries } from "@/modules/public-site/content";
 import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
@@ -57,10 +63,19 @@ export default async function Home() {
   ]);
   const name = profile.displayName || tenant.branding.brandName;
   const settings = profile.siteSettings;
+  const [instructors, faqs, testimonials, gallery] = await Promise.all([
+    listPublicInstructors(tenant),
+    listSiteEntries(tenant, "FAQ"),
+    listSiteEntries(tenant, "TESTIMONIAL"),
+    listSiteEntries(tenant, "GALLERY"),
+  ]);
+  const categories = [
+    ...new Set(runs.map((run) => run.category).filter(Boolean)),
+  ].slice(0, 8);
   const sections = {
     hero: (
       <section
-        className={`public-hero ${settings.heroAlignment === "CENTER" ? "public-hero-center" : ""}`}
+        className={`public-hero public-hero-${settings.heroLayout.toLowerCase()} public-hero-${settings.heroHeight.toLowerCase()} public-overlay-${settings.heroOverlay.toLowerCase()} ${settings.heroAlignment === "CENTER" ? "public-hero-center" : ""}`}
         key="hero"
       >
         <div>
@@ -76,6 +91,11 @@ export default async function Home() {
           <a className="public-button" href={settings.heroCtaHref}>
             {settings.heroCtaText}
           </a>
+          {settings.heroSecondaryText && settings.heroSecondaryHref && (
+            <a className="public-text-link" href={settings.heroSecondaryHref}>
+              {settings.heroSecondaryText}
+            </a>
+          )}
         </div>
         {profile.coverUrl && <img src={profile.coverUrl} alt="" />}
       </section>
@@ -92,7 +112,12 @@ export default async function Home() {
         {runs.length ? (
           <div className="public-run-grid">
             {runs.slice(0, 6).map((run) => (
-              <PublicRunCard key={run.id} run={run} />
+              <PublicRunCard
+                key={run.id}
+                run={run}
+                preset={settings.eventCardStyle}
+                showPaidPrice={tenant.features.payments}
+              />
             ))}
           </div>
         ) : (
@@ -105,7 +130,12 @@ export default async function Home() {
         <h2>دوره‌های آینده</h2>
         <div className="public-run-grid">
           {runs.slice(0, 3).map((run) => (
-            <PublicRunCard key={run.id} run={run} />
+            <PublicRunCard
+              key={run.id}
+              run={run}
+              preset={settings.eventCardStyle}
+              showPaidPrice={tenant.features.payments}
+            />
           ))}
         </div>
       </section>
@@ -141,14 +171,131 @@ export default async function Home() {
       <section className="public-section" key="instructors">
         <h2>مدرسان</h2>
         <div className="public-run-grid">
-          {[...new Set(runs.map((run) => run.instructor).filter(Boolean))]
-            .slice(0, 6)
-            .map((instructor) => (
-              <article className="card card-pad" key={instructor}>
-                {instructor}
-              </article>
-            ))}
+          {instructors.slice(0, 6).map((instructor) => (
+            <article className="public-run-card" key={instructor.id}>
+              {instructor.photoUrl && (
+                <img
+                  className="public-instructor-photo"
+                  src={instructor.photoUrl}
+                  alt={`تصویر ${instructor.name}`}
+                  loading="lazy"
+                />
+              )}
+              <div className="public-run-body">
+                <h3>
+                  <a href={`/instructors/${instructor.slug}`}>
+                    {instructor.name}
+                  </a>
+                </h3>
+                {instructor.title && <p>{instructor.title}</p>}
+              </div>
+            </article>
+          ))}
         </div>
+      </section>
+    ),
+    search: (
+      <section className="public-section" key="search">
+        <h2>جست‌وجوی برنامه</h2>
+        <form action="/events" className="public-search">
+          <label htmlFor="home-event-query">نام دوره یا رویداد</label>
+          <div>
+            <input id="home-event-query" name="q" maxLength={80} />
+            <button type="submit">جست‌وجو</button>
+          </div>
+        </form>
+      </section>
+    ),
+    categories: (
+      <section className="public-section" key="categories">
+        <h2>موضوعات برنامه‌ها</h2>
+        <div className="public-tags">
+          {categories.map((category) => (
+            <a
+              key={category}
+              href={`/events?category=${encodeURIComponent(category)}`}
+            >
+              {category}
+            </a>
+          ))}
+        </div>
+      </section>
+    ),
+    whyUs: (
+      <section className="public-section" key="whyUs">
+        <h2>چرا {name}؟</h2>
+        <ul>
+          {settings.features.map((feature) => (
+            <li key={feature}>{feature}</li>
+          ))}
+        </ul>
+      </section>
+    ),
+    testimonials: (
+      <section className="public-section" key="testimonials">
+        <h2>دیدگاه‌ها</h2>
+        <div className="public-run-grid">
+          {testimonials.map(
+            (entry) =>
+              entry.content.kind === "TESTIMONIAL" && (
+                <blockquote
+                  className="public-run-card public-quote"
+                  key={entry.id}
+                >
+                  <p>{entry.content.quote}</p>
+                  <footer>
+                    {entry.content.name}
+                    {entry.content.role && ` · ${entry.content.role}`}
+                  </footer>
+                </blockquote>
+              ),
+          )}
+        </div>
+      </section>
+    ),
+    gallery: (
+      <section className="public-section" key="gallery">
+        <h2>گالری</h2>
+        <div className="public-gallery">
+          {gallery.map(
+            (entry) =>
+              entry.content.kind === "GALLERY" && (
+                <figure key={entry.id}>
+                  <img
+                    src={entry.content.imageUrl}
+                    alt={entry.content.alt}
+                    loading="lazy"
+                  />
+                  <figcaption>{entry.content.caption}</figcaption>
+                </figure>
+              ),
+          )}
+        </div>
+      </section>
+    ),
+    faq: (
+      <section className="public-section" key="faq">
+        <h2>سوالات متداول</h2>
+        <div className="public-faq-list">
+          {faqs.slice(0, 5).map(
+            (entry) =>
+              entry.content.kind === "FAQ" && (
+                <details key={entry.id}>
+                  <summary>{entry.content.question}</summary>
+                  <p>{entry.content.answer}</p>
+                </details>
+              ),
+          )}
+        </div>
+        <a href="/faq">همه پرسش‌ها</a>
+      </section>
+    ),
+    cta: (
+      <section className="public-section public-final-cta" key="cta">
+        <h2>{settings.heroTitle || name}</h2>
+        <a className="public-button" href={settings.heroCtaHref}>
+          {settings.heroCtaText}
+        </a>
       </section>
     ),
     stats: (
@@ -193,10 +340,47 @@ export default async function Home() {
       </section>
     ),
   };
+  const meaningful: Record<keyof typeof sections, boolean> = {
+    hero: true,
+    featured: runs.length > 0,
+    upcoming: runs.length > 0,
+    about: Boolean(profile.about || profile.shortDescription),
+    instructors: instructors.length > 0,
+    stats: settings.stats.length > 0,
+    contact: Boolean(profile.phone || profile.email || profile.address),
+    social: Boolean(
+      profile.socialUrl || settings.whatsappUrl || settings.telegramUrl,
+    ),
+    newsletter: true,
+    search: true,
+    categories: categories.length > 0,
+    whyUs: settings.features.length > 0,
+    testimonials: testimonials.length > 0,
+    gallery: gallery.length > 0,
+    faq: faqs.length > 0,
+    cta: true,
+  };
   return (
     <PublicSiteShell tenant={tenant} profile={profile}>
+      <StructuredData
+        value={{
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          name,
+          url: publicCanonical(tenant, `http://${hostHeader}`, "/"),
+          description: profile.shortDescription || undefined,
+          ...(profile.logoUrl
+            ? {
+                logo: new URL(
+                  profile.logoUrl,
+                  publicCanonical(tenant, `http://${hostHeader}`, "/"),
+                ).toString(),
+              }
+            : {}),
+        }}
+      />
       {settings.sectionOrder.map((key) =>
-        settings.sections[key] ? sections[key] : null,
+        settings.sections[key] && meaningful[key] ? sections[key] : null,
       )}
     </PublicSiteShell>
   );

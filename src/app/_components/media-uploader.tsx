@@ -6,12 +6,14 @@ import type { MediaKind } from "@/modules/media/validation";
 export function MediaUploader({
   kind,
   programId,
+  resourceId,
   label,
   value,
   onChange,
 }: {
   kind: MediaKind;
   programId?: string;
+  resourceId?: string;
   label: string;
   value: string;
   onChange: (url: string) => void;
@@ -19,12 +21,15 @@ export function MediaUploader({
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState("");
   const isVideo = kind === "PROGRAM_VIDEO";
+  const isPdf = kind === "INSTRUCTOR_RESUME";
   const accept = isVideo
     ? "video/mp4"
-    : kind === "WEBSITE_FAVICON"
-      ? "image/png,image/webp"
-      : "image/jpeg,image/png,image/webp";
-  const path = `/api/tenant/media?${new URLSearchParams({ kind, ...(programId ? { programId } : {}) })}`;
+    : isPdf
+      ? "application/pdf"
+      : kind === "WEBSITE_FAVICON"
+        ? "image/png,image/webp"
+        : "image/jpeg,image/png,image/webp";
+  const path = `/api/tenant/media?${new URLSearchParams({ kind, ...(programId ? { programId } : {}), ...(resourceId ? { resourceId } : {}) })}`;
   function upload(file: File) {
     const form = new FormData();
     form.set("file", file);
@@ -66,7 +71,9 @@ export function MediaUploader({
     <div className="media-uploader">
       <strong>{label}</strong>
       {value &&
-        (isVideo ? (
+        (isPdf ? (
+          <a href={value}>رزومهٔ بارگذاری‌شده (PDF)</a>
+        ) : isVideo ? (
           // biome-ignore lint/a11y/useMediaCaption: Uploaded media has no caption asset in this product version.
           <video controls preload="metadata" src={value} />
         ) : (

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { SiteSettings } from "@/modules/public-site/profile";
 import { MediaUploader } from "./media-uploader";
 import { apiRequest, errorMessage } from "./api-client";
+import { SiteContentEditor } from "./site-content-editor";
 
 type Profile = {
   displayName: string;
@@ -34,8 +35,12 @@ type Profile = {
 const tabs = [
   "اطلاعات عمومی",
   "هویت بصری",
+  "منو",
   "صفحه اصلی",
   "بخش‌ها",
+  "سوالات متداول",
+  "دیدگاه‌ها و گالری",
+  "صفحات",
   "تماس با ما",
   "شبکه‌های اجتماعی",
   "SEO",
@@ -51,6 +56,21 @@ const sectionLabels: Record<keyof SiteSettings["sections"], string> = {
   contact: "تماس با ما",
   social: "شبکه‌های اجتماعی",
   newsletter: "خبرنامه / دعوت به اقدام",
+  search: "جست‌وجوی برنامه‌ها",
+  categories: "دسته‌بندی‌ها",
+  whyUs: "چرا ما",
+  testimonials: "دیدگاه‌ها",
+  gallery: "گالری",
+  faq: "سوالات متداول",
+  cta: "دعوت به ثبت‌نام",
+};
+const menuLabels: Record<keyof SiteSettings["menuEnabled"], string> = {
+  home: "خانه",
+  events: "دوره‌ها و رویدادها",
+  instructors: "مدرس‌ها",
+  about: "درباره ما",
+  contact: "تماس با ما",
+  faq: "سوالات متداول",
 };
 
 const textFields: { key: keyof Profile; label: string; type?: string }[] = [
@@ -74,6 +94,9 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [tab, setTab] = useState<(typeof tabs)[number]>(tabs[0]);
+  const [previewWidth, setPreviewWidth] = useState<
+    "desktop" | "tablet" | "mobile"
+  >("desktop");
   const [usage, setUsage] = useState<{
     imageBytes: number;
     videoBytes: number;
@@ -177,6 +200,75 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
       </section>
       <section className="card card-pad" hidden={tab !== "هویت بصری"}>
         <h2 className="card-title">ظاهر و برند</h2>
+        <div className="website-editor-grid">
+          <label>
+            <span>قالب</span>
+            <select
+              value={value.siteSettings.template}
+              onChange={(e) =>
+                setting("template", e.target.value as SiteSettings["template"])
+              }
+            >
+              <option value="MINIMAL">مینیمال</option>
+              <option value="ACADEMY">آکادمی</option>
+              <option value="PROFESSIONAL">حرفه‌ای</option>
+              <option value="EVENT">رویداد</option>
+            </select>
+          </label>
+          <label>
+            <span>عرض محتوا</span>
+            <select
+              value={value.siteSettings.contentWidth}
+              onChange={(e) =>
+                setting(
+                  "contentWidth",
+                  e.target.value as SiteSettings["contentWidth"],
+                )
+              }
+            >
+              <option value="COMPACT">فشرده</option>
+              <option value="STANDARD">استاندارد</option>
+              <option value="WIDE">عریض</option>
+            </select>
+          </label>
+          <label>
+            <span>فاصله بخش‌ها</span>
+            <select
+              value={value.siteSettings.spacing}
+              onChange={(e) =>
+                setting("spacing", e.target.value as SiteSettings["spacing"])
+              }
+            >
+              <option value="COMPACT">کم</option>
+              <option value="COMFORTABLE">متوسط</option>
+              <option value="SPACIOUS">زیاد</option>
+            </select>
+          </label>
+          <label>
+            <span>رنگ سطح کارت</span>
+            <input
+              type="color"
+              value={value.siteSettings.surfaceColor}
+              onChange={(e) => setting("surfaceColor", e.target.value)}
+            />
+          </label>
+          <label>
+            <span>سبک کارت رویداد</span>
+            <select
+              value={value.siteSettings.eventCardStyle}
+              onChange={(e) =>
+                setting(
+                  "eventCardStyle",
+                  e.target.value as SiteSettings["eventCardStyle"],
+                )
+              }
+            >
+              <option value="COMPACT">فشرده</option>
+              <option value="VISUAL">تصویری</option>
+              <option value="DETAILED">مشروح</option>
+            </select>
+          </label>
+        </div>
         {usage && (
           <p className="hint">
             فضای رسانه: {(usage.totalBytes / 1048576).toFixed(1)} از{" "}
@@ -293,6 +385,56 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
           </label>
         </div>
       </section>
+      <section className="card card-pad" hidden={tab !== "منو"}>
+        <h2 className="card-title">منوی عمومی</h2>
+        {value.siteSettings.menuOrder.map((key, index) => (
+          <div className="website-section-row" key={key}>
+            <label>
+              <input
+                type="checkbox"
+                checked={value.siteSettings.menuEnabled[key]}
+                onChange={(e) =>
+                  setting("menuEnabled", {
+                    ...value.siteSettings.menuEnabled,
+                    [key]: e.target.checked,
+                  })
+                }
+              />{" "}
+              {menuLabels[key]}
+            </label>
+            <button
+              type="button"
+              disabled={index === 0}
+              onClick={() => {
+                const order = [...value.siteSettings.menuOrder];
+                const before = order[index - 1];
+                const current = order[index];
+                if (!before || !current) return;
+                order[index - 1] = current;
+                order[index] = before;
+                setting("menuOrder", order);
+              }}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              disabled={index === value.siteSettings.menuOrder.length - 1}
+              onClick={() => {
+                const order = [...value.siteSettings.menuOrder];
+                const current = order[index];
+                const next = order[index + 1];
+                if (!current || !next) return;
+                order[index] = next;
+                order[index + 1] = current;
+                setting("menuOrder", order);
+              }}
+            >
+              ↓
+            </button>
+          </div>
+        ))}
+      </section>
       <section className="card card-pad" hidden={tab !== "صفحه اصلی"}>
         <h2 className="card-title">صفحه اصلی</h2>
         <div className="website-editor-grid">
@@ -344,6 +486,68 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
             </select>
           </label>
           <label>
+            <span>طرح Hero</span>
+            <select
+              value={value.siteSettings.heroLayout}
+              onChange={(e) =>
+                setting(
+                  "heroLayout",
+                  e.target.value as SiteSettings["heroLayout"],
+                )
+              }
+            >
+              <option value="SPLIT">متن و تصویر</option>
+              <option value="FULL">تصویر تمام‌عرض</option>
+              <option value="CENTERED">مرکزی ساده</option>
+            </select>
+          </label>
+          <label>
+            <span>ارتفاع Hero</span>
+            <select
+              value={value.siteSettings.heroHeight}
+              onChange={(e) =>
+                setting(
+                  "heroHeight",
+                  e.target.value as SiteSettings["heroHeight"],
+                )
+              }
+            >
+              <option value="NORMAL">استاندارد</option>
+              <option value="TALL">بلند</option>
+            </select>
+          </label>
+          <label>
+            <span>پوشش تصویر</span>
+            <select
+              value={value.siteSettings.heroOverlay}
+              onChange={(e) =>
+                setting(
+                  "heroOverlay",
+                  e.target.value as SiteSettings["heroOverlay"],
+                )
+              }
+            >
+              <option value="NONE">بدون پوشش</option>
+              <option value="SOFT">ملایم</option>
+              <option value="STRONG">تیره</option>
+            </select>
+          </label>
+          <label>
+            <span>دکمه دوم</span>
+            <input
+              value={value.siteSettings.heroSecondaryText}
+              onChange={(e) => setting("heroSecondaryText", e.target.value)}
+            />
+          </label>
+          <label>
+            <span>مقصد دکمه دوم (مسیر داخلی)</span>
+            <input
+              value={value.siteSettings.heroSecondaryHref}
+              onChange={(e) => setting("heroSecondaryHref", e.target.value)}
+              placeholder="/about"
+            />
+          </label>
+          <label>
             <span>عنوان درباره ما</span>
             <input
               value={value.siteSettings.aboutTitle}
@@ -380,6 +584,36 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
               }
             />
           </label>
+          {(
+            [
+              ["aboutStory", "داستان مجموعه"],
+              ["aboutMission", "مأموریت"],
+              ["aboutVision", "چشم‌انداز"],
+            ] as const
+          ).map(([key, label]) => (
+            <label className="website-wide" key={key}>
+              <span>{label}</span>
+              <textarea
+                value={value.siteSettings[key]}
+                onChange={(e) => setting(key, e.target.value)}
+              />
+            </label>
+          ))}
+          <label className="website-wide">
+            <span>ارزش‌ها (هر خط یک مورد)</span>
+            <textarea
+              value={value.siteSettings.aboutValues.join("\n")}
+              onChange={(e) =>
+                setting(
+                  "aboutValues",
+                  e.target.value
+                    .split("\n")
+                    .map((item) => item.trim())
+                    .filter(Boolean),
+                )
+              }
+            />
+          </label>
           <label className="website-wide">
             <span>آمار (هر خط: عدد | عنوان)</span>
             <textarea
@@ -410,6 +644,23 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
           value={value.siteSettings.aboutImageUrl}
           onChange={(url) => setting("aboutImageUrl", url)}
         />
+      </section>
+      <section
+        className="card card-pad"
+        hidden={
+          tab !== "سوالات متداول" &&
+          tab !== "دیدگاه‌ها و گالری" &&
+          tab !== "صفحات"
+        }
+      >
+        {tab === "سوالات متداول" && <SiteContentEditor kind="FAQ" />}
+        {tab === "دیدگاه‌ها و گالری" && (
+          <>
+            <SiteContentEditor kind="TESTIMONIAL" />
+            <SiteContentEditor kind="GALLERY" />
+          </>
+        )}
+        {tab === "صفحات" && <SiteContentEditor kind="PAGE" />}
       </section>
       <section className="card card-pad" hidden={tab !== "بخش‌ها"}>
         <h2 className="card-title">نمایش و ترتیب بخش‌ها</h2>
@@ -462,6 +713,8 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
             [
               ["mapUrl", "نشانی نقشه"],
               ["contactCtaText", "متن دکمه تماس"],
+              ["contactMapUrl", "نشانی نقشه HTTPS"],
+              ["contactCtaHref", "مقصد داخلی دکمه تماس"],
             ] as const
           ).map(([key, label]) => (
             <label key={key}>
@@ -523,6 +776,35 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
       <section className="card card-pad" hidden={tab !== "پیش‌نمایش"}>
         <h2 className="card-title">پیش‌نمایش وب‌سایت</h2>
         <p>تغییرات را ذخیره کنید و سایت مجموعه را در زبانه تازه ببینید.</p>
+        {tab === "پیش‌نمایش" && (
+          <>
+            <fieldset className="public-preview-controls">
+              <legend>اندازه پیش‌نمایش</legend>
+              {(
+                [
+                  ["desktop", "دسکتاپ"],
+                  ["tablet", "تبلت"],
+                  ["mobile", "موبایل"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  type="button"
+                  className={`btn ${previewWidth === key ? "btn-primary" : "btn-secondary"}`}
+                  key={key}
+                  onClick={() => setPreviewWidth(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </fieldset>
+            <iframe
+              className={`public-preview-frame public-preview-${previewWidth}`}
+              src="/"
+              title="پیش‌نمایش وب‌سایت مجموعه"
+              loading="lazy"
+            />
+          </>
+        )}
         <a
           className="btn btn-secondary"
           href="/"

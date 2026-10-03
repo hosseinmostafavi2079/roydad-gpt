@@ -26,6 +26,15 @@ export const mediaKinds = {
     types: ["image/jpeg", "image/png", "image/webp"],
     maxBytes: 5 * 1024 * 1024,
   },
+  WEBSITE_GALLERY: {
+    types: ["image/jpeg", "image/png", "image/webp"],
+    maxBytes: 5 * 1024 * 1024,
+  },
+  INSTRUCTOR_PHOTO: {
+    types: ["image/jpeg", "image/png", "image/webp"],
+    maxBytes: 5 * 1024 * 1024,
+  },
+  INSTRUCTOR_RESUME: { types: ["application/pdf"], maxBytes: 10 * 1024 * 1024 },
 } as const;
 export type MediaKind = keyof typeof mediaKinds;
 
@@ -61,7 +70,9 @@ export function validateMedia(
             String.fromCharCode(...bytes.slice(8, 12)) === "WEBP"
           : mime === "video/mp4"
             ? String.fromCharCode(...bytes.slice(4, 8)) === "ftyp"
-            : false;
+            : mime === "application/pdf"
+              ? starts(0x25, 0x50, 0x44, 0x46, 0x2d)
+              : false;
   if (!valid)
     throw new DomainError("VALIDATION_FAILED", "محتوای فایل رسانه معتبر نیست.");
 }
@@ -72,6 +83,10 @@ export function mediaObjectKey(
   resourceId: string,
   randomId: string,
 ): string {
-  const group = kind.startsWith("PROGRAM_") ? "programs" : "website";
+  const group = kind.startsWith("PROGRAM_")
+    ? "programs"
+    : kind.startsWith("INSTRUCTOR_")
+      ? "instructors"
+      : "website";
   return `tenants/${tenantId}/${group}/${resourceId}/${randomId}`;
 }

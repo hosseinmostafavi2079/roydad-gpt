@@ -68,7 +68,7 @@ const navItems = [
     group: "افراد",
   },
   {
-    href: "/instructors",
+    href: "/manage/instructors",
     title: "مدرسان",
     permission: "instructor.read",
     feature: "crm" as const,

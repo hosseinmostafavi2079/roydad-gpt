@@ -11,7 +11,7 @@ const tenantIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const baselineMigration = "0000_phase1_baseline";
 export const tenantIdentityMigrationVersion = "0002_tenant_identity_rbac";
-export const tenantCurrentMigrationVersion = "0011_phase6_payment_lifecycle";
+export const tenantCurrentMigrationVersion = "0013_pilot_public_seo";
 
 function migrationUrl(databaseName: string): string {
   if (!databaseNamePattern.test(databaseName)) {
@@ -96,6 +96,8 @@ export async function applyTenantPrismaMigrations(
         current.schema_version !== "0008_phase5_attendance_certificates" &&
         current.schema_version !== "0009_phase6_payments" &&
         current.schema_version !== "0010_phase6_coupon_reservations" &&
+        current.schema_version !== "0011_phase6_payment_lifecycle" &&
+        current.schema_version !== "0012_pilot_public_site" &&
         current.schema_version !== tenantCurrentMigrationVersion) ||
       !current.has_foundation_migration
     ) {
@@ -199,6 +201,14 @@ export async function applyTenantPrismaMigrations(
     );
     if (!couponReservations.rows[0]?.ready)
       throw new Error("Tenant coupon schema verification failed.");
+
+    const pilotSite = await client.query<{ ready: boolean }>(
+      `SELECT to_regclass('public.tenant_instructor_public_profiles') IS NOT NULL
+          AND to_regclass('public.tenant_information_pages') IS NOT NULL
+          AND to_regclass('public.tenant_site_entries') IS NOT NULL AS ready`,
+    );
+    if (!pilotSite.rows[0]?.ready)
+      throw new Error("Tenant public site schema verification failed.");
 
     await client.query("BEGIN");
     const verification = await client.query<{

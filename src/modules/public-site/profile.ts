@@ -31,15 +31,58 @@ export const sectionIds = [
   "contact",
   "social",
   "newsletter",
+  "search",
+  "categories",
+  "whyUs",
+  "testimonials",
+  "gallery",
+  "faq",
+  "cta",
 ] as const;
 const sectionId = z.enum(sectionIds);
+const publicPath = z.string().regex(/^\/(?:$|[a-z0-9][a-z0-9\-/]*$)/);
+const menuEntry = z.enum([
+  "home",
+  "events",
+  "instructors",
+  "about",
+  "contact",
+  "faq",
+]);
 export const siteSettingsInput = z.strictObject({
+  template: z
+    .enum(["MINIMAL", "ACADEMY", "PROFESSIONAL", "EVENT"])
+    .default("ACADEMY"),
+  surfaceColor: color.default("#ffffff"),
+  contentWidth: z.enum(["COMPACT", "STANDARD", "WIDE"]).default("STANDARD"),
+  spacing: z
+    .enum(["COMPACT", "COMFORTABLE", "SPACIOUS"])
+    .default("COMFORTABLE"),
+  eventCardStyle: z.enum(["COMPACT", "VISUAL", "DETAILED"]).default("VISUAL"),
+  menuOrder: z
+    .array(menuEntry)
+    .max(6)
+    .refine((items) => new Set(items).size === items.length)
+    .default(["home", "events", "instructors", "about", "contact", "faq"]),
+  menuEnabled: z.record(menuEntry, z.boolean()).default({
+    home: true,
+    events: true,
+    instructors: true,
+    about: true,
+    contact: true,
+    faq: false,
+  }),
   slogan: z.string().trim().max(160).default(""),
   heroTitle: z.string().trim().max(160).default(""),
   heroSubtitle: z.string().trim().max(500).default(""),
   heroCtaText: z.string().trim().max(80).default("مشاهده دوره‌ها"),
   heroCtaHref: z.enum(["/events", "/about", "/contact"]).default("/events"),
   heroAlignment: z.enum(["START", "CENTER"]).default("START"),
+  heroLayout: z.enum(["SPLIT", "FULL", "CENTERED"]).default("SPLIT"),
+  heroHeight: z.enum(["NORMAL", "TALL"]).default("NORMAL"),
+  heroOverlay: z.enum(["NONE", "SOFT", "STRONG"]).default("NONE"),
+  heroSecondaryText: z.string().trim().max(80).default(""),
+  heroSecondaryHref: z.union([z.literal(""), publicPath]).default(""),
   sections: z.record(sectionId, z.boolean()).default({
     hero: true,
     featured: true,
@@ -50,6 +93,13 @@ export const siteSettingsInput = z.strictObject({
     contact: true,
     social: false,
     newsletter: false,
+    search: false,
+    categories: false,
+    whyUs: false,
+    testimonials: false,
+    gallery: false,
+    faq: false,
+    cta: false,
   }),
   sectionOrder: z
     .array(sectionId)
@@ -82,9 +132,41 @@ export const siteSettingsInput = z.strictObject({
   socialImageUrl: imageUrl.default(""),
   ogTitle: z.string().trim().max(160).default(""),
   organizationDescription: z.string().trim().max(500).default(""),
+  aboutStory: z.string().trim().max(3000).default(""),
+  aboutMission: z.string().trim().max(1500).default(""),
+  aboutVision: z.string().trim().max(1500).default(""),
+  aboutValues: z.array(z.string().trim().min(1).max(120)).max(8).default([]),
+  contactMapUrl: safeUrl.default(""),
+  contactCtaHref: z.union([z.literal(""), publicPath]).default(""),
 });
 export type SiteSettings = z.infer<typeof siteSettingsInput>;
 export const defaultSiteSettings = siteSettingsInput.parse({});
+
+export function normalizeSiteSettings(value: unknown): SiteSettings {
+  const input =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const sections =
+    input.sections &&
+    typeof input.sections === "object" &&
+    !Array.isArray(input.sections)
+      ? (input.sections as Record<string, unknown>)
+      : {};
+  const order = Array.isArray(input.sectionOrder) ? input.sectionOrder : [];
+  return siteSettingsInput.parse({
+    ...defaultSiteSettings,
+    ...input,
+    sections: { ...defaultSiteSettings.sections, ...sections },
+    sectionOrder: [...new Set([...order, ...sectionIds])],
+    menuEnabled: {
+      ...defaultSiteSettings.menuEnabled,
+      ...(input.menuEnabled && typeof input.menuEnabled === "object"
+        ? input.menuEnabled
+        : {}),
+    },
+  });
+}
 
 export const websiteProfileInput = z.strictObject({
   displayName: z.string().trim().max(160),
@@ -141,7 +223,27 @@ const websiteFieldNames: Record<string, string> = {
 };
 
 export function parseWebsiteProfileInput(value: unknown): WebsiteProfile {
-  const parsed = websiteProfileInput.safeParse(value);
+  const input =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const rawSettings =
+    input.siteSettings && typeof input.siteSettings === "object"
+      ? (input.siteSettings as Record<string, unknown>)
+      : {};
+  const rawOrder = rawSettings.sectionOrder;
+  if (Array.isArray(rawOrder) && new Set(rawOrder).size !== rawOrder.length)
+    throw new DomainError("VALIDATION_FAILED", "ترتیب بخش‌ها تکراری است.");
+  let settings: SiteSettings;
+  try {
+    settings = normalizeSiteSettings(input.siteSettings);
+  } catch {
+    throw new DomainError("VALIDATION_FAILED", "تنظیمات وب‌سایت نامعتبر است.");
+  }
+  const parsed = websiteProfileInput.safeParse({
+    ...input,
+    siteSettings: settings,
+  });
   if (parsed.success) return parsed.data;
   const path = String(parsed.error.issues[0]?.path[0] ?? "اطلاعات وب‌سایت");
   throw new DomainError(
@@ -171,7 +273,7 @@ export async function getWebsiteProfile(
     throw new DomainError("NOT_FOUND", "Website profile not found.");
   return websiteProfileInput.parse({
     ...result.rows[0],
-    siteSettings: { ...defaultSiteSettings, ...result.rows[0].siteSettings },
+    siteSettings: normalizeSiteSettings(result.rows[0].siteSettings),
   });
 }
 

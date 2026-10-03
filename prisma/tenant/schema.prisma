@@ -407,6 +407,10 @@ model ProgramRun {
   capacity             Int
   priceAmount          BigInt    @default(0) @map("price_amount")
   priceCurrency        String    @default("IRR") @map("price_currency") @db.VarChar(3)
+  seoTitle             String    @default("") @map("seo_title") @db.VarChar(160)
+  seoDescription       String    @default("") @map("seo_description") @db.VarChar(300)
+  canonicalPath        String    @default("") @map("canonical_path") @db.VarChar(100)
+  ogImageUrl           String    @default("") @map("og_image_url") @db.VarChar(80)
   minimumCapacity      Int?      @map("minimum_capacity")
   waitlistEnabled      Boolean   @default(false) @map("waitlist_enabled")
   state                String    @default("DRAFT") @db.VarChar(16)

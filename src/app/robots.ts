@@ -14,7 +14,15 @@ export default async function robots(): Promise<MetadataRoute.Robots> {
     return {
       rules: {
         userAgent: "*",
-        allow: ["/", "/events", "/about", "/contact"],
+        allow: [
+          "/",
+          "/events",
+          "/instructors",
+          "/about",
+          "/contact",
+          "/faq",
+          "/pages",
+        ],
         disallow: [
           "/api/",
           "/account",
@@ -26,6 +34,7 @@ export default async function robots(): Promise<MetadataRoute.Robots> {
           "/enrollments",
           "/settings",
           "/staff",
+          "/manage/",
           "/roles",
           "/runs",
           "/sessions",

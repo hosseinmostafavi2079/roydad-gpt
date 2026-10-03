@@ -18,9 +18,17 @@ export function POST(request: Request): Promise<Response> {
           "اندازه درخواست رسانه مجاز نیست.",
         );
       const kind = mediaKind(new URL(request.url).searchParams.get("kind"));
-      const resourceId = kind.startsWith("PROGRAM_")
-        ? z.uuid().parse(new URL(request.url).searchParams.get("programId"))
-        : tenant.tenantId;
+      const resourceId =
+        kind.startsWith("PROGRAM_") ||
+        kind.startsWith("INSTRUCTOR_") ||
+        kind === "WEBSITE_GALLERY"
+          ? z
+              .uuid()
+              .parse(
+                new URL(request.url).searchParams.get("resourceId") ??
+                  new URL(request.url).searchParams.get("programId"),
+              )
+          : tenant.tenantId;
       const form = await request.formData();
       const file = form.get("file");
       if (!(file instanceof File))
@@ -55,9 +63,17 @@ export function DELETE(request: Request): Promise<Response> {
     async ({ tenant }, actor, requestId) => {
       const url = new URL(request.url);
       const kind = mediaKind(url.searchParams.get("kind"));
-      const resourceId = kind.startsWith("PROGRAM_")
-        ? z.uuid().parse(url.searchParams.get("programId"))
-        : tenant.tenantId;
+      const resourceId =
+        kind.startsWith("PROGRAM_") ||
+        kind.startsWith("INSTRUCTOR_") ||
+        kind === "WEBSITE_GALLERY"
+          ? z
+              .uuid()
+              .parse(
+                url.searchParams.get("resourceId") ??
+                  url.searchParams.get("programId"),
+              )
+          : tenant.tenantId;
       return removeMedia(tenant, actor, kind, resourceId, requestId);
     },
     undefined,

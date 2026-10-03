@@ -33,13 +33,14 @@ export function publicMetadata(
   const canonical = publicCanonical(tenant, origin, pathname);
   const image = profile.siteSettings.socialImageUrl || profile.coverUrl;
   return {
-    title: profile.siteSettings.seoTitle || title,
+    title: pathname === "/" ? profile.siteSettings.seoTitle || title : title,
     description: summary,
+    ...(profile.faviconUrl ? { icons: { icon: profile.faviconUrl } } : {}),
     alternates: { canonical },
     openGraph: {
       type: "website",
       locale: "fa_IR",
-      title: profile.siteSettings.ogTitle || title,
+      title: pathname === "/" ? profile.siteSettings.ogTitle || title : title,
       description: summary,
       url: canonical,
       ...(image

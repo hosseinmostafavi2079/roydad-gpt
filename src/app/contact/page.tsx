@@ -46,6 +46,57 @@ export default async function ContactPage() {
             <p>{profile.contactHours}</p>
           </div>
         )}
+        {profile.siteSettings.contactMapUrl && (
+          <div>
+            <h2>موقعیت</h2>
+            <a
+              href={profile.siteSettings.contactMapUrl}
+              rel="noopener noreferrer"
+            >
+              مشاهده نقشه
+            </a>
+          </div>
+        )}
+        {profile.siteSettings.telegramUrl && (
+          <div>
+            <h2>تلگرام</h2>
+            <a
+              href={profile.siteSettings.telegramUrl}
+              rel="noopener noreferrer"
+            >
+              ارتباط در تلگرام
+            </a>
+          </div>
+        )}
+        {profile.siteSettings.whatsappUrl && (
+          <div>
+            <h2>واتساپ</h2>
+            <a
+              href={profile.siteSettings.whatsappUrl}
+              rel="noopener noreferrer"
+            >
+              ارتباط در واتساپ
+            </a>
+          </div>
+        )}
+        {profile.socialUrl && (
+          <div>
+            <h2>شبکه اجتماعی</h2>
+            <a href={profile.socialUrl} rel="noopener noreferrer">
+              مشاهده صفحه
+            </a>
+          </div>
+        )}
+        {profile.siteSettings.contactCtaHref && (
+          <div>
+            <a
+              className="public-button"
+              href={profile.siteSettings.contactCtaHref}
+            >
+              {profile.siteSettings.contactCtaText}
+            </a>
+          </div>
+        )}
         {!profile.phone && !profile.email && !profile.address && (
           <p className="public-empty">اطلاعات تماس هنوز منتشر نشده است.</p>
         )}

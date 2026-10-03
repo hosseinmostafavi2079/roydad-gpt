@@ -31,6 +31,10 @@ type Run = {
   waitlist_enabled: boolean;
   venue_id: string | null;
   notes: string;
+  seo_title: string;
+  seo_description: string;
+  canonical_path: string;
+  og_image_url: string;
   session_count: number;
   instructors: { id: string; name: string }[];
 };
@@ -128,6 +132,10 @@ export function RunsManager({
         venueId: value(data, "venueId") || null,
         instructorIds: data.getAll("instructorIds").map(String),
         notes: value(data, "notes"),
+        seoTitle: value(data, "seoTitle"),
+        seoDescription: value(data, "seoDescription"),
+        canonicalPath: value(data, "canonicalPath"),
+        ogImageUrl: value(data, "ogImageUrl"),
       };
       await apiRequest(
         editing ? `/api/tenant/runs/${editing.id}` : "/api/tenant/runs",
@@ -385,6 +393,40 @@ export function RunsManager({
                 name="notes"
                 maxLength={5000}
                 defaultValue={editing?.notes ?? ""}
+              />
+            </label>
+            <label className="field field-full">
+              <span className="label">عنوان سئو (اختیاری)</span>
+              <input
+                name="seoTitle"
+                maxLength={160}
+                defaultValue={editing?.seo_title ?? ""}
+              />
+            </label>
+            <label className="field field-full">
+              <span className="label">توضیح سئو (اختیاری)</span>
+              <textarea
+                name="seoDescription"
+                maxLength={300}
+                defaultValue={editing?.seo_description ?? ""}
+              />
+            </label>
+            <label className="field field-full">
+              <span className="label">
+                مسیر canonical (اختیاری، فقط مسیر همین سایت)
+              </span>
+              <input
+                name="canonicalPath"
+                placeholder="/events/شناسه-اجرا"
+                defaultValue={editing?.canonical_path ?? ""}
+              />
+            </label>
+            <label className="field field-full">
+              <span className="label">تصویر اشتراک‌گذاری (اختیاری)</span>
+              <input
+                name="ogImageUrl"
+                placeholder="/api/media/..."
+                defaultValue={editing?.og_image_url ?? ""}
               />
             </label>
             <label className="field field-full">

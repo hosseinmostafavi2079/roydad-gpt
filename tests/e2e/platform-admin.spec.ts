@@ -603,6 +603,10 @@ async function* tenantJourney({
     await page.getByRole("button", { name: "هویت بصری" }).click();
     await page.getByLabel("رنگ اصلی").fill("#145d58");
     await page
+      .getByRole("combobox", { name: "قالب", exact: true })
+      .selectOption("PROFESSIONAL");
+    await page.getByLabel("سبک کارت رویداد").selectOption("DETAILED");
+    await page
       .locator(".media-uploader")
       .filter({ hasText: "لوگو" })
       .locator('input[type="file"]')
@@ -618,7 +622,47 @@ async function* tenantJourney({
         .locator("img"),
     ).toBeVisible();
     await page.getByRole("button", { name: "بخش‌ها" }).click();
-    await page.getByLabel("درباره ما", { exact: true }).uncheck();
+    await page
+      .locator("section:not([hidden]) .website-section-row")
+      .filter({ hasText: "درباره ما" })
+      .getByRole("checkbox")
+      .uncheck();
+    await page
+      .locator("section:not([hidden]) .website-section-row")
+      .filter({ hasText: "سوالات متداول" })
+      .getByRole("checkbox")
+      .check();
+    await page
+      .getByRole("button", { name: "سوالات متداول", exact: true })
+      .click();
+    await page.getByLabel("پرسش").fill("چگونه ثبت‌نام کنم؟");
+    await page.getByLabel("پاسخ").fill("از صفحه رویداد ثبت‌نام کنید.");
+    await page
+      .locator(".site-content-editor")
+      .getByRole("checkbox", { name: "نمایش عمومی" })
+      .check();
+    await page.getByRole("button", { name: "ذخیره مورد" }).click();
+    await expect(page.locator(".site-content-editor [role=status]")).toHaveText(
+      "ذخیره شد.",
+    );
+    await page.getByRole("button", { name: "صفحات", exact: true }).click();
+    await page.getByLabel("عنوان صفحه").fill("قوانین ثبت‌نام");
+    await page.getByLabel("شناسه صفحه").fill("registration-rules");
+    await page.getByLabel("انتشار صفحه").check();
+    await page.getByLabel("افزودن بلوک").selectOption("text");
+    await page
+      .locator(".site-block-editor textarea")
+      .fill("قوانین ثبت‌نام آزمایشی");
+    await page.getByRole("button", { name: "ذخیره مورد" }).click();
+    await expect(page.locator(".site-content-editor [role=status]")).toHaveText(
+      "ذخیره شد.",
+    );
+    await page.getByRole("button", { name: "منو", exact: true }).click();
+    await page
+      .locator("section:not([hidden]) .website-section-row")
+      .filter({ hasText: "سوالات متداول" })
+      .getByRole("checkbox")
+      .check();
     await page.getByRole("button", { name: "ذخیره تغییرات" }).click();
     await expect(page.getByRole("status")).toHaveText("تغییرات ذخیره شد.");
     await page.goto(`${tenantOrigin}/`);
@@ -633,7 +677,18 @@ async function* tenantJourney({
         ),
     ).toBe("#145d58");
     await expect(page.locator(".public-logo img")).toBeVisible();
+    await expect(page.locator(".public-site")).toHaveClass(
+      /public-template-professional/,
+    );
     await expect(page.locator(".public-about-band")).toHaveCount(0);
+    await expect(page.getByText("چگونه ثبت‌نام کنم؟")).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "قوانین ثبت‌نام" }),
+    ).toBeVisible();
+    await page.goto(`${tenantOrigin}/pages/registration-rules`);
+    await expect(page.getByText("قوانین ثبت‌نام آزمایشی")).toBeVisible();
+    await page.goto(`${tenantOrigin}/faq`);
+    await expect(page.getByText("چگونه ثبت‌نام کنم؟")).toBeVisible();
     await page.goto(`${tenantOrigin}/contact`);
     await expect(page.getByText("021-12345678")).toBeVisible();
     await page.goto(`${tenantOrigin}/dashboard`);
@@ -790,7 +845,9 @@ async function* tenantJourney({
       email: string,
       retainSession = false,
     ) {
-      await page.goto(`${tenantOrigin}/${collection}`);
+      await page.goto(
+        `${tenantOrigin}/${collection === "instructors" ? "manage/instructors" : collection}`,
+      );
       await page.locator("#invite-name").fill(name);
       await page.locator("#invite-email").fill(email);
       await page.getByRole("button", { name: "ارسال دعوت" }).click();
@@ -858,6 +915,86 @@ async function* tenantJourney({
       "Unrelated E2E Instructor",
       unrelatedInstructorEmail,
     );
+    const publicInstructorId = await page.evaluate(async (email) => {
+      const payload = (await (
+        await fetch("/api/tenant/identity/instructors")
+      ).json()) as {
+        data: { id: string; email: string }[];
+      };
+      return payload.data.find((item) => item.email === email)?.id ?? "";
+    }, phase3InstructorEmail);
+    expect(publicInstructorId).toBeTruthy();
+    await page.goto(`${tenantOrigin}/manage/instructors/${publicInstructorId}`);
+    await page.getByLabel("عنوان حرفه‌ای").fill("مدرس ارشد آزمایشی");
+    await page.getByLabel("معرفی کوتاه").fill("مدرس باتجربه در آموزش رویداد");
+    await page
+      .getByLabel("زندگی‌نامه")
+      .fill("سابقه تدریس و برگزاری دوره‌های آموزشی.");
+    await page
+      .getByLabel("تخصص‌ها (هر خط یک مورد)")
+      .fill("آموزش\nمدیریت رویداد");
+    await page.getByRole("button", { name: "+ افزودن سابقه" }).click();
+    await page.getByLabel("سمت").fill("مدرس");
+    await page
+      .getByRole("textbox", { name: "سازمان", exact: true })
+      .fill("مجموعه آزمایشی");
+    await page.getByRole("button", { name: "+ افزودن تحصیلات" }).click();
+    await page.getByLabel("مدرک").fill("کارشناسی");
+    await page.getByLabel("رشته").fill("آموزش");
+    await page.getByLabel("مؤسسه").fill("دانشگاه نمونه");
+    await page.getByRole("button", { name: "ذخیره پروفایل" }).click();
+    await expect(page.getByRole("status")).toHaveText("پروفایل ذخیره شد.");
+    await page
+      .locator(".media-uploader")
+      .filter({ hasText: "تصویر مدرس" })
+      .locator('input[type="file"]')
+      .setInputFiles({
+        name: "instructor.png",
+        mimeType: "image/png",
+        buffer: tinyPng,
+      });
+    await expect(
+      page
+        .locator(".media-uploader")
+        .filter({ hasText: "تصویر مدرس" })
+        .locator("img"),
+    ).toBeVisible();
+    await page
+      .locator(".media-uploader")
+      .filter({ hasText: "رزومه PDF" })
+      .locator('input[type="file"]')
+      .setInputFiles({
+        name: "resume.pdf",
+        mimeType: "application/pdf",
+        buffer: Buffer.from("%PDF-1.4\n1 0 obj\nendobj\n%%EOF"),
+      });
+    await expect(
+      page
+        .locator(".media-uploader")
+        .filter({ hasText: "رزومه PDF" })
+        .getByText("رزومهٔ بارگذاری‌شده (PDF)"),
+    ).toBeVisible();
+    await page.getByLabel("نمایش لینک رزومه پس از انتشار").check();
+    await page.getByLabel("انتشار پروفایل عمومی").check();
+    await page.getByRole("button", { name: "ذخیره پروفایل" }).click();
+    await expect(page.getByRole("status")).toHaveText("پروفایل ذخیره شد.");
+    const publicInstructorSlug = await page
+      .getByLabel("شناسه صفحه")
+      .inputValue();
+    await page.goto(`${tenantOrigin}/instructors`);
+    await expect(
+      page.getByRole("link", { name: "E2E Instructor Identity" }).first(),
+    ).toBeVisible();
+    await page.goto(`${tenantOrigin}/instructors/${publicInstructorSlug}`);
+    await expect(page.getByText("مدرس ارشد آزمایشی")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "سوابق کاری" }),
+    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "تحصیلات" })).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "دریافت رزومه" }),
+    ).toBeVisible();
+    await expect(page.getByText(phase3InstructorEmail)).toHaveCount(0);
     const phase5ParticipantEmail = `participant-${randomUUID()}@example.test`;
     const phase5ParticipantSession = await invitePortalIdentity(
       "participants",
@@ -1060,7 +1197,16 @@ async function* tenantJourney({
       publicPage.getByRole("heading", { name: phase3RunTitle }),
     ).toBeVisible();
     await expect(publicPage.locator(".public-event-cover")).toBeVisible();
+    await expect(
+      publicPage.getByRole("link", { name: "مشاهده رزومه کامل مدرس" }),
+    ).toHaveAttribute("href", `/instructors/${publicInstructorSlug}`);
+    await expect(
+      publicPage.getByRole("heading", { name: "برنامه جلسات" }),
+    ).toBeVisible();
     await publicPage.setViewportSize({ width: 390, height: 844 });
+    await expect(
+      publicPage.getByRole("link", { name: "ثبت‌نام در دوره" }),
+    ).toBeVisible();
     expect(
       await publicPage.evaluate(
         () =>
@@ -1068,6 +1214,29 @@ async function* tenantJourney({
           document.documentElement.clientWidth,
       ),
     ).toBe(0);
+    for (const width of [320, 375, 390, 430, 768, 1024, 1440]) {
+      await publicPage.setViewportSize({ width, height: 850 });
+      for (const path of [
+        "/",
+        "/events",
+        `/events/${phase3RunId}`,
+        "/instructors",
+        `/instructors/${publicInstructorSlug}`,
+        "/about",
+        "/contact",
+        "/faq",
+      ]) {
+        await publicPage.goto(`${tenantOrigin}${path}`);
+        expect(
+          await publicPage.evaluate(
+            () =>
+              document.documentElement.scrollWidth <=
+              document.documentElement.clientWidth,
+          ),
+          `${path} overflowed at ${width}px`,
+        ).toBe(true);
+      }
+    }
     await publicContext.close();
     yield "program creation and public enrollment";
 

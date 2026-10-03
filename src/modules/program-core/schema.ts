@@ -71,6 +71,17 @@ export const runInput = z
       .string()
       .regex(/^[A-Z]{3}$/)
       .default("IRR"),
+    seoTitle: z.string().trim().max(160).default(""),
+    seoDescription: z.string().trim().max(300).default(""),
+    canonicalPath: z
+      .union([z.literal(""), z.string().regex(/^\/events\/[0-9a-f-]{36}$/i)])
+      .default(""),
+    ogImageUrl: z
+      .union([
+        z.literal(""),
+        z.string().regex(/^\/api\/media\/[0-9a-f-]{36}$/i),
+      ])
+      .default(""),
     minimumCapacity: z
       .number()
       .int()
@@ -102,7 +113,17 @@ export const runInput = z
       value.registrationStartsAt < value.registrationEndsAt,
     { message: "INVALID_REGISTRATION_TIME", path: ["registrationEndsAt"] },
   );
-export type RunInput = z.infer<typeof runInput>;
+type ParsedRunInput = z.infer<typeof runInput>;
+export type RunInput = Omit<
+  ParsedRunInput,
+  "seoTitle" | "seoDescription" | "canonicalPath" | "ogImageUrl"
+> &
+  Partial<
+    Pick<
+      ParsedRunInput,
+      "seoTitle" | "seoDescription" | "canonicalPath" | "ogImageUrl"
+    >
+  >;
 
 export const sessionInput = z
   .strictObject({
