@@ -27,6 +27,8 @@
     "local:up": "docker compose --profile application up -d --no-build",
     "local:down": "docker compose down",
     "local:logs": "docker compose logs -f app worker postgres",
+    "deploy:preflight": "node scripts/deploy-preflight.mjs",
+    "smoke:production": "node scripts/smoke-production.mjs",
     "worker:provisioning": "node --conditions=react-server --import=tsx scripts/provisioning-worker.ts",
     "worker:payments": "node --conditions=react-server --import=tsx scripts/payment-maintenance-worker.ts",
     "worker:payments:once": "node --conditions=react-server --import=tsx scripts/payment-maintenance-once.ts",

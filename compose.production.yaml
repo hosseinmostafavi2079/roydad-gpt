@@ -1,0 +1,137 @@
+name: eventos-production
+
+x-runtime-environment: &runtime-environment
+  NODE_ENV: production
+  MAIL_TRANSPORT: smtp
+  BETTER_AUTH_URL: ${BETTER_AUTH_URL:?Set platform HTTPS URL}
+  PLATFORM_BASE_DOMAIN: ${PLATFORM_BASE_DOMAIN:?Set base domain}
+  PUBLIC_HOSTS: ${PUBLIC_HOSTS:?List exact public hostnames}
+  PILOT_TENANT_HOST: ${PILOT_TENANT_HOST:?Set smoke tenant hostname}
+  ACME_EMAIL: ${ACME_EMAIL:?Set ACME contact email}
+  PLATFORM_REQUIRE_MFA: ${PLATFORM_REQUIRE_MFA:-false}
+  TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?Set auth secret}
+  TENANT_BOOTSTRAP_ENCRYPTION_KEY: ${TENANT_BOOTSTRAP_ENCRYPTION_KEY:?Set encryption secret}
+  CONTROL_DATABASE_URL: ${CONTROL_DATABASE_URL:?Set control app URL}
+  CONTROL_MIGRATION_DATABASE_URL: ${CONTROL_MIGRATION_DATABASE_URL:?Set control migration URL}
+  CONTROL_QUEUE_DATABASE_URL: ${CONTROL_QUEUE_DATABASE_URL:?Set queue URL}
+  TENANT_PROVISIONING_DATABASE_URL: ${TENANT_PROVISIONING_DATABASE_URL:?Set tenant provisioner URL}
+  TENANT_RUNTIME_DATABASE_URL: ${TENANT_RUNTIME_DATABASE_URL:?Set tenant runtime URL}
+  TENANT_MIGRATION_DATABASE_URL: ${TENANT_MIGRATION_DATABASE_URL:?Set tenant migration URL}
+  SMTP_URL: ${SMTP_URL:?Set SMTP URL}
+  SMTP_FROM: ${SMTP_FROM:?Set SMTP sender}
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  GOOGLE_OAUTH_ALLOWED_ORIGINS: ${GOOGLE_OAUTH_ALLOWED_ORIGINS:-}
+  MEDIA_S3_ENDPOINT: ${MEDIA_S3_ENDPOINT:?Set external S3 endpoint}
+  MEDIA_S3_REGION: ${MEDIA_S3_REGION:?Set S3 region}
+  MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:?Set S3 bucket}
+  MEDIA_S3_ACCESS_KEY_ID: ${MEDIA_S3_ACCESS_KEY_ID:?Set S3 access key}
+  MEDIA_S3_SECRET_ACCESS_KEY: ${MEDIA_S3_SECRET_ACCESS_KEY:?Set S3 secret key}
+  MEDIA_S3_ALLOW_HTTP_LOCAL: "false"
+  TENANT_POOL_LIMIT: ${TENANT_POOL_LIMIT:-16}
+  TENANT_POOL_CONNECTIONS_PER_DATABASE: ${TENANT_POOL_CONNECTIONS_PER_DATABASE:-2}
+  TENANT_POOL_IDLE_TIMEOUT_MS: ${TENANT_POOL_IDLE_TIMEOUT_MS:-30000}
+  TENANT_POOL_ACQUIRE_TIMEOUT_MS: ${TENANT_POOL_ACQUIRE_TIMEOUT_MS:-5000}
+
+services:
+  postgres:
+    image: postgres:18.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: eventos_container_admin
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?Set a unique PostgreSQL administrator password}
+      POSTGRES_DB: eventos_control
+      CONTROL_APP_PASSWORD: ${CONTROL_APP_PASSWORD:?Set CONTROL_APP_PASSWORD}
+      CONTROL_MIGRATION_PASSWORD: ${CONTROL_MIGRATION_PASSWORD:?Set CONTROL_MIGRATION_PASSWORD}
+      CONTROL_QUEUE_PASSWORD: ${CONTROL_QUEUE_PASSWORD:?Set CONTROL_QUEUE_PASSWORD}
+      TENANT_PROVISIONER_PASSWORD: ${TENANT_PROVISIONER_PASSWORD:?Set TENANT_PROVISIONER_PASSWORD}
+      TENANT_RUNTIME_PASSWORD: ${TENANT_RUNTIME_PASSWORD:?Set TENANT_RUNTIME_PASSWORD}
+      TENANT_MIGRATION_PASSWORD: ${TENANT_MIGRATION_PASSWORD:?Set TENANT_MIGRATION_PASSWORD}
+    volumes:
+      - production-postgres:/var/lib/postgresql
+      - ./docker/postgres/init-roles.sql:/docker-entrypoint-initdb.d/010-init-roles.sql:ro
+    networks: [database]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eventos_container_admin -d eventos_control"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+      start_period: 20s
+    security_opt: ["no-new-privileges:true"]
+
+  app:
+    build: .
+    image: ${EVENTOS_IMAGE:-eventos-production:local}
+    restart: unless-stopped
+    user: "node"
+    environment:
+      <<: *runtime-environment
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    command: ["sh", "-ec", "node scripts/deploy-preflight.mjs --runtime-only; exec node standalone/server.js"]
+    networks: [frontend, database]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+
+  worker:
+    image: ${EVENTOS_IMAGE:-eventos-production:local}
+    restart: unless-stopped
+    user: "node"
+    environment:
+      <<: *runtime-environment
+    command: ["sh", "-ec", "node scripts/deploy-preflight.mjs --runtime-only; exec node --conditions=react-server --import=tsx scripts/provisioning-worker.ts"]
+    networks: [frontend, database]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "const p=require('pg');const c=new p.Client({connectionString:process.env.CONTROL_QUEUE_DATABASE_URL,connectionTimeoutMillis:3000});c.connect().then(()=>c.query('SELECT 1')).then(()=>c.end()).then(()=>process.exit(0)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+    security_opt: ["no-new-privileges:true"]
+
+  proxy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOSTS: ${PUBLIC_HOSTS:?List exact public hostnames}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME contact email}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/caddy/Caddyfile.production:/etc/caddy/Caddyfile:ro
+      - production-caddy-data:/data
+      - production-caddy-config:/config
+    networks: [frontend]
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    security_opt: ["no-new-privileges:true"]
+
+networks:
+  frontend: {}
+  database:
+    internal: true
+
+volumes:
+  production-postgres: {}
+  production-caddy-data: {}
+  production-caddy-config: {}

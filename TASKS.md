@@ -225,3 +225,12 @@ Final migration-aware local rerun passed: `pnpm check`, 56/56 unit, 16/16 real P
 Website settings use atomic validated saves. Information pages and public instructor profiles have draft/published state; a separate draft revision and publish action for the entire website was deferred because changing existing website profile persistence would broaden the tenant configuration path. Editors must save website changes to preview them publicly.
 
 Final local gate: `pnpm check` passed with 24 lint advisories, 62/62 unit tests, 16/16 real PostgreSQL integration tests, production build, 9/9 Playwright tests, Prisma tenant schema validation, production dependency audit with no known vulnerabilities, and Gitleaks v8.30.0 across 11 project targets with no leaks. The first integration pass caught two stale migration-version assumptions; both were corrected and the full integration suite passed. GitHub Actions has not run on this uncommitted step.
+# Pilot Step 4 — production deployment foundation (local validation pending)
+
+- [x] Prepare a separate production Compose stack with private PostgreSQL, non-root app/worker, Caddy HTTPS and external S3 configuration.
+- [x] Add explicit production preflight, read-only smoke checks, one-time administrator bootstrap, PostgreSQL backup script and manual deployment/restore/rollback guide.
+- [x] Preserve production mode guards for SMTP, test payment/Google providers, trusted hostname routing and secure proxy origin handling.
+- [ ] Build and run the production image and Caddy locally, then complete the full local gate. The Docker Desktop service is stopped on this Windows host and could not be started by the current user.
+- [ ] Confirm GitHub Actions after pushing before marking Pilot Step 4 complete.
+
+Local status: `pnpm check` passed (24 existing lint advisories), unit tests 67/67, production build, Playwright 9/9 with installed Chrome, Prisma tenant schema validation, production Compose syntax, runtime and file preflight, read-only local smoke, and pinned Gitleaks v8.30.0 across 11 source/config targets passed. PostgreSQL integration passed 15/16; the first provisioning journey timed out waiting for ACTIVE, and a focused rerun passed its body but failed fixture cleanup because two tenant sessions remained. Docker Desktop is inaccessible, so the image and Caddy container could not be validated. The dependency audit could not reach the npm registry (`EACCES`). These gates must be completed before marking the step ready.

@@ -2,6 +2,7 @@ import "server-only";
 
 import { headers } from "next/headers";
 import { DomainError } from "@/shared/errors/domain-error";
+import { getServerConfig } from "@/shared/config/env";
 import {
   getTenantAuth,
   type TenantContext,
@@ -64,7 +65,12 @@ export async function resolveTenantRequest(
     throw new DomainError("FORBIDDEN", "The request origin is invalid.");
   }
   const originHeader = request.headers.get("origin");
-  let origin = `${requestUrl.protocol}//${host}`;
+  const localHost = tenant.hostname.endsWith(".localhost");
+  const effectiveProtocol =
+    getServerConfig().NODE_ENV === "production" && !localHost
+      ? "https:"
+      : requestUrl.protocol;
+  let origin = `${effectiveProtocol}//${host}`;
   if (originHeader) {
     try {
       const parsedOrigin = new URL(originHeader);
@@ -75,6 +81,7 @@ export async function resolveTenantRequest(
         parsedOrigin.pathname !== "/" ||
         parsedOrigin.search ||
         parsedOrigin.hash ||
+        parsedOrigin.protocol !== effectiveProtocol ||
         parsedOrigin.host.toLowerCase() !== host.toLowerCase()
       ) {
         throw new Error("origin mismatch");
