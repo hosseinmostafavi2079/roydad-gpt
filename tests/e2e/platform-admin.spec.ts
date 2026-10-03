@@ -16,7 +16,11 @@ import { Client } from "pg";
 import { currentTotp } from "../helpers/totp";
 import { workerDiagnostics } from "../helpers/worker-diagnostics";
 import { reportCleanupFailures } from "../helpers/cleanup-failures";
-import { gregorianWallToJalali } from "@/modules/program-core/dates";
+import {
+  gregorianWallToJalali,
+  persianMonths,
+  tenantWallTimeToUtc,
+} from "@/modules/program-core/dates";
 import { runPhase6BrowserFlows } from "./payment-flows";
 import {
   runPilotAuthBrowserFlows,
@@ -39,6 +43,70 @@ async function setJalali(
   await picker.getByLabel("ماه خورشیدی").selectOption(String(value.month));
   await picker.getByLabel("روز خورشیدی").selectOption(String(value.day));
   await picker.getByLabel("ساعت").fill(value.time);
+}
+
+async function navigateCalendarToDate(
+  page: Page,
+  sessionStart: string,
+  tenantTimezone: string,
+): Promise<void> {
+  const heading = page.locator(".card .page-heading h2.card-title");
+  await expect(heading).toBeVisible();
+  const renderedMonth = (await heading.innerText()).trim();
+  const match = /^(.+)\s+([۰-۹0-9٬,]+)$/.exec(renderedMonth);
+  const currentMonth =
+    persianMonths.indexOf(
+      (match?.[1] ?? "") as (typeof persianMonths)[number],
+    ) + 1;
+  const currentYear = Number(
+    match?.[2]
+      ?.replace(/[٬,]/g, "")
+      .replace(/[۰-۹]/g, (digit) =>
+        String(digit.charCodeAt(0) - "۰".charCodeAt(0)),
+      ),
+  );
+  if (
+    !match ||
+    !currentMonth ||
+    !Number.isInteger(currentYear) ||
+    currentYear <= 0
+  )
+    throw new Error(
+      `Calendar month heading could not be read: ${renderedMonth}`,
+    );
+
+  const targetParts = new Intl.DateTimeFormat("en-US-u-ca-persian", {
+    timeZone: tenantTimezone,
+    year: "numeric",
+    month: "numeric",
+  }).formatToParts(new Date(sessionStart));
+  const part = (type: string) =>
+    Number(targetParts.find((entry) => entry.type === type)?.value);
+  const targetYear = part("year");
+  const targetMonth = part("month");
+  const distance =
+    (targetYear - currentYear) * 12 + (targetMonth - currentMonth);
+  console.info("E2E calendar fixture", {
+    startsAt: sessionStart,
+    tenantTimezone,
+    currentJalaliYear: currentYear,
+    currentJalaliMonth: currentMonth,
+    sessionJalaliYear: targetYear,
+    sessionJalaliMonth: targetMonth,
+  });
+  if (!Number.isInteger(distance) || Math.abs(distance) > 12)
+    throw new Error(
+      `Calendar target is outside the bounded test range: ${distance} months`,
+    );
+  const targetHeading = `${persianMonths[targetMonth - 1]} ${targetYear.toLocaleString("fa-IR")}`;
+  for (let step = 0; step < Math.abs(distance); step++) {
+    const before = await heading.innerText();
+    await page
+      .getByRole("button", { name: distance > 0 ? "ماه بعد" : "ماه قبل" })
+      .click();
+    await expect(heading).not.toHaveText(before);
+  }
+  await expect(heading).toHaveText(targetHeading);
 }
 
 type E2eState = {
@@ -980,6 +1048,52 @@ async function* tenantJourney({
     yield "pilot Google new participant";
 
     await page.goto(`${tenantOrigin}/calendar`);
+    const calendarControl = new Client({
+      connectionString: process.env.CONTROL_DATABASE_URL,
+    });
+    await calendarControl.connect();
+    let tenantTimezone: string;
+    try {
+      const tenantRow = await calendarControl.query<{ timezone: string }>(
+        "SELECT timezone FROM tenants WHERE id=$1",
+        [tenantId],
+      );
+      tenantTimezone = tenantRow.rows[0]?.timezone ?? "";
+    } finally {
+      await calendarControl.end();
+    }
+    expect(tenantTimezone).toBeTruthy();
+    const calendarSession = await page.evaluate(async (title) => {
+      const response = await fetch("/api/tenant/sessions");
+      const payload = (await response.json()) as {
+        data: {
+          title: string;
+          tenant_id: string;
+          status: string;
+          starts_at: string;
+        }[];
+      };
+      return {
+        status: response.status,
+        session: payload.data.find((session) => session.title === title),
+      };
+    }, phase3SessionTitle);
+    expect(calendarSession.status).toBe(200);
+    expect(calendarSession.session).toMatchObject({
+      title: phase3SessionTitle,
+      tenant_id: tenantId,
+      status: "SCHEDULED",
+      starts_at: tenantWallTimeToUtc(`${baseDay}T10:00`, tenantTimezone),
+    });
+    if (!calendarSession.session)
+      throw new Error(
+        "The expected calendar session was not returned by the tenant API.",
+      );
+    await navigateCalendarToDate(
+      page,
+      calendarSession.session.starts_at,
+      tenantTimezone,
+    );
     await expect(page.getByText(phase3SessionTitle)).toBeVisible();
 
     const instructorPage = phase3InstructorSession.page;
@@ -1337,15 +1451,24 @@ test.describe("platform and tenant journey", () => {
     "attendance and certificates",
     "tenant isolation and session revocation",
   ];
+  const focusAttendance = process.env.EVENTOS_E2E_FOCUS_ATTENDANCE === "true";
   for (const [index, phase] of phases.entries()) {
+    if (focusAttendance && phase !== "attendance and certificates") continue;
     test(phase, async () => {
       test.setTimeout(
-        phase === "pilot Google new participant" ? 120_000 : 240_000,
+        focusAttendance
+          ? 600_000
+          : phase === "pilot Google new participant"
+            ? 120_000
+            : 240_000,
       );
       try {
-        const result = await journey.next();
-        expect(result.done).toBe(index === phases.length - 1);
-        if (!result.done) expect(result.value).toBe(phase);
+        const start = focusAttendance ? 0 : index;
+        for (let phaseIndex = start; phaseIndex <= index; phaseIndex++) {
+          const result = await journey.next();
+          expect(result.done).toBe(phaseIndex === phases.length - 1);
+          if (!result.done) expect(result.value).toBe(phases[phaseIndex]);
+        }
       } catch (error) {
         journeyError = error;
         throw error;
