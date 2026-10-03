@@ -462,21 +462,46 @@ describe("Phase 1 real PostgreSQL gates", () => {
     const failedWorker = await startWorker("MIGRATING");
     const slugA = `test-${randomUUID().slice(0, 8)}`;
     const createRequestId = randomUUID();
-    const first = await createTenant(
-      {
-        slug: slugA,
-        legalName: "Integration Test A",
-        displayName: "Test Organization A",
-        planCode: "foundation",
-        ownerName: "Initial Tenant Owner",
-        ownerEmail: `owner-${slugA}@example.test`,
-      },
-      actor,
-      createRequestId,
-    );
+    const creationKey = randomUUID();
+    const firstInput = {
+      slug: slugA,
+      legalName: "Integration Test A",
+      displayName: "Test Organization A",
+      planCode: "foundation",
+      ownerName: "Initial Tenant Owner",
+      ownerEmail: `owner-${slugA}@example.test`,
+      creationKey,
+    };
+    const [first, concurrent] = await Promise.all([
+      createTenant(firstInput, actor, createRequestId),
+      createTenant(firstInput, actor, randomUUID()),
+    ]);
     cleanupTenantIds.push(first.tenant.id);
+    expect(concurrent.tenant.id).toBe(first.tenant.id);
+    const duplicate = await createTenant(firstInput, actor, randomUUID());
+    expect(duplicate.tenant.id).toBe(first.tenant.id);
+    expect(duplicate.provisioning.jobId).toBe(first.provisioning.jobId);
+    await expect(
+      createTenant(
+        { ...firstInput, displayName: "Changed name" },
+        actor,
+        randomUUID(),
+      ),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const createdRows = await getControlPool().query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM tenants WHERE creation_request_key = $1",
+      [creationKey],
+    );
+    expect(createdRows.rows[0]?.count).toBe("1");
     const failed = await waitForState(first.tenant.id, "FAILED_MIGRATION");
     expect(failed.state).toBe("FAILED_MIGRATION");
+    const failedHealth = await getControlPool().query<{
+      last_health_state: string;
+    }>(
+      "SELECT last_health_state FROM tenant_database_registry WHERE tenant_id = $1",
+      [first.tenant.id],
+    );
+    expect(failedHealth.rows[0]?.last_health_state).toBe("FAILED");
     const failureRecord = await getControlPool().query<{
       error_code: string;
       error_message: string;
@@ -493,6 +518,32 @@ describe("Phase 1 real PostgreSQL gates", () => {
     const worker = await startWorker();
     await retryProvisioning(first.tenant.id, actor, randomUUID());
     const readyA = await waitForState(first.tenant.id, "ACTIVE");
+    const coreRelations = await getControlPool().query<{
+      domain_count: number;
+      registry_count: number;
+    }>(
+      `SELECT (SELECT count(*)::int FROM tenant_domains WHERE tenant_id = $1 AND is_primary) AS domain_count,
+              (SELECT count(*)::int FROM tenant_database_registry WHERE tenant_id = $1) AS registry_count`,
+      [first.tenant.id],
+    );
+    expect(coreRelations.rows[0]).toMatchObject({
+      domain_count: 1,
+      registry_count: 1,
+    });
+    const auditEvents = await getControlPool().query<{ action: string }>(
+      "SELECT action FROM platform_audit_logs WHERE target_type = 'TENANT' AND target_id = $1",
+      [first.tenant.id],
+    );
+    expect(auditEvents.rows.map((row) => row.action)).toEqual(
+      expect.arrayContaining([
+        "tenant.creation_requested",
+        "tenant.provisioning_started",
+        "tenant.provisioning_failed",
+        "tenant.provisioning_retried",
+        "tenant.owner_invited",
+        "tenant.provisioned",
+      ]),
+    );
     const tenantHost = `${slugA}.localhost:3000`;
     const tenantOrigin = `http://${tenantHost}`;
     const resolvedFromForwardedRequest = await resolveTenantRequest(
@@ -537,6 +588,22 @@ describe("Phase 1 real PostgreSQL gates", () => {
       const ledger = await tenantDb.query<{ count: number }>(
         "SELECT count(*)::int AS count FROM eventos_schema_migrations",
       );
+      const website = await tenantDb.query<{
+        display_name: string;
+        primary_color: string;
+      }>(
+        "SELECT display_name, primary_color FROM tenant_website_profiles WHERE tenant_id = $1",
+        [first.tenant.id],
+      );
+      expect(website.rows[0]).toMatchObject({
+        display_name: "Test Organization A",
+        primary_color: "#145D58",
+      });
+      const invitations = await tenantDb.query<{ count: number }>(
+        "SELECT count(*)::int AS count FROM tenant_invitations WHERE tenant_id = $1",
+        [first.tenant.id],
+      );
+      expect(invitations.rows[0]?.count).toBe(1);
       expect(roles.rows[0]?.count).toBe(11);
       expect(metadata.rows[0]).toEqual({
         tenant_id: first.tenant.id,

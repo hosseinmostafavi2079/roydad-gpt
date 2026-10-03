@@ -24,6 +24,7 @@ import {
 } from "../src/infrastructure/db/control/pool";
 import { closeTenantPools } from "../src/infrastructure/db/tenant/pool";
 import { logger } from "../src/infrastructure/logging/logger";
+import { appendAuditRecord } from "../src/modules/platform/audit/repository";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 const config = getServerConfig();
@@ -136,11 +137,31 @@ async function transition(
            migration_version = $2 WHERE tenant_id = $1`,
         [tenantId, tenantCurrentMigrationVersion],
       );
+      await appendAuditRecord(client, {
+        actorType: "SYSTEM",
+        actorId: null,
+        action: "tenant.provisioned",
+        targetType: "TENANT",
+        targetId: tenantId,
+        requestId,
+        afterState: { state: "ACTIVE" },
+      });
     } else if (toState.startsWith("FAILED_")) {
       await client.query(
         "UPDATE tenants SET status = 'FAILED', updated_at = now() WHERE id = $1",
         [tenantId],
       );
+    }
+    if (toState === "DATABASE_CREATING") {
+      await appendAuditRecord(client, {
+        actorType: "SYSTEM",
+        actorId: null,
+        action: "tenant.provisioning_started",
+        targetType: "TENANT",
+        targetId: tenantId,
+        requestId,
+        afterState: { state: toState },
+      });
     }
     await client.query("COMMIT");
     return true;
@@ -269,6 +290,27 @@ async function verifyTenantDatabase(
     const roles = await client.query<{ count: number }>(
       "SELECT count(*)::int AS count FROM tenant_role_templates",
     );
+    const essentials = await client.query<{
+      website: boolean;
+      owner: boolean;
+      invitation: boolean;
+    }>(
+      `SELECT EXISTS (SELECT 1 FROM tenant_website_profiles WHERE tenant_id = $1) AS website,
+              EXISTS (SELECT 1 FROM tenant_users AS account JOIN tenant_user_roles AS grant_role
+                ON grant_role.tenant_id = account."tenantId" AND grant_role.user_id = account.id
+                JOIN tenant_roles AS role ON role.tenant_id = grant_role.tenant_id AND role.id = grant_role.role_id
+                WHERE account."tenantId" = $1 AND role.code = 'organization_owner') AS owner,
+              EXISTS (SELECT 1 FROM tenant_invitations WHERE tenant_id = $1) AS invitation`,
+      [tenantId],
+    );
+    const control = await getControlPool().query<{ ready: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM tenants AS tenant JOIN plans AS plan ON plan.id = tenant.plan_id
+        JOIN tenant_database_registry AS registry ON registry.tenant_id = tenant.id
+        JOIN tenant_domains AS domain ON domain.tenant_id = tenant.id AND domain.is_primary
+          AND domain.verified_at IS NOT NULL
+        WHERE tenant.id = $1 AND registry.database_name = $2 AND domain.hostname = $3) AS ready`,
+      [tenantId, databaseName, `${slug}.${config.PLATFORM_BASE_DOMAIN}`],
+    );
     if (
       metadata.rows[0]?.tenant_id !== tenantId ||
       metadata.rows[0]?.slug !== slug
@@ -288,12 +330,92 @@ async function verifyTenantDatabase(
       schema.role_count !== 11 ||
       schema.permission_count < 40 ||
       schema.owner_grant_count !== schema.permission_count ||
-      !schema.has_owner
+      !schema.has_owner ||
+      !essentials.rows[0]?.website ||
+      !essentials.rows[0]?.owner ||
+      !essentials.rows[0]?.invitation ||
+      !control.rows[0]?.ready
     ) {
       throw new Error("Tenant identity schema verification failed.");
     }
   } finally {
     await client.end();
+  }
+}
+
+async function configureInitialWebsite(
+  databaseName: string,
+  tenantId: string,
+  displayName: string,
+  primaryColor: string,
+  preset: string,
+) {
+  const url = new URL(config.TENANT_RUNTIME_DATABASE_URL);
+  url.pathname = `/${databaseName}`;
+  const client = new Client({
+    connectionString: url.toString(),
+    application_name: "eventos-website-seed",
+  });
+  try {
+    await client.connect();
+    const style = preset === "PROFESSIONAL" ? "OUTLINED" : "SOFT";
+    const alignment = preset === "EDUCATIONAL" ? "CENTER" : "START";
+    await client.query(
+      `UPDATE tenant_website_profiles
+       SET display_name = $2, short_description = $3, about = $4,
+           primary_color = $5, card_style = $6,
+           site_settings = site_settings || jsonb_build_object('heroAlignment', $7::text),
+           updated_at = now()
+       WHERE tenant_id = $1`,
+      [
+        tenantId,
+        displayName,
+        `دوره‌ها و رویدادهای ${displayName}`,
+        `به ${displayName} خوش آمدید. اطلاعات بیشتر این مجموعه به‌زودی منتشر می‌شود.`,
+        primaryColor,
+        style,
+        alignment,
+      ],
+    );
+  } finally {
+    await client.end();
+  }
+}
+
+async function checkPublicRoutes(
+  tenantId: string,
+  hostname: string,
+): Promise<void> {
+  const base = new URL(tenantOrigin(hostname));
+  for (const path of ["/", "/login"]) {
+    let status: number | undefined;
+    try {
+      const url = new URL(path, base);
+      const response = await fetch(url, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(3000),
+        cache: "no-store",
+      });
+      status = response.status;
+      await response.arrayBuffer();
+      if (!response.ok) throw new Error("Unexpected public response");
+    } catch (error) {
+      await getControlPool().query(
+        `UPDATE tenant_database_registry SET last_health_state = 'DEGRADED', last_health_check_at = now()
+         WHERE tenant_id = $1`,
+        [tenantId],
+      );
+      logger.warn(
+        {
+          tenantId,
+          path,
+          ...(status ? { status } : {}),
+          failure: error instanceof Error ? error.name : "UnknownError",
+        },
+        "Tenant public route health check is degraded",
+      );
+      return;
+    }
   }
 }
 
@@ -343,14 +465,20 @@ async function provision(jobId: string, tenantId: string) {
     const data = await lock.query<{
       database_name: string;
       slug: string;
+      display_name: string;
+      primary_color: string;
+      preset: string;
       state: string;
       request_id: string;
       owner_bootstrap_ciphertext: Buffer | null;
     }>(
-      `SELECT registry.database_name, tenant.slug, job.state, job.request_id,
+      `SELECT registry.database_name, tenant.slug, tenant.display_name,
+              branding.primary_color, tenant.metadata->>'preset' AS preset,
+              job.state, job.request_id,
               job.owner_bootstrap_ciphertext
        FROM provisioning_jobs AS job JOIN tenants AS tenant ON tenant.id = job.tenant_id
        JOIN tenant_database_registry AS registry ON registry.tenant_id = tenant.id
+       JOIN tenant_branding AS branding ON branding.tenant_id = tenant.id
        WHERE job.id = $1 AND tenant.id = $2`,
       [jobId, tenantId],
     );
@@ -376,6 +504,13 @@ async function provision(jobId: string, tenantId: string) {
     testFailureAt(phase);
     await seedTenantDatabase(record.database_name, tenantId, record.slug);
     await applyTenantPrismaMigrations(record.database_name, tenantId);
+    await configureInitialWebsite(
+      record.database_name,
+      tenantId,
+      record.display_name,
+      record.primary_color,
+      record.preset,
+    );
     if (record.owner_bootstrap_ciphertext) {
       const owner = decryptTenantOwnerBootstrap(
         tenantId,
@@ -397,6 +532,20 @@ async function provision(jobId: string, tenantId: string) {
         tenantOrigin(`${record.slug}.${config.PLATFORM_BASE_DOMAIN}`),
         true,
       );
+      const audit = await getControlPool().connect();
+      try {
+        await appendAuditRecord(audit, {
+          actorType: "SYSTEM",
+          actorId: null,
+          action: "tenant.owner_invited",
+          targetType: "TENANT",
+          targetId: tenantId,
+          requestId,
+          afterState: { invitationPrepared: true },
+        });
+      } finally {
+        audit.release();
+      }
       await clearOwnerBootstrap(jobId);
     } else {
       const ownerCheck = await getTenantPool({
@@ -421,6 +570,10 @@ async function provision(jobId: string, tenantId: string) {
     await verifyTenantDatabase(record.database_name, tenantId, record.slug);
 
     await transition(jobId, tenantId, "ACTIVE", requestId);
+    await checkPublicRoutes(
+      tenantId,
+      `${record.slug}.${config.PLATFORM_BASE_DOMAIN}`,
+    );
     logger.info({ jobId, tenantId }, "Tenant provisioning completed");
   } catch (error) {
     const failure =
@@ -466,6 +619,19 @@ async function provision(jobId: string, tenantId: string) {
           "UPDATE tenants SET status = 'FAILED', updated_at = now() WHERE id = $1",
           [tenantId],
         );
+        await client.query(
+          "UPDATE tenant_database_registry SET last_health_state = 'FAILED', last_health_check_at = now() WHERE tenant_id = $1",
+          [tenantId],
+        );
+        await appendAuditRecord(client, {
+          actorType: "SYSTEM",
+          actorId: null,
+          action: "tenant.provisioning_failed",
+          targetType: "TENANT",
+          targetId: tenantId,
+          requestId,
+          afterState: { failedPhase: phase, errorCode: failure },
+        });
       }
       await client.query("COMMIT");
     } catch (_persistError) {

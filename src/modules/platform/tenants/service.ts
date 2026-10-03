@@ -35,6 +35,7 @@ type TenantSummaryRow = {
   plan_name: string;
   primary_hostname: string | null;
   provisioning_state: string | null;
+  health_state: string;
   created_at: Date;
 };
 
@@ -79,6 +80,7 @@ function tenantSummaryDto(row: TenantSummaryRow) {
     plan: { code: row.plan_code, name: row.plan_name },
     primaryHostname: row.primary_hostname,
     provisioningState: row.provisioning_state,
+    health: row.health_state === "UNAVAILABLE" ? "FAILED" : row.health_state,
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -148,6 +150,27 @@ export async function createTenant(
   const tenantId = randomUUID();
   const databaseName = `eventos_t_${tenantId.replaceAll("-", "")}`;
   const hostname = `${input.slug}.${config.PLATFORM_BASE_DOMAIN}`;
+  const creationKey = input.creationKey ?? null;
+  const primaryColor = input.primaryColor ?? "#145D58";
+  const preset = input.preset ?? "SIMPLE";
+  const payloadHash = creationKey
+    ? createHash("sha256")
+        .update(
+          JSON.stringify({
+            slug: input.slug,
+            legalName: input.legalName || input.displayName,
+            displayName: input.displayName,
+            planCode: input.planCode,
+            ownerName: input.ownerName,
+            ownerEmail: input.ownerEmail,
+            primaryColor,
+            preset,
+            featureOverrides: input.featureOverrides ?? [],
+            limitOverrides: input.limitOverrides ?? [],
+          }),
+        )
+        .digest("hex")
+    : null;
   if (hostname.length > 253) {
     throw new DomainError(
       "VALIDATION_FAILED",
@@ -157,6 +180,55 @@ export async function createTenant(
 
   try {
     return await withControlTransaction(async (client) => {
+      if (creationKey) {
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [`tenant-create:${actor.adminId}:${creationKey}`],
+        );
+        const prior = await client.query<{
+          id: string;
+          slug: string;
+          legal_name: string;
+          display_name: string;
+          status: string;
+          created_at: Date;
+          creation_payload_hash: string;
+          plan_code: string;
+          plan_name: string;
+          job_id: string;
+        }>(
+          `SELECT tenant.id, tenant.slug, tenant.legal_name, tenant.display_name,
+                  tenant.status, tenant.created_at, tenant.creation_payload_hash,
+                  plan.code AS plan_code, plan.name AS plan_name, job.id AS job_id
+           FROM tenants AS tenant JOIN plans AS plan ON plan.id = tenant.plan_id
+           JOIN LATERAL (SELECT id FROM provisioning_jobs WHERE tenant_id = tenant.id
+                         ORDER BY created_at DESC LIMIT 1) AS job ON true
+           WHERE tenant.created_by = $1 AND tenant.creation_request_key = $2`,
+          [actor.adminId, creationKey],
+        );
+        const previous = prior.rows[0];
+        if (previous) {
+          if (previous.creation_payload_hash !== payloadHash) {
+            throw new DomainError(
+              "CONFLICT",
+              "This creation request was already used for different details.",
+            );
+          }
+          return {
+            tenant: {
+              id: previous.id,
+              slug: previous.slug,
+              legalName: previous.legal_name,
+              displayName: previous.display_name,
+              status: previous.status,
+              plan: { code: previous.plan_code, name: previous.plan_name },
+              primaryHostname: `${previous.slug}.${config.PLATFORM_BASE_DOMAIN}`,
+              createdAt: previous.created_at.toISOString(),
+            },
+            provisioning: { jobId: previous.job_id, state: previous.status },
+          };
+        }
+      }
       const planResult = await client.query<{
         id: string;
         code: string;
@@ -171,16 +243,20 @@ export async function createTenant(
       }
 
       const tenantResult = await client.query(
-        `INSERT INTO tenants (id, slug, legal_name, display_name, plan_id, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO tenants (id, slug, legal_name, display_name, plan_id, created_by,
+                              creation_request_key, creation_payload_hash, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
          RETURNING id, slug, legal_name, display_name, status, created_at`,
         [
           tenantId,
           input.slug,
-          input.legalName,
+          input.legalName || input.displayName,
           input.displayName,
           plan.id,
           actor.adminId,
+          creationKey,
+          payloadHash,
+          JSON.stringify({ preset }),
         ],
       );
       const tenant = tenantResult.rows[0] as
@@ -207,10 +283,28 @@ export async function createTenant(
         [tenantId, hostname, actor.adminId],
       );
       await client.query(
-        `INSERT INTO tenant_branding (tenant_id, brand_name, updated_by)
-         VALUES ($1, $2, $3)`,
-        [tenantId, input.displayName, actor.adminId],
+        `INSERT INTO tenant_branding (tenant_id, brand_name, primary_color, updated_by)
+         VALUES ($1, $2, $3, $4)`,
+        [tenantId, input.displayName, primaryColor, actor.adminId],
       );
+      for (const override of input.featureOverrides ?? []) {
+        if (override.enabled !== null)
+          await client.query(
+            `INSERT INTO tenant_features (tenant_id, feature_key, enabled, updated_by)
+           VALUES ($1, $2, $3, $4) ON CONFLICT (tenant_id, feature_key)
+           DO UPDATE SET enabled = EXCLUDED.enabled, updated_by = EXCLUDED.updated_by`,
+            [tenantId, override.key, override.enabled, actor.adminId],
+          );
+      }
+      for (const override of input.limitOverrides ?? []) {
+        if (override.value !== null)
+          await client.query(
+            `INSERT INTO tenant_limits (tenant_id, limit_key, limit_value, updated_by)
+           VALUES ($1, $2, $3, $4) ON CONFLICT (tenant_id, limit_key)
+           DO UPDATE SET limit_value = EXCLUDED.limit_value, updated_by = EXCLUDED.updated_by`,
+            [tenantId, override.key, override.value, actor.adminId],
+          );
+      }
 
       const jobResult = await client.query<{ id: string }>(
         `INSERT INTO provisioning_jobs
@@ -264,6 +358,19 @@ export async function createTenant(
           provisioningJobId: job.id,
         },
       });
+      await appendAuditRecord(client, {
+        actorType: "PLATFORM_ADMIN",
+        actorId: actor.adminId,
+        action: "tenant.creation_requested",
+        targetType: "TENANT",
+        targetId: tenantId,
+        requestId,
+        afterState: {
+          slug: tenant.slug,
+          planCode: plan.code,
+          provisioningJobId: job.id,
+        },
+      });
 
       return {
         tenant: {
@@ -305,12 +412,17 @@ export async function listTenants(input: {
   pageSize: number;
   search?: string | undefined;
   status?: "PROVISIONING" | "ACTIVE" | "SUSPENDED" | "FAILED" | undefined;
+  plan?: string | undefined;
 }) {
   const values: unknown[] = [];
   const conditions: string[] = [];
   if (input.status) {
     values.push(input.status);
     conditions.push(`tenant.status = $${values.length}`);
+  }
+  if (input.plan) {
+    values.push(input.plan);
+    conditions.push(`plan.code = $${values.length}`);
   }
   if (input.search) {
     const search = input.search.replace(/[\\%_]/g, "\\$&");
@@ -331,10 +443,12 @@ export async function listTenants(input: {
             plan.code AS plan_code, plan.name AS plan_name,
             (SELECT hostname FROM tenant_domains WHERE tenant_id = tenant.id AND is_primary AND verified_at IS NOT NULL) AS primary_hostname,
             latest_job.state AS provisioning_state,
+            COALESCE(registry.last_health_state, 'FAILED') AS health_state,
             tenant.created_at,
             count(*) OVER()::text AS total_count
      FROM tenants AS tenant
      JOIN plans AS plan ON plan.id = tenant.plan_id
+     LEFT JOIN tenant_database_registry AS registry ON registry.tenant_id = tenant.id
      LEFT JOIN LATERAL (
        SELECT state FROM provisioning_jobs WHERE tenant_id = tenant.id ORDER BY created_at DESC LIMIT 1
      ) AS latest_job ON true
@@ -810,7 +924,7 @@ export async function changeTenantStatus(
     if (
       status === "ACTIVE" &&
       (!current.migration_version ||
-        current.last_health_state === "UNAVAILABLE")
+        ["UNAVAILABLE", "FAILED"].includes(current.last_health_state))
     ) {
       throw new DomainError(
         "PROVISIONING_FAILED",
@@ -1120,7 +1234,7 @@ export async function verifyCustomDomain(
 
 export async function updateTenantHealth(
   tenantId: string,
-  state: "HEALTHY" | "DEGRADED" | "UNAVAILABLE",
+  state: "HEALTHY" | "DEGRADED" | "UNAVAILABLE" | "FAILED",
   version?: string,
 ) {
   await getControlPool().query(

@@ -16,11 +16,18 @@ export function TenantOwnerInviteForm({ tenantId }: { tenantId: string }) {
     setError("");
     setMessage("");
     try {
-      await apiRequest(`/api/platform/tenants/${tenantId}/owner-invitation`, {
-        method: "POST",
-        body: { name, email },
-      });
-      setMessage("پیوند یک‌بارمصرف فعال‌سازی برای مدیر سازمان ارسال شد.");
+      const result = await apiRequest<{ invitationIssued: boolean }>(
+        `/api/platform/tenants/${tenantId}/owner-invitation`,
+        {
+          method: "POST",
+          body: { name, email },
+        },
+      );
+      setMessage(
+        result.invitationIssued
+          ? "پیوند یک‌بارمصرف فعال‌سازی برای مدیر سازمان ارسال شد."
+          : "مدیر سازمان قبلاً فعال شده است.",
+      );
       setName("");
       setEmail("");
     } catch (cause) {
@@ -32,10 +39,10 @@ export function TenantOwnerInviteForm({ tenantId }: { tenantId: string }) {
 
   return (
     <section className="card card-pad section">
-      <h2 className="card-title">دعوت مدیر اولیهٔ سازمان</h2>
+      <h2 className="card-title">ارسال دعوت مدیر اصلی</h2>
       <p className="muted">
-        برای سازمان‌های قدیمی که هنوز مدیر سازمان ندارند، یک دعوت‌نامهٔ یک‌بارمصرف
-        ارسال کنید.
+        با ارسال مجدد، پیوند قبلی باطل و یک پیوند تازه برای همان مدیر فرستاده
+        می‌شود.
       </p>
       {message && (
         <p className="alert alert-success" role="status">

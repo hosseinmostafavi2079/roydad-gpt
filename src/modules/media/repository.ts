@@ -34,16 +34,19 @@ function assertMediaAccess(
   );
 }
 
-export async function saveMedia(
+async function saveMediaCore(
   tenant: TenantContext,
-  actor: TenantActor,
+  actor: TenantActor | null,
   kind: MediaKind,
   resourceId: string,
   mime: string,
   bytes: Uint8Array,
   requestId: string,
+  platformLogo = false,
 ) {
-  assertMediaAccess(tenant, actor, kind);
+  if (actor) assertMediaAccess(tenant, actor, kind);
+  else if (!platformLogo || kind !== "WEBSITE_LOGO")
+    throw new DomainError("FORBIDDEN", "این عملیات مجاز نیست.");
   validateMedia(kind, mime, bytes);
   const client = await getTenantPool(tenant).connect();
   const key = mediaObjectKey(tenant.tenantId, kind, resourceId, randomUUID());
@@ -95,9 +98,15 @@ export async function saveMedia(
     );
     const savedId = result.rows[0]?.id;
     if (!savedId) throw new Error("Media row was not returned after upload.");
+    if (platformLogo) {
+      await client.query(
+        "UPDATE tenant_website_profiles SET logo_url=$2,updated_at=now() WHERE tenant_id=$1",
+        [tenant.tenantId, mediaUrl(savedId)],
+      );
+    }
     await client.query(
       `INSERT INTO tenant_audit_logs (tenant_id,actor_id,action,target_type,target_id,request_id) VALUES ($1,$2,'media.uploaded','MEDIA',$3,$4)`,
-      [tenant.tenantId, actor.id, savedId, requestId],
+      [tenant.tenantId, actor?.id ?? null, savedId, requestId],
     );
     await client.query("COMMIT");
     if (oldKey) await deleteMediaObject(oldKey).catch(() => undefined);
@@ -113,6 +122,36 @@ export async function saveMedia(
   } finally {
     client.release();
   }
+}
+
+export function saveMedia(
+  tenant: TenantContext,
+  actor: TenantActor,
+  kind: MediaKind,
+  resourceId: string,
+  mime: string,
+  bytes: Uint8Array,
+  requestId: string,
+) {
+  return saveMediaCore(tenant, actor, kind, resourceId, mime, bytes, requestId);
+}
+
+export function savePlatformTenantLogo(
+  tenant: TenantContext,
+  mime: string,
+  bytes: Uint8Array,
+  requestId: string,
+) {
+  return saveMediaCore(
+    tenant,
+    null,
+    "WEBSITE_LOGO",
+    tenant.tenantId,
+    mime,
+    bytes,
+    requestId,
+    true,
+  );
 }
 
 export async function removeMedia(

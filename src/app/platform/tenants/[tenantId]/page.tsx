@@ -7,6 +7,8 @@ import { TenantSettings } from "@/app/_components/tenant-settings";
 import { TenantOwnerInviteForm } from "@/app/_components/tenant-owner-invite-form";
 import { getTenantUsage } from "@/modules/platform/tenants/usage";
 import { DomainError } from "@/shared/errors/domain-error";
+import { TenantQuickActions } from "@/app/_components/tenant-quick-actions";
+import { getServerConfig } from "@/shared/config/env";
 
 export const metadata = { title: "تنظیمات سازمان" };
 
@@ -42,6 +44,13 @@ export default async function TenantDetailsPage({
     throw error;
   }
   const plans = await listPlans();
+  const primaryHostname = initial.domains.find(
+    (domain) => domain.isPrimary,
+  )?.hostname;
+  const origin = new URL(getServerConfig().BETTER_AUTH_URL);
+  const siteUrl = primaryHostname
+    ? `${origin.protocol}//${primaryHostname}${origin.port ? `:${origin.port}` : ""}`
+    : "";
   const usage =
     initial.tenant.status === "ACTIVE"
       ? await getTenantUsage(tenantId.data)
@@ -58,15 +67,50 @@ export default async function TenantDetailsPage({
           </div>
           <h1 className="page-title">{initial.tenant.displayName}</h1>
           <p className="page-description">
-            <code className="mono">{initial.tenant.slug}</code> · مدیریت وضعیت،
-            دامنه و تنظیمات محیط
+            <code className="mono">
+              {primaryHostname ?? initial.tenant.slug}
+            </code>{" "}
+            · {initial.tenant.plan.name} ·{" "}
+            {initial.tenant.status === "ACTIVE"
+              ? "فعال"
+              : initial.tenant.status === "FAILED"
+                ? "خطا"
+                : initial.tenant.status === "SUSPENDED"
+                  ? "غیرفعال"
+                  : "در حال راه‌اندازی"}
           </p>
         </div>
         <Link className="btn btn-secondary" href="/platform/tenants">
           بازگشت به فهرست
         </Link>
       </div>
-      <TenantSettings initial={initial} plans={plans} />
+      <section className="card card-pad section" id="tenant-health">
+        <h2 className="card-title">
+          {initial.tenant.status === "ACTIVE"
+            ? "مجموعه آماده استفاده است ✓"
+            : "وضعیت مجموعه"}
+        </h2>
+        <p>
+          سلامت:{" "}
+          {initial.database.state === "HEALTHY"
+            ? "سالم"
+            : initial.database.state === "DEGRADED"
+              ? "نیازمند بررسی"
+              : initial.database.state === "UNAVAILABLE" ||
+                  initial.database.state === "FAILED"
+                ? "خطا"
+                : "در حال بررسی"}
+        </p>
+        {siteUrl && (
+          <TenantQuickActions
+            siteUrl={siteUrl}
+            active={initial.tenant.status === "ACTIVE"}
+          />
+        )}
+      </section>
+      <div id="tenant-settings">
+        <TenantSettings initial={initial} plans={plans} />
+      </div>
       {usage && (
         <section className="card card-pad section">
           <h2 className="card-title">مصرف منابع</h2>
@@ -134,7 +178,9 @@ export default async function TenantDetailsPage({
         </section>
       )}
       {initial.tenant.status === "ACTIVE" && (
-        <TenantOwnerInviteForm tenantId={tenantId.data} />
+        <div id="owner-invitation">
+          <TenantOwnerInviteForm tenantId={tenantId.data} />
+        </div>
       )}
     </main>
   );

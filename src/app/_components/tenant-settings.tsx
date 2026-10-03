@@ -3,6 +3,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { apiRequest, errorMessage } from "@/app/_components/api-client";
+import {
+  provisioningStateLabels,
+  provisioningProgressStates,
+} from "@/modules/platform/tenants/provisioning-view";
 
 type Plan = {
   id: string;
@@ -131,18 +135,7 @@ const limitNames: Record<string, string> = {
   max_branches: "حداکثر شعب",
   max_custom_domains: "دامنه‌های اختصاصی",
 };
-const stateLabels: Record<string, string> = {
-  REQUESTED: "در صف راه‌اندازی",
-  DATABASE_CREATING: "ساخت پایگاه داده",
-  MIGRATING: "اعمال تغییرات ساختاری",
-  SEEDING: "افزودن داده‌های پایه",
-  VERIFYING: "بررسی نهایی",
-  ACTIVE: "آماده و فعال",
-  FAILED_DATABASE: "خطا در ساخت پایگاه داده",
-  FAILED_MIGRATION: "خطا در اعمال تغییرات",
-  FAILED_SEED: "خطا در داده‌های پایه",
-  FAILED_VERIFICATION: "بررسی نهایی ناموفق",
-};
+const stateLabels = provisioningStateLabels;
 
 export function TenantSettings({
   initial,
@@ -323,7 +316,13 @@ export function TenantSettings({
         <section className="card card-pad section" aria-label="وضعیت راه‌اندازی">
           <div className="section-header">
             <div>
-              <h2>راه‌اندازی پایگاه داده</h2>
+              <h2>
+                {details.tenant.status === "FAILED"
+                  ? "راه‌اندازی مجموعه کامل نشد"
+                  : details.tenant.status === "ACTIVE"
+                    ? "مجموعه آماده استفاده است ✓"
+                    : "در حال راه‌اندازی مجموعه"}
+              </h2>
               <p>مرحلهٔ فعلی، آخرین تلاش</p>
             </div>
             <span
@@ -333,23 +332,14 @@ export function TenantSettings({
             </span>
           </div>
           <ol className="grid grid-4" aria-label="مراحل راه‌اندازی">
-            {[
-              "DATABASE_CREATING",
-              "MIGRATING",
-              "SEEDING",
-              "VERIFYING",
-              "ACTIVE",
-            ].map((state, index) => (
+            {provisioningProgressStates.map((state, index) => (
               <li className="check-row" key={state}>
                 <span className="check-label">
                   <span aria-hidden="true">
                     {latestJob.state === "ACTIVE" ||
-                    [
-                      "DATABASE_CREATING",
-                      "MIGRATING",
-                      "SEEDING",
-                      "VERIFYING",
-                    ].indexOf(latestJob.state) > index
+                    provisioningProgressStates.indexOf(
+                      latestJob.state as (typeof provisioningProgressStates)[number],
+                    ) > index
                       ? "✓"
                       : "○"}
                   </span>
@@ -360,11 +350,20 @@ export function TenantSettings({
           </ol>
           {latestJob.errorMessage && (
             <p className="alert alert-error" role="status">
-              {latestJob.errorMessage}{" "}
-              <span className="table-sub">
-                کد پیگیری: {latestJob.errorCode}
-              </span>
+              در راه‌اندازی مجموعه مشکلی رخ داد. می‌توانید دوباره تلاش کنید.
             </p>
+          )}
+          {latestJob.state.startsWith("FAILED_") && (
+            <details>
+              <summary>مشاهده جزئیات فنی محدود</summary>
+              <p>مرحله: {stateLabels[latestJob.state] ?? "نامشخص"}</p>
+              <p>
+                کد خطا: <code>{latestJob.errorCode ?? "—"}</code>
+              </p>
+              <p>
+                شناسه درخواست: <code>{latestJob.requestId}</code>
+              </p>
+            </details>
           )}
           <div className="form-actions">
             <span className="muted">

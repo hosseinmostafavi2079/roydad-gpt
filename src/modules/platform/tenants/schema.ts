@@ -14,7 +14,7 @@ export const createTenantSchema = z.strictObject({
     .min(2)
     .max(63)
     .regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/),
-  legalName: z.string().trim().min(2).max(200),
+  legalName: z.string().trim().min(2).max(200).optional(),
   displayName: z.string().trim().min(2).max(120),
   planCode: z
     .string()
@@ -23,6 +23,23 @@ export const createTenantSchema = z.strictObject({
     .regex(/^[a-z][a-z0-9_]{1,47}$/),
   ownerName: z.string().trim().min(2).max(120),
   ownerEmail: z.string().trim().toLowerCase().email().max(320),
+  creationKey: z.uuid().optional(),
+  primaryColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .default("#145D58"),
+  preset: z.enum(["SIMPLE", "EDUCATIONAL", "PROFESSIONAL"]).default("SIMPLE"),
+  featureOverrides: z
+    .array(featureOverrideSchema)
+    .max(featureKeys.length)
+    .default([]),
+  limitOverrides: z
+    .array(limitOverrideSchema)
+    .max(limitKeys.length)
+    .default([]),
+});
+export const createTenantRequestSchema = createTenantSchema.extend({
+  creationKey: z.uuid(),
 });
 
 export const inviteTenantOwnerSchema = z.strictObject({
@@ -87,12 +104,17 @@ export const listTenantsSchema = z
     status: z
       .enum(["PROVISIONING", "ACTIVE", "SUSPENDED", "FAILED"])
       .optional(),
+    plan: z
+      .string()
+      .trim()
+      .regex(/^[a-z][a-z0-9_]{1,47}$/)
+      .optional(),
   })
   .strict();
 
 export const tenantIdSchema = z.string().uuid();
 
-export type CreateTenantInput = z.infer<typeof createTenantSchema>;
+export type CreateTenantInput = z.input<typeof createTenantSchema>;
 export type UpdateTenantInput = z.infer<typeof updateTenantSchema>;
 export type UpdateBrandingInput = z.infer<typeof updateBrandingSchema>;
 export type CreateDomainInput = z.infer<typeof createDomainSchema>;

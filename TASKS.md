@@ -196,3 +196,17 @@ Final local Phase 6 gate: `pnpm check` passed with 11 pre-existing lint advisori
 Pilot Step 1 local result: focused Playwright passed 1/1; the full run passed 2/2. Unit tests passed 49/49 and real PostgreSQL integration tests passed 15/15. `pnpm check`, `pnpm build`, Prisma tenant schema validation, and the production dependency audit passed. The local Docker daemon stopped responding during its Gitleaks attempt; the official Gitleaks v8.30.0 Windows archive was verified against its published SHA-256 and scanned all 334 tracked and new files with no leaks. GitHub Actions has not run on this patch.
 
 Pilot Step 1 follow-up: unified branded tenant login and registration at `/login`, role-aware server landing, explicit default-off `google_login` feature enforced at OAuth endpoints, documented local/production Google configuration, split Playwright journey into seven bounded named phases, and retained an independent platform auth spec. Focused five-phase browser run passed. Final local gates passed: `pnpm check`, 51/51 unit, 15/15 real PostgreSQL integration, production build, 8/8 Playwright, Prisma validation, production dependency audit, and Gitleaks v8.30.0 on 338 tracked and new files with no leaks. GitHub Actions remains pending for this follow-up.
+
+# Pilot Step 2 — Platform tenant creation (GitHub gate pending)
+
+- [x] Four-step Persian RTL creation wizard: four basic required fields, optional legal name/logo, color/preset, human-readable plan and disclosed overrides, review.
+- [x] Authenticated slug availability preflight with database uniqueness as the final authority.
+- [x] Persist a UUID creation key and payload hash; concurrent identical submissions return one tenant/job and conflicting key reuse fails.
+- [x] Keep provisioning in the existing transactional queue/worker with safe retry and audited transitions.
+- [x] Seed the public website name, theme, sections and placeholder; verify control, database, migration, RBAC, owner invitation, domain and site records; probe public home/login.
+- [x] Display real progress, safe failure details, retry, health, success actions, and list filters.
+- [x] Add focused unit/PostgreSQL checks and expand Playwright for mobile, site/login and optional logo.
+- [x] Pass the full local gate: `pnpm check` (11 existing lint advisories), 56/56 unit tests, 16/16 real PostgreSQL integration tests, production build, 9/9 Playwright tests, Prisma validation, production dependency audit with no known vulnerabilities, and Gitleaks v8.30.0 across ten project targets with no leaks.
+- [ ] Confirm GitHub Actions after pushing before marking Pilot Step 2 complete.
+
+Final migration-aware local rerun passed: `pnpm check`, 56/56 unit, 16/16 real PostgreSQL integration, production build, and 9/9 Playwright. The first final browser attempt stalled on platform sign-out after Chrome reported `net::ERR_NETWORK_CHANGED`; a complete rerun passed including sign-out and teardown. Prisma validation, dependency audit, and Gitleaks passed earlier in this patch and are rerun for the final files. GitHub Actions has not run on this uncommitted change.

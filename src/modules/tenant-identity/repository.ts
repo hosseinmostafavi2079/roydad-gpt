@@ -105,6 +105,7 @@ async function issueInvitation(
   actor: TenantActor | null,
   requestId: string,
   origin: string,
+  replacePending = false,
 ): Promise<{ userId: string }> {
   if (actor) assertActorTenant(context, actor);
   const profileType = input.profileType ?? "STAFF";
@@ -176,7 +177,7 @@ async function issueInvitation(
          ) AS exists`,
         [context.tenantId, id],
       );
-      if (pending.rows[0]?.exists) {
+      if (pending.rows[0]?.exists && !replacePending) {
         throw new DomainError(
           "CONFLICT",
           "A pending invitation already exists for this account.",
@@ -334,7 +335,8 @@ export function issueInitialTenantOwnerInvitation(
             "An organization owner is already assigned.",
           );
         }
-        if (owner.status === "ACTIVE") return { userId: owner.id };
+        if (owner.status === "ACTIVE")
+          return { userId: owner.id, invitationIssued: false };
         if (owner.status !== "INVITED") {
           throw new DomainError(
             "CONFLICT",
@@ -342,13 +344,15 @@ export function issueInitialTenantOwnerInvitation(
           );
         }
       }
-      return await issueInvitation(
+      const result = await issueInvitation(
         context,
         { ...input, roleCodes: ["organization_owner"], profileType: "STAFF" },
         null,
         requestId,
         origin,
+        allowExistingInvite,
       );
+      return { ...result, invitationIssued: true };
     } finally {
       await lock
         .query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lockName])

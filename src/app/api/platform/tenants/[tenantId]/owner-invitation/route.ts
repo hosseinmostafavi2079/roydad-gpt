@@ -60,24 +60,26 @@ export function POST(
       const context = await resolveTenantContext(tenant.hostname);
       const config = getServerConfig();
       const origin = `${config.NODE_ENV === "production" ? "https" : "http"}://${context.hostname}`;
-      await issueInitialTenantOwnerInvitation(
+      const invitation = await issueInitialTenantOwnerInvitation(
         context,
         input,
         requestId,
         origin,
+        true,
       );
-      await withControlTransaction((client) =>
-        appendAuditRecord(client, {
-          actorType: "PLATFORM_ADMIN",
-          actorId: actor.adminId,
-          action: "tenant.owner_invitation_issued",
-          targetType: "TENANT",
-          targetId: tenantId,
-          requestId,
-          afterState: { invitationIssued: true },
-        }),
-      );
-      return { invitationIssued: true };
+      if (invitation.invitationIssued)
+        await withControlTransaction((client) =>
+          appendAuditRecord(client, {
+            actorType: "PLATFORM_ADMIN",
+            actorId: actor.adminId,
+            action: "tenant.owner_invitation_issued",
+            targetType: "TENANT",
+            targetId: tenantId,
+            requestId,
+            afterState: { invitationIssued: true },
+          }),
+        );
+      return { invitationIssued: invitation.invitationIssued };
     },
     { mutation: true },
   );

@@ -2037,3 +2037,70 @@ th {
     padding: 22px;
   }
 }
+.tenant-wizard {
+  min-width: 0;
+}
+.wizard-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0;
+  margin: 0 0 28px;
+  list-style: none;
+}
+.wizard-steps li {
+  padding: 10px;
+  border-radius: 10px;
+  background: #f1f5f3;
+  color: #536a63;
+  font-size: 13px;
+  text-align: center;
+}
+.wizard-steps .wizard-current {
+  background: #dcf2e9;
+  color: #145d58;
+  font-weight: 800;
+}
+.wizard-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.wizard-review {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+.wizard-review > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #e5ece8;
+  padding: 10px 0;
+  overflow-wrap: anywhere;
+}
+.wizard-review dt {
+  color: #64766e;
+}
+.wizard-review dd {
+  margin: 0;
+  text-align: left;
+}
+.wizard-color {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+@media (max-width: 600px) {
+  .wizard-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wizard-summary-grid {
+    grid-template-columns: 1fr;
+  }
+  .tenant-wizard .form-actions {
+    flex-wrap: wrap;
+  }
+}

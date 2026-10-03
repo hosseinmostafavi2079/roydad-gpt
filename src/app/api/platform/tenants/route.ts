@@ -1,6 +1,6 @@
 import { createTenant, listTenants } from "@/modules/platform/tenants/service";
 import {
-  createTenantSchema,
+  createTenantRequestSchema,
   listTenantsSchema,
 } from "@/modules/platform/tenants/schema";
 import {
@@ -23,7 +23,7 @@ export function POST(request: Request): Promise<Response> {
     request,
     async (actor, requestId) => {
       const result = await createTenant(
-        await parseJson(request, createTenantSchema),
+        await parseJson(request, createTenantRequestSchema),
         actor,
         requestId,
       );

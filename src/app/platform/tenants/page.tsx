@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listTenants } from "@/modules/platform/tenants/service";
 import { listTenantsSchema } from "@/modules/platform/tenants/schema";
+import { listPlans } from "@/modules/platform/plans/service";
 
 export const metadata = { title: "سازمان‌ها" };
 
@@ -15,8 +16,9 @@ export default async function TenantsPage({
     pageSize: params.pageSize,
     search: params.search,
     status: params.status,
+    plan: params.plan,
   });
-  const tenants = await listTenants(query);
+  const [tenants, plans] = await Promise.all([listTenants(query), listPlans()]);
   return (
     <main className="content">
       <div className="page-heading">
@@ -58,6 +60,41 @@ export default async function TenantsPage({
                 defaultValue={query.search}
               />
             </div>
+            <div className="field">
+              <label className="label" htmlFor="tenant-status-filter">
+                وضعیت
+              </label>
+              <select
+                className="select"
+                id="tenant-status-filter"
+                name="status"
+                defaultValue={query.status ?? ""}
+              >
+                <option value="">همه</option>
+                <option value="PROVISIONING">در حال راه‌اندازی</option>
+                <option value="ACTIVE">فعال</option>
+                <option value="FAILED">خطا</option>
+                <option value="SUSPENDED">غیرفعال</option>
+              </select>
+            </div>
+            <div className="field">
+              <label className="label" htmlFor="tenant-plan-filter">
+                طرح
+              </label>
+              <select
+                className="select"
+                id="tenant-plan-filter"
+                name="plan"
+                defaultValue={query.plan ?? ""}
+              >
+                <option value="">همه طرح‌ها</option>
+                {plans.map((plan) => (
+                  <option key={plan.code} value={plan.code}>
+                    {plan.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <button type="submit" className="btn btn-secondary btn-small">
               جست‌وجو
             </button>
@@ -72,6 +109,7 @@ export default async function TenantsPage({
                   <th>شناسه</th>
                   <th>طرح</th>
                   <th>وضعیت</th>
+                  <th>سلامت</th>
                   <th>دامنه</th>
                   <th>زمان ایجاد</th>
                   <th />
@@ -90,6 +128,15 @@ export default async function TenantsPage({
                     <td>{tenant.plan.name}</td>
                     <td>
                       <StatusBadge status={tenant.status} />
+                    </td>
+                    <td>
+                      {tenant.health === "HEALTHY"
+                        ? "سالم"
+                        : tenant.health === "DEGRADED"
+                          ? "نیازمند بررسی"
+                          : tenant.health === "FAILED"
+                            ? "خطا"
+                            : "در حال بررسی"}
                     </td>
                     <td className="mono">{tenant.primaryHostname ?? "—"}</td>
                     <td>

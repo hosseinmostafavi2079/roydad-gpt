@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listPlans } from "@/modules/platform/plans/service";
 import { TenantCreateForm } from "@/app/_components/tenant-create-form";
+import { getServerConfig } from "@/shared/config/env";
 
 export const metadata = { title: "ایجاد سازمان" };
 
@@ -23,7 +24,10 @@ export default async function NewTenantPage() {
         </div>
       </div>
       <section className="card card-pad" style={{ maxWidth: 850 }}>
-        <TenantCreateForm plans={plans} />
+        <TenantCreateForm
+          plans={plans}
+          platformDomain={getServerConfig().PLATFORM_BASE_DOMAIN}
+        />
       </section>
     </main>
   );

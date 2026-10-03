@@ -366,16 +366,33 @@ async function* tenantJourney({
     ).toBeVisible();
 
     await page.goto("/platform/tenants/new");
+    for (const width of [320, 375, 390, 430, 768]) {
+      await page.setViewportSize({ width, height: 850 });
+      expect(
+        await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth <=
+            document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+    }
+    await page.setViewportSize({ width: 1280, height: 850 });
     const slug = `e2e-${randomUUID().slice(0, 8)}`;
     const ownerName = "E2E Tenant Owner";
     const ownerEmail = `owner-${randomUUID()}@example.test`;
     saveTenantState(null, slug);
-    await page.getByLabel("نام نمایشی سازمان").fill("EventOS E2E Organization");
-    await page.getByLabel("نام ثبتی").fill("EventOS E2E Organization Inc.");
-    await page.getByLabel("شناسهٔ زیردامنه").fill(slug);
-    await page.getByLabel("نام مدیر اولیه").fill(ownerName);
-    await page.getByLabel("ایمیل مدیر اولیه").fill(ownerEmail);
-    await page.getByRole("button", { name: "ایجاد و شروع راه‌اندازی" }).click();
+    await page.getByLabel("نام مجموعه").fill("EventOS E2E Organization");
+    await page
+      .getByLabel("نام ثبتی (اختیاری)")
+      .fill("EventOS E2E Organization Inc.");
+    await page.getByLabel("شناسه / زیردامنه").fill(slug);
+    await page.getByLabel("نام مدیر اصلی").fill(ownerName);
+    await page.getByLabel("ایمیل مدیر اصلی").fill(ownerEmail);
+    await expect(page.getByText("این آدرس آزاد است ✓")).toBeVisible();
+    await page.getByRole("button", { name: "ادامه" }).click();
+    await page.getByRole("button", { name: "ادامه" }).click();
+    await page.getByRole("button", { name: "ادامه" }).click();
+    await page.getByRole("button", { name: "ایجاد مجموعه" }).click();
     await page.waitForURL(/\/platform\/tenants\/[0-9a-f-]{36}$/);
     const provisioningStatus = page
       .getByRole("region", { name: "وضعیت راه‌اندازی" })
@@ -391,9 +408,47 @@ async function* tenantJourney({
     await stopWorker(failWorker);
     retryWorker = await startWorker(false);
     await page.getByRole("button", { name: "تلاش دوباره" }).click();
-    await expect(provisioningStatus).toHaveText("آماده و فعال", {
+    await expect(provisioningStatus).toHaveText("آماده استفاده", {
       timeout: 45_000,
     });
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async (id) => {
+            const response = await fetch(`/api/platform/tenants/${id}`);
+            if (!response.ok) return `HTTP_${response.status}`;
+            const details = (await response.json()) as {
+              data: { database: { state: string } };
+            };
+            return details.data.database.state;
+          }, tenantId),
+        { timeout: 20_000 },
+      )
+      .toBe("HEALTHY");
+    await page.reload();
+    await expect(page.locator("#tenant-health")).toContainText("سالم");
+    await expect(
+      page.getByRole("heading", { name: "مجموعه آماده استفاده است ✓" }).first(),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "باز کردن سایت" }),
+    ).toBeVisible();
+    const newTenantSite = await page.context().newPage();
+    const homeResponse = await newTenantSite.goto(
+      `http://${slug}.localhost:${e2ePort}`,
+    );
+    expect(homeResponse?.status()).toBe(200);
+    await expect(
+      newTenantSite.getByRole("heading", {
+        name: "EventOS E2E Organization",
+        exact: true,
+      }),
+    ).toBeVisible();
+    const loginResponse = await newTenantSite.goto(
+      `http://${slug}.localhost:${e2ePort}/login`,
+    );
+    expect(loginResponse?.status()).toBe(200);
+    await newTenantSite.close();
 
     await page
       .getByLabel("نام نمایشی", { exact: true })
@@ -1277,19 +1332,32 @@ async function* tenantJourney({
     await page.goto(`http://localhost:${e2ePort}/platform/tenants/new`);
     const secondSlug = `e2e-${randomUUID().slice(0, 8)}`;
     saveTenantState(null, secondSlug);
-    await page.getByLabel("نام نمایشی سازمان").fill("EventOS E2E Tenant B");
-    await page.getByLabel("نام ثبتی").fill("EventOS E2E Tenant B Inc.");
-    await page.getByLabel("شناسهٔ زیردامنه").fill(secondSlug);
-    await page.getByLabel("نام مدیر اولیه").fill("Tenant B Owner");
+    await page.getByLabel("نام مجموعه").fill("EventOS E2E Tenant B");
+    await page
+      .getByLabel("نام ثبتی (اختیاری)")
+      .fill("EventOS E2E Tenant B Inc.");
+    await page.getByLabel("شناسه / زیردامنه").fill(secondSlug);
+    await page.getByLabel("نام مدیر اصلی").fill("Tenant B Owner");
     const secondOwnerEmail = `owner-${randomUUID()}@example.test`;
-    await page.getByLabel("ایمیل مدیر اولیه").fill(secondOwnerEmail);
-    await page.getByRole("button", { name: "ایجاد و شروع راه‌اندازی" }).click();
-    await page.waitForURL(/\/platform\/tenants\/[0-9a-f-]{36}$/);
+    await page.getByLabel("ایمیل مدیر اصلی").fill(secondOwnerEmail);
+    await expect(page.getByText("این آدرس آزاد است ✓")).toBeVisible();
+    await page.getByRole("button", { name: "ادامه" }).click();
+    await page.getByLabel("لوگو (اختیاری)").setInputFiles({
+      name: "logo.png",
+      mimeType: "image/png",
+      buffer: tinyPng,
+    });
+    await page.getByRole("button", { name: "ادامه" }).click();
+    await page.getByRole("button", { name: "ادامه" }).click();
+    await page.getByRole("button", { name: "ایجاد مجموعه" }).click();
+    await page.waitForURL(/\/platform\/tenants\/[0-9a-f-]{36}$/, {
+      timeout: 90_000,
+    });
     const secondTenantId = page.url().split("/").at(-1) ?? null;
     if (!secondTenantId)
       throw new Error("Tenant B page did not contain a tenant ID.");
     saveTenantState(secondTenantId, secondSlug);
-    await expect(provisioningStatus).toHaveText("آماده و فعال", {
+    await expect(provisioningStatus).toHaveText("آماده استفاده", {
       timeout: 45_000,
     });
     expect(
@@ -1316,6 +1384,12 @@ async function* tenantJourney({
     const secondOrigin = `http://${secondSlug}.localhost:${e2ePort}`;
     const secondContext = await browser.newContext();
     const secondPage = await secondContext.newPage();
+    await secondPage.goto(secondOrigin);
+    const logo = secondPage.locator(".public-logo img");
+    await expect(logo).toBeVisible();
+    expect(await logo.getAttribute("src")).toMatch(
+      /^\/api\/media\/[0-9a-f-]{36}$/,
+    );
     await secondPage.goto(
       `${secondOrigin}/accept-invitation?token=${encodeURIComponent(secondToken)}`,
     );
