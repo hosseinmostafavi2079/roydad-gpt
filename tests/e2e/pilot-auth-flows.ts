@@ -35,14 +35,17 @@ function signedGoogleIdentity(input: {
   return `${payload}.${signature}`;
 }
 
-async function mockGoogleIdentity(page: Page, token: string) {
+async function mockGoogleIdentity(page: Page, token: string | (() => string)) {
   await page.route("**/api/tenant-auth/sign-in/social", async (route) => {
     const body = JSON.parse(route.request().postData() ?? "{}") as Record<
       string,
       unknown
     >;
     await route.continue({
-      postData: JSON.stringify({ ...body, idToken: { token } }),
+      postData: JSON.stringify({
+        ...body,
+        idToken: { token: typeof token === "function" ? token() : token },
+      }),
     });
   });
 }
@@ -115,7 +118,6 @@ export async function runPilotAuthBrowserFlows(input: Input): Promise<void> {
     const passwordRun = await cloneRun("ورود با رمز");
     const otpRun = await cloneRun("ورود با کد");
     const googleRun = await cloneRun("ورود با گوگل");
-    const googleNewRun = await cloneRun("ثبت‌نام با گوگل");
 
     const passwordContext = await input.browser.newContext();
     contexts.push(passwordContext);
@@ -266,24 +268,28 @@ export async function runPilotAuthBrowserFlows(input: Input): Promise<void> {
     const existingId = existing.rows[0]?.id;
     if (!existingId)
       throw new Error("Pilot E2E existing participant is missing.");
-    const unverified = signedGoogleIdentity({
-      tenantId: input.tenantId,
-      email: input.participantEmail,
-      verified: false,
-      sub: `unverified-${randomUUID()}`,
-    });
+    const unverifiedSubject = `unverified-${randomUUID()}`;
+    const unverified = () =>
+      signedGoogleIdentity({
+        tenantId: input.tenantId,
+        email: input.participantEmail,
+        verified: false,
+        sub: unverifiedSubject,
+      });
     await mockGoogleIdentity(googlePage, unverified);
     await clickGoogleWithRateLimit(googlePage, db);
     await expect(
       googlePage.locator(".tenant-auth-card [role=alert]"),
     ).toContainText("ورود با گوگل انجام نشد");
     await googlePage.unroute("**/api/tenant-auth/sign-in/social");
-    const verified = signedGoogleIdentity({
-      tenantId: input.tenantId,
-      email: input.participantEmail,
-      verified: true,
-      sub: `verified-${randomUUID()}`,
-    });
+    const verifiedSubject = `verified-${randomUUID()}`;
+    const verified = () =>
+      signedGoogleIdentity({
+        tenantId: input.tenantId,
+        email: input.participantEmail,
+        verified: true,
+        sub: verifiedSubject,
+      });
     await mockGoogleIdentity(googlePage, verified);
     await clickGoogleWithRateLimit(googlePage, db);
     await googlePage.waitForURL(`**${googleRun.path}`);
@@ -300,36 +306,6 @@ export async function runPilotAuthBrowserFlows(input: Input): Promise<void> {
     await expect(googlePage.getByRole("status")).toContainText(
       "ثبت‌نام شما تأیید شد",
     );
-
-    const newGoogleContext = await input.browser.newContext();
-    contexts.push(newGoogleContext);
-    const newGooglePage = await newGoogleContext.newPage();
-    const newGoogleEmail = `google-${randomUUID()}@example.test`;
-    await newGooglePage.goto(
-      `${input.tenantOrigin}/register?next=${encodeURIComponent(googleNewRun.path)}`,
-    );
-    await mockGoogleIdentity(
-      newGooglePage,
-      signedGoogleIdentity({
-        tenantId: input.tenantId,
-        email: newGoogleEmail,
-        verified: true,
-        sub: `new-${randomUUID()}`,
-      }),
-    );
-    await clickGoogleWithRateLimit(newGooglePage, db);
-    await newGooglePage.waitForURL(`**${googleNewRun.path}`);
-    await newGooglePage.getByRole("button", { name: "ثبت‌نام در دوره" }).click();
-    await expect(newGooglePage.getByRole("status")).toContainText(
-      "ثبت‌نام شما تأیید شد",
-    );
-    const newGoogleUser = await db.query<{ count: number }>(
-      `SELECT count(*)::int AS count FROM tenant_participant_profiles p
-       JOIN tenant_users u ON u."tenantId"=p.tenant_id AND u.id=p.user_id
-       WHERE p.tenant_id=$1 AND u.email=$2`,
-      [input.tenantId, newGoogleEmail],
-    );
-    expect(newGoogleUser.rows[0]?.count).toBe(1);
 
     const maliciousContext = await input.browser.newContext();
     contexts.push(maliciousContext);
@@ -354,6 +330,118 @@ export async function runPilotAuthBrowserFlows(input: Input): Promise<void> {
     reportCleanupFailures(
       "Pilot browser cleanup failed",
       failures,
+      originalError,
+    );
+  }
+}
+
+export async function runPilotGoogleNewUserFlow(input: Input): Promise<void> {
+  const control = new Client({
+    connectionString: process.env.CONTROL_DATABASE_URL,
+  });
+  await control.connect();
+  let databaseName: string | undefined;
+  try {
+    const registry = await control.query<{ database_name: string }>(
+      "SELECT database_name FROM tenant_database_registry WHERE tenant_id=$1",
+      [input.tenantId],
+    );
+    databaseName = registry.rows[0]?.database_name;
+  } finally {
+    await control.end();
+  }
+  if (!databaseName || !/^eventos_t_[0-9a-f]{32}$/.test(databaseName))
+    throw new Error("Pilot E2E tenant database is unavailable.");
+  const url = new URL(process.env.TENANT_RUNTIME_DATABASE_URL ?? "");
+  url.pathname = `/${databaseName}`;
+  const db = new Client({ connectionString: url.toString() });
+  await db.connect();
+  const context = await input.browser.newContext();
+  let originalError: unknown;
+  try {
+    const run = await db.query<{ id: string }>(
+      `INSERT INTO program_runs
+        (tenant_id,program_id,title,starts_at,ends_at,registration_starts_at,
+         registration_ends_at,delivery_mode,capacity,minimum_capacity,
+         waitlist_enabled,state,venue_id,notes,created_by,
+         registration_form_schema,price_amount,price_currency)
+       SELECT tenant_id,program_id,$3,starts_at,ends_at,registration_starts_at,
+         registration_ends_at,'ONLINE',10,NULL,false,'PUBLISHED',NULL,notes,
+         created_by,'{"version":1,"fields":[]}'::jsonb,0,'IRR'
+       FROM program_runs WHERE tenant_id=$1 AND id=$2 RETURNING id`,
+      [
+        input.tenantId,
+        input.sourceRunId,
+        `ثبت‌نام با گوگل ${randomUUID().slice(0, 8)}`,
+      ],
+    );
+    const runId = run.rows[0]?.id;
+    if (!runId) throw new Error("Pilot E2E run creation failed.");
+    const eventPath = `/events/${runId}`;
+    const page = await context.newPage();
+    const email = `google-${randomUUID()}@example.test`;
+    const googleSubject = `new-${randomUUID()}`;
+    await page.goto(
+      `${input.tenantOrigin}/register?next=${encodeURIComponent(eventPath)}`,
+    );
+    await expect(page).toHaveURL(/\/login\?mode=register/);
+    await mockGoogleIdentity(page, () =>
+      signedGoogleIdentity({
+        tenantId: input.tenantId,
+        email,
+        verified: true,
+        sub: googleSubject,
+      }),
+    );
+    const social = await clickGoogleWithRateLimit(page, db);
+    const socialStatus = social.status();
+    let callbackStatus: number | null = null;
+    page.on("response", (response) => {
+      if (response.url().includes("/api/tenant-auth/callback/google"))
+        callbackStatus = response.status();
+    });
+    try {
+      expect(socialStatus).toBe(200);
+      await page.waitForURL(`**${eventPath}`);
+    } catch (error) {
+      const identity = await db.query<{
+        user_exists: boolean;
+        participant_exists: boolean;
+        session_exists: boolean;
+      }>(
+        `SELECT EXISTS(SELECT 1 FROM tenant_users WHERE "tenantId"=$1 AND email=$2) AS user_exists,
+                EXISTS(SELECT 1 FROM tenant_participant_profiles p JOIN tenant_users u
+                  ON u.id=p.user_id AND u."tenantId"=p.tenant_id
+                  WHERE p.tenant_id=$1 AND u.email=$2) AS participant_exists,
+                EXISTS(SELECT 1 FROM tenant_auth_sessions s JOIN tenant_users u
+                  ON u.id=s."userId" AND u."tenantId"=s."tenantId"
+                  WHERE s."tenantId"=$1 AND u.email=$2) AS session_exists`,
+        [input.tenantId, email],
+      );
+      throw new Error(
+        `New Google participant did not reach event: ${JSON.stringify({ currentUrl: page.url(), socialStatus, callbackStatus, ...identity.rows[0] })}`,
+        { cause: error },
+      );
+    }
+    await page.getByRole("button", { name: "ثبت‌نام در دوره" }).click();
+    await expect(page.getByRole("status")).toContainText("ثبت‌نام شما تأیید شد");
+    const participant = await db.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM tenant_participant_profiles p
+       JOIN tenant_users u ON u."tenantId"=p.tenant_id AND u.id=p.user_id
+       WHERE p.tenant_id=$1 AND u.email=$2`,
+      [input.tenantId, email],
+    );
+    expect(participant.rows[0]?.count).toBe(1);
+  } catch (error) {
+    originalError = error;
+    throw error;
+  } finally {
+    const results = await Promise.allSettled([context.close(), db.end()]);
+    reportCleanupFailures(
+      "New Google participant cleanup failed",
+      results
+        .filter((result) => result.status === "rejected")
+        .map((result) => result.reason),
       originalError,
     );
   }

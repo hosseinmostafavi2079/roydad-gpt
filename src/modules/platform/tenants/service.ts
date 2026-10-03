@@ -367,13 +367,49 @@ const tenantSelect = `
 export async function getTenantDetails(tenantId: string) {
   const client = await getControlPool().connect();
   try {
+    const integrity = await client.query<{
+      plan_exists: boolean;
+      registry_exists: boolean;
+      branding_exists: boolean;
+      primary_domain_exists: boolean;
+    }>(
+      `SELECT plan.id IS NOT NULL AS plan_exists,
+              registry.tenant_id IS NOT NULL AS registry_exists,
+              branding.tenant_id IS NOT NULL AS branding_exists,
+              EXISTS (SELECT 1 FROM tenant_domains AS domain
+                      WHERE domain.tenant_id = tenant.id AND domain.is_primary)
+                AS primary_domain_exists
+       FROM tenants AS tenant
+       LEFT JOIN plans AS plan ON plan.id = tenant.plan_id
+       LEFT JOIN tenant_database_registry AS registry ON registry.tenant_id = tenant.id
+       LEFT JOIN tenant_branding AS branding ON branding.tenant_id = tenant.id
+       WHERE tenant.id = $1`,
+      [tenantId],
+    );
+    const relationships = integrity.rows[0];
+    if (!relationships)
+      throw new DomainError("NOT_FOUND", "The requested tenant was not found.");
+    if (
+      !relationships.plan_exists ||
+      !relationships.registry_exists ||
+      !relationships.branding_exists ||
+      !relationships.primary_domain_exists
+    ) {
+      throw new DomainError(
+        "PROVISIONING_FAILED",
+        "Tenant control data is incomplete.",
+      );
+    }
     const tenantResult = await client.query<TenantConfigurationRow>(
       `${tenantSelect} WHERE tenant.id = $1`,
       [tenantId],
     );
     const row = tenantResult.rows[0];
     if (!row) {
-      throw new DomainError("NOT_FOUND", "The requested tenant was not found.");
+      throw new DomainError(
+        "PROVISIONING_FAILED",
+        "Tenant control data changed during the request.",
+      );
     }
 
     const [

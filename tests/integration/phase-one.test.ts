@@ -50,6 +50,7 @@ import {
 } from "@/modules/platform/provisioning/queue";
 import {
   createTenant,
+  getTenantDetails,
   createCustomDomain,
   changeTenantStatus,
   retryProvisioning,
@@ -385,6 +386,70 @@ describe("Phase 1 real PostgreSQL gates", () => {
       verifyPlatformPassword(hash, "incorrect password"),
     ).resolves.toBe(false);
   }, 60_000);
+
+  it("distinguishes stale tenant URLs from incomplete control records", async () => {
+    const tenantId = randomUUID();
+    const hostname = `integrity-${randomUUID().slice(0, 8)}.localhost`;
+    const control = getControlPool();
+    const current = await control.query<{ id: string }>(
+      "SELECT id FROM tenants LIMIT 1",
+    );
+    if (current.rows[0])
+      await expect(
+        getTenantDetails(current.rows[0].id),
+      ).resolves.toHaveProperty("tenant.id", current.rows[0].id);
+    await expect(getTenantDetails(tenantId)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    try {
+      await control.query(
+        `INSERT INTO tenants (id,slug,legal_name,display_name,plan_id,created_by)
+         SELECT $1,$2,'Integrity test','Integrity test',id,'integration-test'
+         FROM plans WHERE code='foundation'`,
+        [tenantId, `integrity-${randomUUID().slice(0, 8)}`],
+      );
+      await expect(getTenantDetails(tenantId)).rejects.toMatchObject({
+        code: "PROVISIONING_FAILED",
+      });
+      await control.query(
+        "INSERT INTO tenant_database_registry (tenant_id,database_name) VALUES ($1,$2)",
+        [tenantId, `eventos_t_${tenantId.replaceAll("-", "")}`],
+      );
+      await expect(getTenantDetails(tenantId)).rejects.toMatchObject({
+        code: "PROVISIONING_FAILED",
+      });
+      await control.query(
+        `INSERT INTO tenant_domains
+          (tenant_id,hostname,domain_type,is_primary,verified_at,created_by)
+         VALUES ($1,$2,'PLATFORM_SUBDOMAIN',true,now(),'integration-test')`,
+        [tenantId, hostname],
+      );
+      await expect(getTenantDetails(tenantId)).rejects.toMatchObject({
+        code: "PROVISIONING_FAILED",
+      });
+      await control.query(
+        `INSERT INTO tenant_branding (tenant_id,brand_name,updated_by)
+         VALUES ($1,'Integrity test','integration-test')`,
+        [tenantId],
+      );
+      await expect(getTenantDetails(tenantId)).resolves.toHaveProperty(
+        "tenant.id",
+        tenantId,
+      );
+    } finally {
+      await control.query("DELETE FROM tenant_branding WHERE tenant_id=$1", [
+        tenantId,
+      ]);
+      await control.query("DELETE FROM tenant_domains WHERE tenant_id=$1", [
+        tenantId,
+      ]);
+      await control.query(
+        "DELETE FROM tenant_database_registry WHERE tenant_id=$1",
+        [tenantId],
+      );
+      await control.query("DELETE FROM tenants WHERE id=$1", [tenantId]);
+    }
+  });
 
   it("provisions, verifies, resolves, isolates, fails safely, retries, and invalidates tenant context", async () => {
     const actor = {

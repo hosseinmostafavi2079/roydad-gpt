@@ -6,6 +6,7 @@ import { tenantIdSchema } from "@/modules/platform/tenants/schema";
 import { TenantSettings } from "@/app/_components/tenant-settings";
 import { TenantOwnerInviteForm } from "@/app/_components/tenant-owner-invite-form";
 import { getTenantUsage } from "@/modules/platform/tenants/usage";
+import { DomainError } from "@/shared/errors/domain-error";
 
 export const metadata = { title: "تنظیمات سازمان" };
 
@@ -17,10 +18,30 @@ export default async function TenantDetailsPage({
   const { tenantId: rawId } = await params;
   const tenantId = tenantIdSchema.safeParse(rawId);
   if (!tenantId.success) notFound();
-  const [initial, plans] = await Promise.all([
-    getTenantDetails(tenantId.data),
-    listPlans(),
-  ]);
+  let initial: Awaited<ReturnType<typeof getTenantDetails>>;
+  try {
+    initial = await getTenantDetails(tenantId.data);
+  } catch (error) {
+    if (error instanceof DomainError && error.code === "NOT_FOUND") notFound();
+    if (error instanceof DomainError && error.code === "PROVISIONING_FAILED") {
+      console.error("Tenant control data is incomplete", {
+        tenantId: tenantId.data,
+      });
+      return (
+        <main className="content">
+          <section className="card card-pad">
+            <h1 className="page-title">اطلاعات سازمان ناقص است</h1>
+            <p>اطلاعات زیرساخت این سازمان نیاز به بررسی دارد.</p>
+            <Link className="btn btn-secondary" href="/platform/tenants">
+              بازگشت به سازمان‌ها
+            </Link>
+          </section>
+        </main>
+      );
+    }
+    throw error;
+  }
+  const plans = await listPlans();
   const usage =
     initial.tenant.status === "ACTIVE"
       ? await getTenantUsage(tenantId.data)

@@ -18,7 +18,10 @@ import { workerDiagnostics } from "../helpers/worker-diagnostics";
 import { reportCleanupFailures } from "../helpers/cleanup-failures";
 import { gregorianWallToJalali } from "@/modules/program-core/dates";
 import { runPhase6BrowserFlows } from "./payment-flows";
-import { runPilotAuthBrowserFlows } from "./pilot-auth-flows";
+import {
+  runPilotAuthBrowserFlows,
+  runPilotGoogleNewUserFlow,
+} from "./pilot-auth-flows";
 
 const tinyPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pXcAAAAASUVORK5CYII=",
@@ -284,6 +287,15 @@ async function* tenantJourney({
       headers: { origin: "https://attacker.example" },
     });
     expect(csrfDenied.status()).toBe(403);
+
+    const missingTenant = await page.goto(`/platform/tenants/${randomUUID()}`);
+    expect(missingTenant?.status()).toBe(404);
+    await expect(
+      page.getByRole("heading", { name: "سازمان پیدا نشد" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "بازگشت به سازمان‌ها" }),
+    ).toBeVisible();
 
     await page.goto("/platform/tenants/new");
     const slug = `e2e-${randomUUID().slice(0, 8)}`;
@@ -957,6 +969,16 @@ async function* tenantJourney({
     });
     yield "pilot authentication flows";
 
+    await runPilotGoogleNewUserFlow({
+      browser,
+      tenantId,
+      tenantOrigin,
+      sourceRunId: phase3RunId,
+      participantEmail: phase5ParticipantEmail,
+      mailOutboxPath: e2eState.mailOutboxPath ?? "",
+    });
+    yield "pilot Google new participant";
+
     await page.goto(`${tenantOrigin}/calendar`);
     await expect(page.getByText(phase3SessionTitle)).toBeVisible();
 
@@ -1311,12 +1333,15 @@ test.describe("platform and tenant journey", () => {
     "program creation and public enrollment",
     "payment browser flows",
     "pilot authentication flows",
+    "pilot Google new participant",
     "attendance and certificates",
     "tenant isolation and session revocation",
   ];
   for (const [index, phase] of phases.entries()) {
     test(phase, async () => {
-      test.setTimeout(240_000);
+      test.setTimeout(
+        phase === "pilot Google new participant" ? 120_000 : 240_000,
+      );
       try {
         const result = await journey.next();
         expect(result.done).toBe(index === phases.length - 1);
