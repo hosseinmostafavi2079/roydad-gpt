@@ -201,20 +201,37 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
       <section className="card card-pad" hidden={tab !== "هویت بصری"}>
         <h2 className="card-title">ظاهر و برند</h2>
         <div className="website-editor-grid">
-          <label>
-            <span>قالب</span>
-            <select
-              value={value.siteSettings.template}
-              onChange={(e) =>
-                setting("template", e.target.value as SiteSettings["template"])
-              }
-            >
-              <option value="MINIMAL">مینیمال</option>
-              <option value="ACADEMY">آکادمی</option>
-              <option value="PROFESSIONAL">حرفه‌ای</option>
-              <option value="EVENT">رویداد</option>
-            </select>
-          </label>
+          <fieldset className="website-template-options">
+            <legend>قالب سایت</legend>
+            {(
+              [
+                ["MINIMAL", "مینیمال", "متن و فضای سفید"],
+                ["ACADEMY", "آکادمی", "دوره‌ها و مدرسان"],
+                ["PROFESSIONAL", "حرفه‌ای", "ساختار و اعتبار"],
+                ["EVENT", "رویداد", "تصویر و ثبت‌نام"],
+              ] as const
+            ).map(([key, title, description]) => (
+              <label className="website-template-choice" key={key}>
+                <input
+                  type="radio"
+                  name="public-template"
+                  value={key}
+                  checked={value.siteSettings.template === key}
+                  onChange={() => setting("template", key)}
+                />
+                <span
+                  className={`website-template-mini website-template-mini-${key.toLowerCase()}`}
+                  aria-hidden="true"
+                >
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <strong>{title}</strong>
+                <small>{description}</small>
+              </label>
+            ))}
+          </fieldset>
           <label>
             <span>عرض محتوا</span>
             <select
@@ -316,18 +333,27 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
               </label>
             ),
           )}
-          <label>
-            <span>سبک کارت‌ها</span>
-            <select
-              value={value.cardStyle}
-              onChange={(event) =>
-                set("cardStyle", event.target.value as Profile["cardStyle"])
-              }
-            >
-              <option value="SOFT">نرم</option>
-              <option value="OUTLINED">خط‌دار</option>
-            </select>
-          </label>
+          <fieldset className="website-visual-options">
+            <legend>سبک کارت‌ها</legend>
+            {(["SOFT", "OUTLINED"] as const).map((style) => (
+              <label className="website-visual-choice" key={style}>
+                <input
+                  type="radio"
+                  name="card-style"
+                  checked={value.cardStyle === style}
+                  onChange={() => set("cardStyle", style)}
+                />
+                <span
+                  className={`website-card-mini website-card-mini-${style.toLowerCase()}`}
+                  aria-hidden="true"
+                >
+                  <i />
+                  <i />
+                </span>
+                <span>{style === "SOFT" ? "نرم" : "خط‌دار"}</span>
+              </label>
+            ))}
+          </fieldset>
           <label>
             <span>گردی گوشه‌ها</span>
             <select
@@ -368,21 +394,26 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
               <option value="TAHOMA">تاهوما</option>
             </select>
           </label>
-          <label>
-            <span>سبک دکمه</span>
-            <select
-              value={value.siteSettings.buttonStyle}
-              onChange={(event) =>
-                setting(
-                  "buttonStyle",
-                  event.target.value as SiteSettings["buttonStyle"],
-                )
-              }
-            >
-              <option value="SOLID">پررنگ</option>
-              <option value="OUTLINE">خط‌دار</option>
-            </select>
-          </label>
+          <fieldset className="website-visual-options">
+            <legend>سبک دکمه</legend>
+            {(["SOLID", "OUTLINE"] as const).map((style) => (
+              <label className="website-visual-choice" key={style}>
+                <input
+                  type="radio"
+                  name="button-style"
+                  checked={value.siteSettings.buttonStyle === style}
+                  onChange={() => setting("buttonStyle", style)}
+                />
+                <span
+                  className={`website-button-mini website-button-mini-${style.toLowerCase()}`}
+                  aria-hidden="true"
+                >
+                  دکمه
+                </span>
+                <span>{style === "SOLID" ? "پررنگ" : "خط‌دار"}</span>
+              </label>
+            ))}
+          </fieldset>
         </div>
       </section>
       <section className="card card-pad" hidden={tab !== "منو"}>
@@ -485,22 +516,33 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
               <option value="CENTER">وسط‌چین</option>
             </select>
           </label>
-          <label>
-            <span>طرح Hero</span>
-            <select
-              value={value.siteSettings.heroLayout}
-              onChange={(e) =>
-                setting(
-                  "heroLayout",
-                  e.target.value as SiteSettings["heroLayout"],
-                )
-              }
-            >
-              <option value="SPLIT">متن و تصویر</option>
-              <option value="FULL">تصویر تمام‌عرض</option>
-              <option value="CENTERED">مرکزی ساده</option>
-            </select>
-          </label>
+          <fieldset className="website-visual-options">
+            <legend>طرح Hero</legend>
+            {(["SPLIT", "FULL", "CENTERED"] as const).map((layout) => (
+              <label className="website-visual-choice" key={layout}>
+                <input
+                  type="radio"
+                  name="hero-layout"
+                  checked={value.siteSettings.heroLayout === layout}
+                  onChange={() => setting("heroLayout", layout)}
+                />
+                <span
+                  className={`website-hero-mini website-hero-mini-${layout.toLowerCase()}`}
+                  aria-hidden="true"
+                >
+                  <i />
+                  <i />
+                </span>
+                <span>
+                  {layout === "SPLIT"
+                    ? "متن و تصویر"
+                    : layout === "FULL"
+                      ? "تصویر تمام‌عرض"
+                      : "مرکزی ساده"}
+                </span>
+              </label>
+            ))}
+          </fieldset>
           <label>
             <span>ارتفاع Hero</span>
             <select

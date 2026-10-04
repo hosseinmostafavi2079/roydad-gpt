@@ -4,6 +4,7 @@ import "@fontsource/vazirmatn/600.css";
 import "@fontsource/vazirmatn/700.css";
 import type { Metadata } from "next";
 import "./globals.css";
+import "./public-polish.css";
 
 export const metadata: Metadata = {
   title: {

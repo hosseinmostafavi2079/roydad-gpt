@@ -603,8 +603,9 @@ async function* tenantJourney({
     await page.getByRole("button", { name: "هویت بصری" }).click();
     await page.getByLabel("رنگ اصلی").fill("#145d58");
     await page
-      .getByRole("combobox", { name: "قالب", exact: true })
-      .selectOption("PROFESSIONAL");
+      .getByRole("group", { name: "قالب سایت" })
+      .getByRole("radio", { name: "حرفه‌ای ساختار و اعتبار" })
+      .check();
     await page.getByLabel("سبک کارت رویداد").selectOption("DETAILED");
     await page
       .locator(".media-uploader")
@@ -690,7 +691,9 @@ async function* tenantJourney({
     await page.goto(`${tenantOrigin}/faq`);
     await expect(page.getByText("چگونه ثبت‌نام کنم؟")).toBeVisible();
     await page.goto(`${tenantOrigin}/contact`);
-    await expect(page.getByText("021-12345678")).toBeVisible();
+    await expect(
+      page.getByRole("main").getByText("021-12345678"),
+    ).toBeVisible();
     await page.goto(`${tenantOrigin}/dashboard`);
     expect(
       await page.evaluate(
@@ -987,6 +990,17 @@ async function* tenantJourney({
     ).toBeVisible();
     await page.goto(`${tenantOrigin}/instructors/${publicInstructorSlug}`);
     await expect(page.getByText("مدرس ارشد آزمایشی")).toBeVisible();
+    if (process.env.EVENTOS_VISUAL_CAPTURE === "true") {
+      const originalViewport = page.viewportSize();
+      for (const width of [390, 1440]) {
+        await page.setViewportSize({ width, height: 850 });
+        await page.screenshot({
+          path: `test-results/instructor-profile-${width}.png`,
+          fullPage: true,
+        });
+      }
+      if (originalViewport) await page.setViewportSize(originalViewport);
+    }
     await expect(
       page.getByRole("heading", { name: "سوابق کاری" }),
     ).toBeVisible();
