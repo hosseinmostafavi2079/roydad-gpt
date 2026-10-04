@@ -89,7 +89,19 @@ const textFields: { key: keyof Profile; label: string; type?: string }[] = [
   { key: "footerDescription", label: "متن پایین صفحه" },
 ];
 
-export function WebsiteEditor({ initial }: { initial: Profile }) {
+type FeaturedOptions = {
+  runs: { id: string; title: string }[];
+  instructors: { id: string; title: string }[];
+  categories: string[];
+};
+
+export function WebsiteEditor({
+  initial,
+  featuredOptions,
+}: {
+  initial: Profile;
+  featuredOptions: FeaturedOptions;
+}) {
   const [value, setValue] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -97,6 +109,7 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
   const [previewWidth, setPreviewWidth] = useState<
     "desktop" | "tablet" | "mobile"
   >("desktop");
+  const [previewRevision, setPreviewRevision] = useState(0);
   const [usage, setUsage] = useState<{
     imageBytes: number;
     videoBytes: number;
@@ -123,6 +136,54 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
   function section(key: keyof SiteSettings["sections"], enabled: boolean) {
     setting("sections", { ...value.siteSettings.sections, [key]: enabled });
   }
+  function toggleFeatured(
+    key: "featuredRunIds" | "featuredInstructorIds" | "featuredCategories",
+    id: string,
+  ) {
+    const selected = value.siteSettings[key];
+    setting(
+      key,
+      selected.includes(id)
+        ? selected.filter((item) => item !== id)
+        : [...selected, id].slice(0, 8),
+    );
+  }
+  function updateCategoryPresentation(
+    category: string,
+    field: "description" | "imageUrl" | "icon" | "order",
+    entry: string | number,
+  ) {
+    const current = value.siteSettings.categoryPresentation[category] ?? {
+      description: "",
+      imageUrl: "",
+      icon: "NONE",
+      order: 50,
+    };
+    setting("categoryPresentation", {
+      ...value.siteSettings.categoryPresentation,
+      [category]: {
+        ...current,
+        [field]: entry,
+      } as SiteSettings["categoryPresentation"][string],
+    });
+  }
+  function setSectionDesign(
+    key: keyof SiteSettings["sections"],
+    field: "layout" | "background" | "spacing" | "width" | "decoration",
+    choice: string,
+  ) {
+    const current = value.siteSettings.sectionDesigns[key] ?? {
+      layout: "DEFAULT",
+      background: "DEFAULT",
+      spacing: "NORMAL",
+      width: "CONTAINED",
+      decoration: "NONE",
+    };
+    setting("sectionDesigns", {
+      ...value.siteSettings.sectionDesigns,
+      [key]: { ...current, [field]: choice },
+    });
+  }
   async function save(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -130,6 +191,7 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
     try {
       await apiRequest("/api/tenant/website", { method: "PUT", body: value });
       setMessage("تغییرات ذخیره شد.");
+      setPreviewRevision((revision) => revision + 1);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -232,6 +294,107 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
               </label>
             ))}
           </fieldset>
+          <fieldset className="website-visual-options website-wide">
+            <legend>سبک سربرگ</legend>
+            {(["CLEAN", "BORDERED", "BRAND"] as const).map((style) => (
+              <label className="website-visual-choice" key={style}>
+                <input
+                  type="radio"
+                  name="header-style"
+                  checked={value.siteSettings.headerStyle === style}
+                  onChange={() => setting("headerStyle", style)}
+                />
+                <span
+                  className={`website-header-mini website-header-mini-${style.toLowerCase()}`}
+                  aria-hidden="true"
+                >
+                  <i />
+                  <i />
+                </span>
+                <span>
+                  {style === "CLEAN"
+                    ? "ساده"
+                    : style === "BORDERED"
+                      ? "خط‌دار"
+                      : "رنگ برند"}
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <fieldset className="website-visual-options website-wide">
+            <legend>سبک پایین صفحه</legend>
+            {(["LIGHT", "DARK", "BRAND"] as const).map((style) => (
+              <label className="website-visual-choice" key={style}>
+                <input
+                  type="radio"
+                  name="footer-style"
+                  checked={value.siteSettings.footerStyle === style}
+                  onChange={() => setting("footerStyle", style)}
+                />
+                <span
+                  className={`website-footer-mini website-footer-mini-${style.toLowerCase()}`}
+                  aria-hidden="true"
+                >
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <span>
+                  {style === "LIGHT"
+                    ? "روشن"
+                    : style === "DARK"
+                      ? "تیره"
+                      : "رنگ برند"}
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          {(
+            [
+              [
+                "graphicIntensity",
+                "جزئیات گرافیکی",
+                [
+                  ["MINIMAL", "کم"],
+                  ["BALANCED", "متعادل"],
+                  ["GRAPHIC", "بیشتر"],
+                ],
+              ],
+              [
+                "animationIntensity",
+                "حرکت",
+                [
+                  ["OFF", "خاموش"],
+                  ["GENTLE", "ملایم"],
+                  ["DYNAMIC", "پویا"],
+                ],
+              ],
+              [
+                "contentDensity",
+                "تراکم محتوا",
+                [
+                  ["COMPACT", "جمع‌وجور"],
+                  ["BALANCED", "متعادل"],
+                  ["OPEN", "باز"],
+                ],
+              ],
+            ] as const
+          ).map(([key, label, choices]) => (
+            <fieldset className="website-visual-options website-wide" key={key}>
+              <legend>{label}</legend>
+              {choices.map(([choice, title]) => (
+                <label className="website-visual-choice" key={choice}>
+                  <input
+                    type="radio"
+                    name={key}
+                    checked={value.siteSettings[key] === choice}
+                    onChange={() => setting(key, choice)}
+                  />
+                  <span>{title}</span>
+                </label>
+              ))}
+            </fieldset>
+          ))}
           <label>
             <span>عرض محتوا</span>
             <select
@@ -269,22 +432,55 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
               onChange={(e) => setting("surfaceColor", e.target.value)}
             />
           </label>
-          <label>
-            <span>سبک کارت رویداد</span>
-            <select
-              value={value.siteSettings.eventCardStyle}
-              onChange={(e) =>
-                setting(
-                  "eventCardStyle",
-                  e.target.value as SiteSettings["eventCardStyle"],
-                )
-              }
-            >
-              <option value="COMPACT">فشرده</option>
-              <option value="VISUAL">تصویری</option>
-              <option value="DETAILED">مشروح</option>
-            </select>
-          </label>
+          <fieldset className="website-visual-options website-wide">
+            <legend>سبک کارت رویداد</legend>
+            {(["COMPACT", "VISUAL", "DETAILED"] as const).map((style) => (
+              <label className="website-visual-choice" key={style}>
+                <input
+                  type="radio"
+                  name="event-card-style"
+                  checked={value.siteSettings.eventCardStyle === style}
+                  onChange={() => setting("eventCardStyle", style)}
+                />
+                <span
+                  className={`website-card-preview website-card-preview-${style.toLowerCase()}`}
+                  aria-hidden="true"
+                >
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <span>
+                  {style === "COMPACT"
+                    ? "فشرده"
+                    : style === "VISUAL"
+                      ? "تصویری"
+                      : "مشروح"}
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          <fieldset className="website-visual-options website-wide">
+            <legend>کارت مدرس</legend>
+            {(["PORTRAIT", "EDITORIAL"] as const).map((style) => (
+              <label className="website-visual-choice" key={style}>
+                <input
+                  type="radio"
+                  name="instructor-card-style"
+                  checked={value.siteSettings.instructorCardStyle === style}
+                  onChange={() => setting("instructorCardStyle", style)}
+                />
+                <span
+                  className={`website-instructor-preview website-instructor-preview-${style.toLowerCase()}`}
+                  aria-hidden="true"
+                >
+                  <i />
+                  <i />
+                </span>
+                <span>{style === "PORTRAIT" ? "پرتره" : "تحریری"}</span>
+              </label>
+            ))}
+          </fieldset>
         </div>
         {usage && (
           <p className="hint">
@@ -706,46 +902,306 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
       </section>
       <section className="card card-pad" hidden={tab !== "بخش‌ها"}>
         <h2 className="card-title">نمایش و ترتیب بخش‌ها</h2>
+        <div className="website-featured-options">
+          {(
+            [
+              [
+                "featuredRunIds",
+                "برنامه‌های ویژه",
+                featuredOptions.runs.map((item) => ({
+                  value: item.id,
+                  label: item.title,
+                })),
+              ],
+              [
+                "featuredInstructorIds",
+                "مدرسان ویژه",
+                featuredOptions.instructors.map((item) => ({
+                  value: item.id,
+                  label: item.title,
+                })),
+              ],
+              [
+                "featuredCategories",
+                "موضوعات ویژه",
+                featuredOptions.categories.map((item) => ({
+                  value: item,
+                  label: item,
+                })),
+              ],
+            ] as const
+          ).map(([key, label, options]) => (
+            <fieldset key={key}>
+              <legend>{label}</legend>
+              {options.length ? (
+                options.map((item) => (
+                  <label key={item.value}>
+                    <input
+                      type="checkbox"
+                      checked={value.siteSettings[key].includes(item.value)}
+                      onChange={() => toggleFeatured(key, item.value)}
+                    />
+                    {item.label}
+                  </label>
+                ))
+              ) : (
+                <p className="hint">مورد منتشرشده‌ای برای انتخاب وجود ندارد.</p>
+              )}
+            </fieldset>
+          ))}
+        </div>
+        {featuredOptions.categories.length > 0 && (
+          <details className="website-category-presentation">
+            <summary>نمایش موضوعات</summary>
+            <p className="hint">
+              توضیح و تصویر هر موضوع اختیاری است. تنها موضوعات برنامه‌های
+              منتشرشده نمایش داده می‌شوند.
+            </p>
+            {featuredOptions.categories.map((category) => (
+              <fieldset key={category}>
+                <legend>{category}</legend>
+                <label>
+                  توضیح کوتاه
+                  <input
+                    maxLength={160}
+                    value={
+                      value.siteSettings.categoryPresentation[category]
+                        ?.description ?? ""
+                    }
+                    onChange={(event) =>
+                      updateCategoryPresentation(
+                        category,
+                        "description",
+                        event.target.value,
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  نشانی HTTPS تصویر
+                  <input
+                    value={
+                      value.siteSettings.categoryPresentation[category]
+                        ?.imageUrl ?? ""
+                    }
+                    onChange={(event) =>
+                      updateCategoryPresentation(
+                        category,
+                        "imageUrl",
+                        event.target.value,
+                      )
+                    }
+                  />
+                </label>
+                <label>
+                  نماد
+                  <select
+                    value={
+                      value.siteSettings.categoryPresentation[category]?.icon ??
+                      "NONE"
+                    }
+                    onChange={(event) =>
+                      updateCategoryPresentation(
+                        category,
+                        "icon",
+                        event.target.value,
+                      )
+                    }
+                  >
+                    <option value="NONE">بدون نماد</option>
+                    <option value="BOOK">کتاب</option>
+                    <option value="SCREEN">نمایشگر</option>
+                    <option value="PEOPLE">افراد</option>
+                  </select>
+                </label>
+                <label>
+                  ترتیب
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={
+                      value.siteSettings.categoryPresentation[category]
+                        ?.order ?? 50
+                    }
+                    onChange={(event) =>
+                      updateCategoryPresentation(
+                        category,
+                        "order",
+                        Number(event.target.value),
+                      )
+                    }
+                  />
+                </label>
+              </fieldset>
+            ))}
+          </details>
+        )}
         {value.siteSettings.sectionOrder.map((key, index) => (
-          <div className="website-section-row" key={key}>
-            <label>
-              <input
-                type="checkbox"
-                checked={value.siteSettings.sections[key]}
-                onChange={(event) => section(key, event.target.checked)}
-              />
-              {sectionLabels[key]}
-            </label>
-            <button
-              type="button"
-              disabled={index === 0}
-              onClick={() => {
-                const order = [...value.siteSettings.sectionOrder];
-                const previous = order[index - 1];
-                const current = order[index];
-                if (!previous || !current) return;
-                order[index - 1] = current;
-                order[index] = previous;
-                setting("sectionOrder", order);
-              }}
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              disabled={index === value.siteSettings.sectionOrder.length - 1}
-              onClick={() => {
-                const order = [...value.siteSettings.sectionOrder];
-                const current = order[index];
-                const next = order[index + 1];
-                if (!current || !next) return;
-                order[index] = next;
-                order[index + 1] = current;
-                setting("sectionOrder", order);
-              }}
-            >
-              ↓
-            </button>
+          <div className="website-section-builder-row" key={key}>
+            <div className="website-section-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={value.siteSettings.sections[key]}
+                  onChange={(event) => section(key, event.target.checked)}
+                />
+                {sectionLabels[key]}
+              </label>
+              <button
+                type="button"
+                disabled={index === 0}
+                onClick={() => {
+                  const order = [...value.siteSettings.sectionOrder];
+                  const previous = order[index - 1];
+                  const current = order[index];
+                  if (!previous || !current) return;
+                  order[index - 1] = current;
+                  order[index] = previous;
+                  setting("sectionOrder", order);
+                }}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                disabled={index === value.siteSettings.sectionOrder.length - 1}
+                onClick={() => {
+                  const order = [...value.siteSettings.sectionOrder];
+                  const current = order[index];
+                  const next = order[index + 1];
+                  if (!current || !next) return;
+                  order[index] = next;
+                  order[index + 1] = current;
+                  setting("sectionOrder", order);
+                }}
+              >
+                ↓
+              </button>
+            </div>
+            <details className="website-section-design">
+              <summary>چیدمان و ظاهر {sectionLabels[key]}</summary>
+              <fieldset className="website-visual-options">
+                <legend>چیدمان</legend>
+                {(["DEFAULT", "SPLIT", "FEATURE", "STRIP"] as const).map(
+                  (choice) => (
+                    <label className="website-visual-choice" key={choice}>
+                      <input
+                        type="radio"
+                        name={`layout-${key}`}
+                        checked={
+                          (value.siteSettings.sectionDesigns[key]?.layout ??
+                            "DEFAULT") === choice
+                        }
+                        onChange={() => setSectionDesign(key, "layout", choice)}
+                      />
+                      <span
+                        className={`website-layout-mini website-layout-mini-${choice.toLowerCase()}`}
+                        aria-hidden="true"
+                      >
+                        <i />
+                        <i />
+                      </span>
+                      <span>
+                        {choice === "DEFAULT"
+                          ? "استاندارد"
+                          : choice === "SPLIT"
+                            ? "دو بخش"
+                            : choice === "FEATURE"
+                              ? "برجسته"
+                              : "نواری"}
+                      </span>
+                    </label>
+                  ),
+                )}
+              </fieldset>
+              <fieldset className="website-visual-options">
+                <legend>پس‌زمینه</legend>
+                {(
+                  ["DEFAULT", "MUTED", "TINT", "DARK", "GRADIENT"] as const
+                ).map((choice) => (
+                  <label className="website-visual-choice" key={choice}>
+                    <input
+                      type="radio"
+                      name={`background-${key}`}
+                      checked={
+                        (value.siteSettings.sectionDesigns[key]?.background ??
+                          "DEFAULT") === choice
+                      }
+                      onChange={() =>
+                        setSectionDesign(key, "background", choice)
+                      }
+                    />
+                    <span
+                      className={`website-background-mini website-background-mini-${choice.toLowerCase()}`}
+                      aria-hidden="true"
+                    />
+                    <span>
+                      {choice === "DEFAULT"
+                        ? "ساده"
+                        : choice === "MUTED"
+                          ? "ملایم"
+                          : choice === "TINT"
+                            ? "رنگ برند"
+                            : choice === "DARK"
+                              ? "تیره"
+                              : "شیب ملایم"}
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+              <div className="website-section-design-controls">
+                <label>
+                  فاصله
+                  <select
+                    value={
+                      value.siteSettings.sectionDesigns[key]?.spacing ??
+                      "NORMAL"
+                    }
+                    onChange={(event) =>
+                      setSectionDesign(key, "spacing", event.target.value)
+                    }
+                  >
+                    <option value="COMPACT">کم</option>
+                    <option value="NORMAL">متوسط</option>
+                    <option value="SPACIOUS">زیاد</option>
+                  </select>
+                </label>
+                <label>
+                  عرض
+                  <select
+                    value={
+                      value.siteSettings.sectionDesigns[key]?.width ??
+                      "CONTAINED"
+                    }
+                    onChange={(event) =>
+                      setSectionDesign(key, "width", event.target.value)
+                    }
+                  >
+                    <option value="CONTAINED">محتوا</option>
+                    <option value="WIDE">عریض</option>
+                    <option value="FULL">تمام‌عرض</option>
+                  </select>
+                </label>
+                <label>
+                  جزئیات گرافیکی
+                  <select
+                    value={
+                      value.siteSettings.sectionDesigns[key]?.decoration ??
+                      "NONE"
+                    }
+                    onChange={(event) =>
+                      setSectionDesign(key, "decoration", event.target.value)
+                    }
+                  >
+                    <option value="NONE">بدون تزئین</option>
+                    <option value="LINES">خطوط</option>
+                    <option value="GRID">شبکه</option>
+                    <option value="GEOMETRY">هندسی</option>
+                  </select>
+                </label>
+              </div>
+            </details>
           </div>
         ))}
       </section>
@@ -841,7 +1297,7 @@ export function WebsiteEditor({ initial }: { initial: Profile }) {
             </fieldset>
             <iframe
               className={`public-preview-frame public-preview-${previewWidth}`}
-              src="/"
+              src={`/?preview=${previewRevision}`}
               title="پیش‌نمایش وب‌سایت مجموعه"
               loading="lazy"
             />

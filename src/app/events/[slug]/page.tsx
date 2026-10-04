@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { PublicSiteShell, formatDate } from "@/app/_components/public-site";
+import {
+  PublicSiteShell,
+  formatDate,
+  formatTime,
+} from "@/app/_components/public-site";
+import { PublicEventArtwork } from "@/app/_components/public-event-artwork";
 import { StructuredData } from "@/app/_components/structured-data";
 import { PublicEnrollmentForm } from "@/app/_components/public-enrollment-form";
 import { registrationFormSchema } from "@/modules/enrollment/form";
@@ -104,21 +109,39 @@ export default async function EventDetailPage({ params }: Props) {
       <StructuredData value={eventSchema} />
       <div className="public-detail">
         <div className="public-detail-main">
-          {run.coverUrl && (
-            <img
-              className="public-event-cover"
+          <div className="public-event-intro">
+            <div className="public-event-intro-copy">
+              <Link href="/events" className="public-text-link">
+                ← همه برنامه‌ها
+              </Link>
+              <span className="public-eyebrow">
+                {run.category || (run.type === "COURSE" ? "دوره" : "رویداد")}
+              </span>
+              <h1>{run.title}</h1>
+              {run.summary && <p className="public-lead">{run.summary}</p>}
+              <div className="public-event-intro-facts">
+                <span>
+                  {formatDate(run.startsAt)} · {formatTime(run.startsAt)}
+                </span>
+                <span>
+                  {run.deliveryMode === "ONLINE"
+                    ? "آنلاین"
+                    : run.deliveryMode === "HYBRID"
+                      ? "ترکیبی"
+                      : "حضوری"}
+                </span>
+                {run.instructor && <span>{run.instructor}</span>}
+              </div>
+            </div>
+            <PublicEventArtwork
               src={run.coverUrl}
-              alt={`تصویر شاخص ${run.title}`}
+              title={run.title}
+              category={run.category}
+              type={run.type}
+              eager
+              className="public-event-cover"
             />
-          )}
-          <Link href="/events" className="public-text-link">
-            ← همه برنامه‌ها
-          </Link>
-          <span className="public-eyebrow">
-            {run.type === "COURSE" ? "دوره" : "رویداد"}
-          </span>
-          <h1>{run.title}</h1>
-          <p className="public-lead">{run.summary}</p>
+          </div>
           {run.videoUrl && (
             <section>
               <h2>ویدیوی معرفی</h2>
@@ -131,10 +154,12 @@ export default async function EventDetailPage({ params }: Props) {
               />
             </section>
           )}
-          <section>
-            <h2>درباره برنامه</h2>
-            {run.description && <p>{run.description}</p>}
-          </section>
+          {run.description && (
+            <section>
+              <h2>درباره برنامه</h2>
+              <p>{run.description}</p>
+            </section>
+          )}
           {run.audience && (
             <section>
               <h2>مخاطبان</h2>
@@ -161,8 +186,15 @@ export default async function EventDetailPage({ params }: Props) {
                   <li key={session.id}>
                     <strong>{session.title}</strong>
                     <span>
-                      {formatDate(session.startsAt)} تا{" "}
-                      {formatDate(session.endsAt)}
+                      {formatDate(session.startsAt)} ·{" "}
+                      {formatTime(session.startsAt)} تا{" "}
+                      {formatTime(session.endsAt)}
+                      {" · "}
+                      {session.deliveryMode === "ONLINE"
+                        ? "آنلاین"
+                        : session.deliveryMode === "HYBRID"
+                          ? "ترکیبی"
+                          : "حضوری"}
                     </span>
                   </li>
                 ))}
@@ -201,6 +233,14 @@ export default async function EventDetailPage({ params }: Props) {
             <section>
               <h2>محل برگزاری</h2>
               <p>{run.venue}</p>
+            </section>
+          )}
+          {canRegister && (
+            <section className="public-detail-final-cta">
+              <h2>برای حضور آماده‌اید؟</h2>
+              <a className="public-button" href="#registration">
+                ثبت‌نام در این برنامه
+              </a>
             </section>
           )}
           {relatedRuns.length > 0 && (

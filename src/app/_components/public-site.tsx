@@ -5,10 +5,18 @@ import type { WebsiteProfile } from "@/modules/public-site/profile";
 import type { PublicRun } from "@/modules/public-site/repository";
 import { listInformationPages } from "@/modules/public-site/content";
 import { PublicNavigation } from "@/app/_components/public-navigation";
+import { PublicEventArtwork } from "@/app/_components/public-event-artwork";
 
 function formatDate(date: Date): string {
   return new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
     dateStyle: "long",
+    timeZone: "Asia/Tehran",
+  }).format(date);
+}
+function formatTime(date: Date): string {
+  return new Intl.DateTimeFormat("fa-IR", {
+    hour: "2-digit",
+    minute: "2-digit",
     timeZone: "Asia/Tehran",
   }).format(date);
 }
@@ -58,6 +66,12 @@ export async function PublicSiteShell({
   return (
     <div
       className={`public-site public-template-${profile.siteSettings.template.toLowerCase()} public-width-${profile.siteSettings.contentWidth.toLowerCase()} public-spacing-${profile.siteSettings.spacing.toLowerCase()} ${profile.siteSettings.fontPreset === "TAHOMA" ? "public-font-tahoma" : ""} ${profile.siteSettings.buttonStyle === "OUTLINE" ? "public-buttons-outline" : ""}`}
+      data-header-style={profile.siteSettings.headerStyle}
+      data-footer-style={profile.siteSettings.footerStyle}
+      data-graphic-intensity={profile.siteSettings.graphicIntensity}
+      data-animation-intensity={profile.siteSettings.animationIntensity}
+      data-content-density={profile.siteSettings.contentDensity}
+      data-instructor-card-style={profile.siteSettings.instructorCardStyle}
       dir="rtl"
       style={style}
     >
@@ -78,7 +92,9 @@ export async function PublicSiteShell({
       <main className="public-content">{children}</main>
       <footer className="public-footer">
         <div className="public-footer-intro">
-          <strong>{title}</strong>
+          <Link href="/" className="public-footer-brand">
+            {title}
+          </Link>
           {(profile.footerDescription || profile.shortDescription) && (
             <p>{profile.footerDescription || profile.shortDescription}</p>
           )}
@@ -100,6 +116,33 @@ export async function PublicSiteShell({
             )}
           </div>
         )}
+        {(profile.socialUrl ||
+          profile.siteSettings.whatsappUrl ||
+          profile.siteSettings.telegramUrl) && (
+          <nav className="public-footer-social" aria-label="شبکه‌های اجتماعی">
+            {profile.socialUrl && (
+              <a href={profile.socialUrl} rel="noopener noreferrer">
+                شبکه اجتماعی
+              </a>
+            )}
+            {profile.siteSettings.whatsappUrl && (
+              <a
+                href={profile.siteSettings.whatsappUrl}
+                rel="noopener noreferrer"
+              >
+                واتساپ
+              </a>
+            )}
+            {profile.siteSettings.telegramUrl && (
+              <a
+                href={profile.siteSettings.telegramUrl}
+                rel="noopener noreferrer"
+              >
+                تلگرام
+              </a>
+            )}
+          </nav>
+        )}
       </footer>
     </div>
   );
@@ -109,24 +152,23 @@ export function PublicRunCard({
   run,
   preset = "VISUAL",
   showPaidPrice = false,
+  variant = "standard",
 }: {
   run: PublicRun;
   preset?: "COMPACT" | "VISUAL" | "DETAILED";
   showPaidPrice?: boolean;
+  variant?: "standard" | "featured" | "horizontal";
 }) {
   return (
     <article
-      className={`public-run-card public-run-card-${preset.toLowerCase()}`}
+      className={`public-run-card public-run-card-${preset.toLowerCase()} public-run-card-${variant}`}
     >
-      <div className="public-run-art" aria-hidden="true">
-        {run.coverUrl ? (
-          <img src={run.coverUrl} alt="" loading="lazy" />
-        ) : run.type === "COURSE" ? (
-          "دوره"
-        ) : (
-          "رویداد"
-        )}
-      </div>
+      <PublicEventArtwork
+        src={run.coverUrl}
+        title={run.title}
+        category={run.category}
+        type={run.type}
+      />
       <div className="public-run-body">
         <span className="public-run-type">
           {run.category || (run.type === "COURSE" ? "دوره" : "رویداد")}
@@ -136,10 +178,17 @@ export function PublicRunCard({
         </h3>
         {run.summary && <p>{run.summary}</p>}
         {run.instructor && (
-          <div className="public-run-instructor">مدرس: {run.instructor}</div>
+          <div className="public-run-instructor">
+            {run.instructorPhotoUrl && (
+              <img src={run.instructorPhotoUrl} alt="" loading="lazy" />
+            )}
+            <span>مدرس: {run.instructor}</span>
+          </div>
         )}
         <div className="public-run-meta">
-          <span>{formatDate(run.startsAt)}</span>
+          <span>
+            {formatDate(run.startsAt)} · {formatTime(run.startsAt)}
+          </span>
           <span>
             {run.deliveryMode === "ONLINE"
               ? "آنلاین"
@@ -167,4 +216,4 @@ export function PublicRunCard({
   );
 }
 
-export { formatDate };
+export { formatDate, formatTime };

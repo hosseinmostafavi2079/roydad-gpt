@@ -40,6 +40,15 @@ export const sectionIds = [
   "cta",
 ] as const;
 const sectionId = z.enum(sectionIds);
+const sectionDesign = z.strictObject({
+  layout: z.enum(["DEFAULT", "SPLIT", "FEATURE", "STRIP"]).default("DEFAULT"),
+  background: z
+    .enum(["DEFAULT", "MUTED", "TINT", "DARK", "GRADIENT"])
+    .default("DEFAULT"),
+  spacing: z.enum(["COMPACT", "NORMAL", "SPACIOUS"]).default("NORMAL"),
+  width: z.enum(["CONTAINED", "WIDE", "FULL"]).default("CONTAINED"),
+  decoration: z.enum(["NONE", "LINES", "GRID", "GEOMETRY"]).default("NONE"),
+});
 const publicPath = z.string().regex(/^\/(?:$|[a-z0-9][a-z0-9\-/]*$)/);
 const menuEntry = z.enum([
   "home",
@@ -106,6 +115,33 @@ export const siteSettingsInput = z.strictObject({
     .length(sectionIds.length)
     .refine((value) => new Set(value).size === sectionIds.length)
     .default([...sectionIds]),
+  sectionDesigns: z.partialRecord(sectionId, sectionDesign).default({}),
+  headerStyle: z.enum(["CLEAN", "BORDERED", "BRAND"]).default("CLEAN"),
+  footerStyle: z.enum(["LIGHT", "DARK", "BRAND"]).default("DARK"),
+  graphicIntensity: z
+    .enum(["MINIMAL", "BALANCED", "GRAPHIC"])
+    .default("BALANCED"),
+  animationIntensity: z.enum(["OFF", "GENTLE", "DYNAMIC"]).default("GENTLE"),
+  contentDensity: z.enum(["COMPACT", "BALANCED", "OPEN"]).default("BALANCED"),
+  instructorCardStyle: z.enum(["PORTRAIT", "EDITORIAL"]).default("PORTRAIT"),
+  featuredRunIds: z.array(z.uuid()).max(8).default([]),
+  featuredInstructorIds: z.array(z.uuid()).max(8).default([]),
+  featuredCategories: z
+    .array(z.string().trim().min(1).max(120))
+    .max(8)
+    .default([]),
+  categoryPresentation: z
+    .record(
+      z.string().trim().min(1).max(120),
+      z.strictObject({
+        description: z.string().trim().max(160).default(""),
+        imageUrl: imageUrl.default(""),
+        icon: z.enum(["NONE", "BOOK", "SCREEN", "PEOPLE"]).default("NONE"),
+        order: z.number().int().min(0).max(100).default(50),
+      }),
+    )
+    .refine((items) => Object.keys(items).length <= 40)
+    .default({}),
   backgroundColor: color.default("#ffffff"),
   textColor: color.default("#172a2a"),
   fontPreset: z.enum(["VAZIRMATN", "TAHOMA"]).default("VAZIRMATN"),
@@ -159,6 +195,14 @@ export function normalizeSiteSettings(value: unknown): SiteSettings {
     ...input,
     sections: { ...defaultSiteSettings.sections, ...sections },
     sectionOrder: [...new Set([...order, ...sectionIds])],
+    sectionDesigns: {
+      ...defaultSiteSettings.sectionDesigns,
+      ...(input.sectionDesigns &&
+      typeof input.sectionDesigns === "object" &&
+      !Array.isArray(input.sectionDesigns)
+        ? input.sectionDesigns
+        : {}),
+    },
     menuEnabled: {
       ...defaultSiteSettings.menuEnabled,
       ...(input.menuEnabled && typeof input.menuEnabled === "object"

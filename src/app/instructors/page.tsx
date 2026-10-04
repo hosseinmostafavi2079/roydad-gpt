@@ -4,6 +4,7 @@ import { PublicSiteShell } from "@/app/_components/public-site";
 import { publicPageContext } from "@/modules/public-site/page-context";
 import { publicMetadata } from "@/modules/public-site/metadata";
 import { listPublicInstructors } from "@/modules/public-site/instructors";
+import { PublicPortrait } from "@/app/_components/public-portrait";
 
 export const dynamic = "force-dynamic";
 export async function generateMetadata(): Promise<Metadata> {
@@ -32,14 +33,7 @@ export default async function PublicInstructorsPage({
         <div className="public-run-grid">
           {instructors.map((item) => (
             <article className="public-run-card" key={item.id}>
-              {item.photoUrl && (
-                <img
-                  className="public-instructor-photo"
-                  src={item.photoUrl}
-                  alt={`تصویر ${item.name}`}
-                  loading="lazy"
-                />
-              )}
+              <PublicPortrait src={item.photoUrl} name={item.name} />
               <div className="public-run-body">
                 <h2>
                   <Link href={`/instructors/${item.slug}`}>{item.name}</Link>

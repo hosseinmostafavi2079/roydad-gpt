@@ -11,6 +11,7 @@ import {
 import { getPublicInstructor } from "@/modules/public-site/instructors";
 import { listInstructorRuns } from "@/modules/public-site/repository";
 import { PublicRunCard } from "@/app/_components/public-site";
+import { PublicPortrait } from "@/app/_components/public-portrait";
 
 export const dynamic = "force-dynamic";
 type Props = { params: Promise<{ slug: string }> };
@@ -56,9 +57,11 @@ export default async function PublicInstructorPage({ params }: Props) {
       <StructuredData value={personSchema} />
       <article className="public-instructor-profile">
         <header className="public-page-header public-instructor-hero">
-          {instructor.photoUrl && (
-            <img src={instructor.photoUrl} alt={`تصویر ${instructor.name}`} />
-          )}
+          <PublicPortrait
+            src={instructor.photoUrl}
+            name={instructor.name}
+            className="public-portrait-large"
+          />
           <div>
             <span className="public-eyebrow">مدرس</span>
             <h1>{instructor.name}</h1>

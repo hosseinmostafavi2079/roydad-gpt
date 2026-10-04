@@ -28,6 +28,8 @@ export default async function EventsPage({
     type?: string;
     instructor?: string;
     period?: string;
+    delivery?: string;
+    price?: string;
     page?: string;
   }>;
 }) {
@@ -46,60 +48,107 @@ export default async function EventsPage({
         <h1>دوره‌ها و رویدادها</h1>
         <p>برنامه مناسب خود را پیدا کنید.</p>
       </section>
-      <form className="public-search" action="/events">
-        <label htmlFor="public-search">جست‌وجوی برنامه</label>
-        <div>
-          <input
-            id="public-search"
-            name="q"
-            defaultValue={query.slice(0, 80)}
-            placeholder="نام دوره یا رویداد"
-            maxLength={80}
-          />
-          <button type="submit">جست‌وجو</button>
-        </div>
-      </form>
-      <form className="public-event-filters" action="/events">
-        {query && <input type="hidden" name="q" value={query.slice(0, 80)} />}
-        <label>
-          موضوع
-          <select name="category" defaultValue={filters.category ?? ""}>
-            <option value="">همه موضوعات</option>
-            {categories.map((category) => (
-              <option key={category} value={category}>
-                {category}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          نوع
-          <select name="type" defaultValue={filters.type ?? ""}>
-            <option value="">همه</option>
-            <option value="COURSE">دوره</option>
-            <option value="EVENT">رویداد</option>
-          </select>
-        </label>
-        <label>
-          زمان
-          <select name="period" defaultValue={filters.period ?? ""}>
-            <option value="">همه</option>
-            <option value="upcoming">پیش رو</option>
-            <option value="past">گذشته</option>
-          </select>
-        </label>
-        <label>
-          مدرس
-          <input
-            name="instructor"
-            maxLength={120}
-            defaultValue={filters.instructor ?? ""}
-          />
-        </label>
-        <button type="submit">اعمال فیلتر</button>
-      </form>
+      <search>
+        <form className="public-search public-events-search" action="/events">
+          <label htmlFor="public-search">جست‌وجوی برنامه</label>
+          <div>
+            <input
+              id="public-search"
+              name="q"
+              defaultValue={query.slice(0, 80)}
+              placeholder="نام دوره یا رویداد"
+              maxLength={80}
+            />
+            <button type="submit">جست‌وجو</button>
+          </div>
+        </form>
+      </search>
+      {categories.length > 0 && (
+        <nav className="public-category-rail" aria-label="موضوعات برنامه‌ها">
+          <a
+            href="/events"
+            aria-current={!filters.category ? "page" : undefined}
+          >
+            همه موضوعات
+          </a>
+          {categories.map((category) => (
+            <a
+              key={category}
+              href={`/events?category=${encodeURIComponent(category)}`}
+              aria-current={filters.category === category ? "page" : undefined}
+            >
+              {category}
+            </a>
+          ))}
+        </nav>
+      )}
+      <details className="public-filter-panel">
+        <summary>فیلتر برنامه‌ها</summary>
+        <form className="public-event-filters" action="/events">
+          {query && <input type="hidden" name="q" value={query.slice(0, 80)} />}
+          <label>
+            موضوع
+            <select name="category" defaultValue={filters.category ?? ""}>
+              <option value="">همه موضوعات</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            نوع
+            <select name="type" defaultValue={filters.type ?? ""}>
+              <option value="">همه</option>
+              <option value="COURSE">دوره</option>
+              <option value="EVENT">رویداد</option>
+            </select>
+          </label>
+          <label>
+            زمان
+            <select name="period" defaultValue={filters.period ?? ""}>
+              <option value="">همه</option>
+              <option value="upcoming">پیش رو</option>
+              <option value="past">گذشته</option>
+            </select>
+          </label>
+          <label>
+            مدرس
+            <input
+              name="instructor"
+              maxLength={120}
+              defaultValue={filters.instructor ?? ""}
+            />
+          </label>
+          <label>
+            شیوه برگزاری
+            <select name="delivery" defaultValue={filters.delivery ?? ""}>
+              <option value="">همه شیوه‌ها</option>
+              <option value="ONLINE">آنلاین</option>
+              <option value="IN_PERSON">حضوری</option>
+              <option value="HYBRID">ترکیبی</option>
+            </select>
+          </label>
+          <label>
+            هزینه
+            <select name="price" defaultValue={filters.price ?? ""}>
+              <option value="">همه</option>
+              <option value="free">رایگان</option>
+              <option value="paid">غیررایگان</option>
+            </select>
+          </label>
+          <button type="submit">اعمال فیلتر</button>
+        </form>
+      </details>
+      <div className="public-results-heading">
+        <h2>برنامه‌ها</h2>
+        <span>{runs.length.toLocaleString("fa-IR")} برنامه در این صفحه</span>
+      </div>
       {runs.length ? (
-        <div className="public-run-grid">
+        <div
+          className={`public-run-grid public-run-grid-count-${Math.min(runs.length, 3)}`}
+        >
           {runs.map((run) => (
             <PublicRunCard
               key={run.id}

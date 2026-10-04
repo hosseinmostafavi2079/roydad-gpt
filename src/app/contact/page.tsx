@@ -20,8 +20,9 @@ export default async function ContactPage() {
       <section className="public-page-header">
         <span className="public-eyebrow">راه‌های ارتباطی</span>
         <h1>تماس با ما</h1>
+        {profile.shortDescription && <p>{profile.shortDescription}</p>}
       </section>
-      <div className="public-contact-grid">
+      <div className="public-contact-grid public-contact-directory">
         {profile.phone && (
           <div>
             <h2>تلفن</h2>

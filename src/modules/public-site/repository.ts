@@ -79,6 +79,8 @@ export async function listPublicRuns(
     type?: string;
     instructor?: string;
     period?: string;
+    delivery?: string;
+    price?: string;
     page?: number;
   } = {},
 ): Promise<PublicRun[]> {
@@ -94,6 +96,14 @@ export async function listPublicRuns(
   const period = ["upcoming", "past"].includes(filters.period ?? "")
     ? (filters.period ?? "")
     : "";
+  const delivery = ["ONLINE", "IN_PERSON", "HYBRID"].includes(
+    filters.delivery ?? "",
+  )
+    ? (filters.delivery ?? "")
+    : "";
+  const price = ["free", "paid"].includes(filters.price ?? "")
+    ? (filters.price ?? "")
+    : "";
   const page = Math.min(
     100,
     Math.max(1, Number.isInteger(filters.page) ? (filters.page ?? 1) : 1),
@@ -103,7 +113,9 @@ export async function listPublicRuns(
       AND ($3 = '' OR p.category=$3) AND ($4 = '' OR p.type=$4)
       AND ($5 = '' OR instructor.display_name ILIKE '%' || $5 || '%')
       AND ($6 = '' OR ($6='upcoming' AND r.ends_at>=now()) OR ($6='past' AND r.ends_at<now()))
-      ORDER BY r.starts_at ASC LIMIT 24 OFFSET $7`,
+      AND ($7 = '' OR r.delivery_mode=$7)
+      AND ($8 = '' OR ($8='free' AND r.price_amount=0) OR ($8='paid' AND r.price_amount>0))
+      ORDER BY r.starts_at ASC LIMIT 24 OFFSET $9`,
     [
       tenant.tenantId,
       boundedSearch,
@@ -111,6 +123,8 @@ export async function listPublicRuns(
       type,
       instructor,
       period,
+      delivery,
+      price,
       (page - 1) * 24,
     ],
   );

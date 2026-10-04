@@ -19,24 +19,31 @@ export default async function AboutPage() {
   const settings = profile.siteSettings;
   return (
     <PublicSiteShell tenant={tenant} profile={profile}>
-      <section className="public-page-header">
-        <span className="public-eyebrow">آشنایی با مجموعه</span>
-        <h1>درباره {profile.displayName || tenant.branding.brandName}</h1>
-      </section>
-      {(profile.about || profile.shortDescription) && (
-        <article className="public-prose">
-          {profile.about || profile.shortDescription}
-        </article>
-      )}
-      {settings.aboutImageUrl && (
-        <figure className="public-about-image-block">
-          <img
-            src={settings.aboutImageUrl}
-            alt={`نمایی از ${profile.displayName}`}
-            loading="lazy"
-          />
-        </figure>
-      )}
+      <div className="public-about-intro">
+        <div>
+          <span className="public-eyebrow">آشنایی با مجموعه</span>
+          <h1>درباره {profile.displayName || tenant.branding.brandName}</h1>
+          {(profile.about || profile.shortDescription) && (
+            <p className="public-prose">
+              {profile.about || profile.shortDescription}
+            </p>
+          )}
+          {settings.foundingYear && (
+            <span className="public-about-founded">
+              از سال {settings.foundingYear}
+            </span>
+          )}
+        </div>
+        {settings.aboutImageUrl && (
+          <figure className="public-about-image-block">
+            <img
+              src={settings.aboutImageUrl}
+              alt={`نمایی از ${profile.displayName}`}
+              loading="lazy"
+            />
+          </figure>
+        )}
+      </div>
       {settings.aboutStory && (
         <section className="public-section">
           <h2>داستان ما</h2>
@@ -78,6 +85,23 @@ export default async function AboutPage() {
           </div>
         </section>
       )}
+      <aside className="public-about-next">
+        <div>
+          <span className="public-eyebrow">گام بعدی</span>
+          <h2>برنامه‌های آموزشی را ببینید</h2>
+          <p>دوره‌ها و رویدادهای منتشرشدهٔ مجموعه را در یک جا پیدا کنید.</p>
+        </div>
+        <div className="public-about-actions">
+          <a className="public-button" href="/events">
+            مشاهده برنامه‌ها
+          </a>
+          {(profile.phone || profile.email) && (
+            <a className="public-text-link" href="/contact">
+              راه‌های ارتباطی ←
+            </a>
+          )}
+        </div>
+      </aside>
     </PublicSiteShell>
   );
 }

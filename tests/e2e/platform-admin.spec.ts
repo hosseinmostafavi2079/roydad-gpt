@@ -606,7 +606,19 @@ async function* tenantJourney({
       .getByRole("group", { name: "قالب سایت" })
       .getByRole("radio", { name: "حرفه‌ای ساختار و اعتبار" })
       .check();
-    await page.getByLabel("سبک کارت رویداد").selectOption("DETAILED");
+    await page
+      .getByRole("group", { name: "سبک کارت رویداد" })
+      .getByRole("radio", { name: "مشروح" })
+      .check();
+    if (process.env.EVENTOS_VISUAL_CAPTURE === "true") {
+      const originalViewport = page.viewportSize();
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.screenshot({
+        path: "test-results/step36-website-editor-1440.png",
+        fullPage: true,
+      });
+      if (originalViewport) await page.setViewportSize(originalViewport);
+    }
     await page
       .locator(".media-uploader")
       .filter({ hasText: "لوگو" })

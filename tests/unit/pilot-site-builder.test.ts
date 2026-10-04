@@ -19,6 +19,7 @@ import { validateMedia } from "@/modules/media/validation";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { SafeRichText } from "@/app/_components/safe-rich-text";
+import { PublicEventArtwork } from "@/app/_components/public-event-artwork";
 
 describe("Pilot public site validation", () => {
   it("keeps older website section order while appending new safe sections", () => {
@@ -50,6 +51,73 @@ describe("Pilot public site validation", () => {
         heroSecondaryHref: "javascript:alert(1)",
       }).success,
     ).toBe(false);
+  });
+
+  it("keeps controlled section presets and rejects arbitrary styles", () => {
+    const featuredRunId = crypto.randomUUID();
+    const settings = normalizeSiteSettings({
+      sectionDesigns: {
+        featured: {
+          layout: "FEATURE",
+          background: "DARK",
+          spacing: "COMPACT",
+          width: "WIDE",
+          decoration: "LINES",
+        },
+      },
+      animationIntensity: "OFF",
+      featuredRunIds: [featuredRunId],
+      featuredCategories: ["آموزش"],
+      categoryPresentation: {
+        آموزش: {
+          description: "دوره‌های آموزشی",
+          imageUrl: "",
+          icon: "BOOK",
+          order: 1,
+        },
+      },
+    });
+    expect(settings.sectionDesigns.featured?.background).toBe("DARK");
+    expect(settings.animationIntensity).toBe("OFF");
+    expect(settings.featuredRunIds).toEqual([featuredRunId]);
+    expect(settings.categoryPresentation["آموزش"]?.icon).toBe("BOOK");
+    expect(
+      siteSettingsInput.safeParse({
+        ...settings,
+        categoryPresentation: {
+          آموزش: {
+            description: "",
+            imageUrl: "javascript:alert(1)",
+            icon: "BOOK",
+            order: 1,
+          },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      siteSettingsInput.safeParse({
+        ...settings,
+        sectionDesigns: {
+          featured: {
+            ...settings.sectionDesigns.featured,
+            background: "url(javascript:alert(1))",
+          },
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("renders a branded event cover when no image is configured", () => {
+    const markup = renderToStaticMarkup(
+      createElement(PublicEventArtwork, {
+        src: null,
+        title: "دوره نمونه",
+        category: "آموزش",
+        type: "COURSE",
+      }),
+    );
+    expect(markup).toContain("دوره نمونه");
+    expect(markup).not.toContain("<img");
   });
 
   it("rejects unsafe page slugs, executable blocks and external CTAs", () => {
