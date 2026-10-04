@@ -19,7 +19,12 @@ const fail = (name, reason) => problems.push(`${name}: ${reason}`);
 const get = (name) => String(config[name] ?? "").trim();
 const required = (name, min = 1) => {
   const value = get(name);
-  if (value.length < min || /replace-with|example\.invalid/i.test(value))
+  if (
+    value.length < min ||
+    /replace-with|example\.invalid/i.test(value) ||
+    /^(?:password|access-key|secret-key)$/i.test(value) ||
+    (min >= 32 && /^(.)\1+$/.test(value))
+  )
     fail(name, "a real value is required");
   return value;
 };
@@ -28,6 +33,7 @@ const hostname = (value) =>
     value,
   ) &&
   !value.endsWith(".localhost") &&
+  !/(?:^|\.)example\.(?:com|net|org)$/.test(value) &&
   !value.includes("..") &&
   !value.includes("--.");
 
@@ -140,7 +146,7 @@ for (const [name, [role, database]] of Object.entries(databaseUrls)) {
       url.username !== role ||
       url.pathname !== `/${database}` ||
       !url.password ||
-      /replace-with/i.test(url.password)
+      /replace-with|^password$/i.test(url.password)
     )
       throw new Error("invalid");
   } catch {
@@ -153,7 +159,8 @@ try {
     smtp.protocol !== "smtps:" ||
     !hostname(smtp.hostname) ||
     !smtp.username ||
-    !smtp.password
+    !smtp.password ||
+    /^(?:password|replace-with.*)$/i.test(smtp.password)
   )
     throw new Error("invalid");
 } catch {
@@ -174,13 +181,10 @@ try {
 } catch {
   fail("MEDIA_S3_ENDPOINT", "must be a root HTTPS endpoint");
 }
-for (const name of [
-  "MEDIA_S3_REGION",
-  "MEDIA_S3_BUCKET",
-  "MEDIA_S3_ACCESS_KEY_ID",
-  "MEDIA_S3_SECRET_ACCESS_KEY",
-])
-  required(name);
+required("MEDIA_S3_REGION");
+required("MEDIA_S3_BUCKET");
+required("MEDIA_S3_ACCESS_KEY_ID", 12);
+required("MEDIA_S3_SECRET_ACCESS_KEY", 32);
 if (!/^[a-z0-9][a-z0-9.-]{2,62}$/.test(get("MEDIA_S3_BUCKET")))
   fail("MEDIA_S3_BUCKET", "must be an S3 bucket name");
 const google = [

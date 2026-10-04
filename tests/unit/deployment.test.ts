@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdtempSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,32 +10,33 @@ const base: NodeJS.ProcessEnv = {
   NODE_ENV: "production",
   MAIL_TRANSPORT: "smtp",
   MEDIA_S3_ALLOW_HTTP_LOCAL: "false",
-  PLATFORM_BASE_DOMAIN: "example.net",
-  BETTER_AUTH_URL: "https://panel.example.net",
-  PUBLIC_HOSTS: "panel.example.net academy.example.net",
-  PILOT_TENANT_HOST: "academy.example.net",
-  ACME_EMAIL: "ops@example.net",
-  BETTER_AUTH_SECRET: "a".repeat(48),
-  TENANT_BOOTSTRAP_ENCRYPTION_KEY: "b".repeat(48),
+  PLATFORM_BASE_DOMAIN: "sample-pilot.ir",
+  BETTER_AUTH_URL: "https://panel.sample-pilot.ir",
+  PUBLIC_HOSTS: "panel.sample-pilot.ir academy.sample-pilot.ir",
+  PILOT_TENANT_HOST: "academy.sample-pilot.ir",
+  ACME_EMAIL: "ops@sample-pilot.ir",
+  BETTER_AUTH_SECRET: randomBytes(48).toString("hex"),
+  TENANT_BOOTSTRAP_ENCRYPTION_KEY: randomBytes(48).toString("hex"),
   CONTROL_DATABASE_URL:
-    "postgresql://eventos_control_app:password@postgres:5432/eventos_control",
+    "postgresql://eventos_control_app:synthetic-test-credential-0123456789@postgres:5432/eventos_control",
   CONTROL_MIGRATION_DATABASE_URL:
-    "postgresql://eventos_control_migrator:password@postgres:5432/eventos_control",
+    "postgresql://eventos_control_migrator:synthetic-test-credential-0123456789@postgres:5432/eventos_control",
   CONTROL_QUEUE_DATABASE_URL:
-    "postgresql://eventos_control_queue:password@postgres:5432/eventos_control",
+    "postgresql://eventos_control_queue:synthetic-test-credential-0123456789@postgres:5432/eventos_control",
   TENANT_PROVISIONING_DATABASE_URL:
-    "postgresql://eventos_tenant_provisioner:password@postgres:5432/postgres",
+    "postgresql://eventos_tenant_provisioner:synthetic-test-credential-0123456789@postgres:5432/postgres",
   TENANT_RUNTIME_DATABASE_URL:
-    "postgresql://eventos_tenant_runtime:password@postgres:5432/postgres",
+    "postgresql://eventos_tenant_runtime:synthetic-test-credential-0123456789@postgres:5432/postgres",
   TENANT_MIGRATION_DATABASE_URL:
-    "postgresql://eventos_tenant_migrator:password@postgres:5432/postgres",
-  SMTP_URL: "smtps://account:password@mail.example.net:465",
-  SMTP_FROM: "EventOS <security@example.net>",
-  MEDIA_S3_ENDPOINT: "https://storage.example.net",
+    "postgresql://eventos_tenant_migrator:synthetic-test-credential-0123456789@postgres:5432/postgres",
+  SMTP_URL:
+    "smtps://account:synthetic-test-credential@mail.sample-pilot.ir:465",
+  SMTP_FROM: "EventOS <security@sample-pilot.ir>",
+  MEDIA_S3_ENDPOINT: "https://storage.sample-pilot.ir",
   MEDIA_S3_REGION: "us-east-1",
   MEDIA_S3_BUCKET: "eventos-media",
-  MEDIA_S3_ACCESS_KEY_ID: "access-key",
-  MEDIA_S3_SECRET_ACCESS_KEY: "secret-key",
+  MEDIA_S3_ACCESS_KEY_ID: "synthetic-access-key",
+  MEDIA_S3_SECRET_ACCESS_KEY: randomBytes(32).toString("hex"),
 };
 function run(overrides: Record<string, string> = {}) {
   return spawnSync(
@@ -56,11 +58,22 @@ describe("production deployment preflight", () => {
     expect(run({ EVENTOS_E2E_GOOGLE_MOCK: "true" }).status).not.toBe(0);
   });
   it("rejects unlisted hosts, insecure storage and partial Google credentials", () => {
-    expect(run({ PILOT_TENANT_HOST: "other.example.net" }).status).not.toBe(0);
+    expect(run({ PILOT_TENANT_HOST: "other.sample-pilot.ir" }).status).not.toBe(
+      0,
+    );
     expect(
-      run({ MEDIA_S3_ENDPOINT: "http://storage.example.net" }).status,
+      run({ MEDIA_S3_ENDPOINT: "http://storage.sample-pilot.ir" }).status,
     ).not.toBe(0);
     expect(run({ GOOGLE_CLIENT_ID: "one" }).status).not.toBe(0);
+  });
+  it("rejects documentation domains and example credentials", () => {
+    expect(run({ PLATFORM_BASE_DOMAIN: "example.com" }).status).not.toBe(0);
+    expect(
+      run({ SMTP_URL: "smtps://account:password@mail.sample-pilot.ir:465" })
+        .status,
+    ).not.toBe(0);
+    expect(run({ MEDIA_S3_ACCESS_KEY_ID: "access-key" }).status).not.toBe(0);
+    expect(run({ BETTER_AUTH_SECRET: "a".repeat(48) }).status).not.toBe(0);
   });
   it("does not print secret values in failures", () => {
     const result = run({ SMTP_URL: "invalid-secret-password" });
@@ -90,7 +103,7 @@ it("runs read-only local smoke checks against platform and tenant routes", async
     throw new Error("Test server address unavailable.");
   const temporary = mkdtempSync(path.join(tmpdir(), "eventos-smoke-"));
   const envFile = path.join(temporary, "test.env");
-  writeFileSync(envFile, "PILOT_TENANT_HOST=academy.example.net\n", {
+  writeFileSync(envFile, "PILOT_TENANT_HOST=academy.sample-pilot.ir\n", {
     mode: 0o600,
   });
   try {
