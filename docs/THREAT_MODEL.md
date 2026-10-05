@@ -66,3 +66,11 @@ Participant privacy workflows beyond current authenticated records and additiona
 | Provider outage or secret leakage | Capability-gated bounded reconciliation, retry backoff, encrypted config, redacted audit/log fields | Fake-provider outage test, config and source review |
 
 Production operational controls still require deployment-specific review.
+
+## B1 custom domain threats
+
+- Domain takeover/cross-tenant routing: globally unique canonical hostname, random expiring TXT proof, exact verified mapping and tenant-bound mutation predicates; tested with two real PostgreSQL tenant fixtures.
+- Stale proof after rotation/expiry/deletion: compare the original hash and expiry in the transactional verification UPDATE; race cases use injected DNS and never public DNS.
+- Cached removed hostname or stale primary on another process: cache-hit control-plane revalidation plus local invalidation after mutations. In-flight requests remain a documented residual risk.
+- Orphaned tenant access: serialized verified-primary selection, partial unique database index and explicit switch-before-delete policy.
+- Platform hostname collision: reserve configured platform hostname in registration, creation and resolution. No arbitrary forwarded hostname trust is added.

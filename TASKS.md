@@ -250,3 +250,16 @@ Final pilot release-candidate audit: production preflight now rejects the commit
 No custom-domain, deployment, payment, attendance or certificate feature work is included.
 
 Identity V2 final local results: pnpm check passed (93 warnings and 3 informational diagnostics; no errors), unit tests 93/93 across 17 files, real PostgreSQL integration tests 30/30 across 3 files, production build succeeded, Playwright 10/10 including teardown, Prisma tenant validation passed, and dependency audit found no known vulnerabilities. Focused identity PostgreSQL tests passed 14/14 before the final gate. The final Gitleaks working-tree scan is recorded in docs/TESTING.md. Two initial full browser attempts failed on the existing public provisioning probe (fetch TypeError before any HTTP status); its focused rerun and the final full suite passed without changing the probe, health assertion or timeouts. GitHub Actions has not run on this uncommitted change; completion remains pending its quality gate.
+
+## B1 — Custom domain core and security
+
+- [x] Reuse tenant_domains, its globally unique hostname and partial unique primary index; no new domain system or migration.
+- [x] Reserve the configured platform hostname; preserve local platform subdomains and independent tenant parent domains.
+- [x] Add expiring TXT challenge rotation, a bounded injectable DNS resolver and stale-proof rejection.
+- [x] Add authorized transactional primary switch and safe deletion with audit and resolver invalidation.
+- [x] Recheck domain ownership on cache hits across application processes; preserve tenant-auth origins and same-origin checks.
+- [x] Run final pnpm check, focused unit/PostgreSQL tests, Prisma validation and git diff --check.
+
+B2 UI, B3 full browser/build/release gates and deployment work are outside B1.
+
+B1 final local result: pnpm check passed (93 warnings, 3 informational diagnostics, no errors); focused units 22/22 across 3 files; focused real PostgreSQL 12/12; Prisma validation and git diff --check passed. Zero migrations. Full browser/build/deployment/GitHub gates remain B3 work.

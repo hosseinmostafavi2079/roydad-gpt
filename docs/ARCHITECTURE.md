@@ -55,3 +55,9 @@ Staff attendance writes lock the session row and require a valid enrollment. Ins
 Certificates use controlled text placeholders and optional validated image assets. The server renders Persian PDFs to private S3-compatible storage; the database stores metadata and object keys. Issuance requires a completed run and valid enrollment, is unique per run/participant, and is audited. Public verification exposes only a minimal active-certificate result and uses a tenant-local rate limit. Platform usage includes attendance, certificate counts, and PDF bytes. Payment work remains outside this request.
 
 The production image keeps Next's traced standalone server under `/app/standalone` and the full dependency tree under `/app/node_modules` for the provisioning worker and migration scripts. Keeping these trees separate avoids collisions between traced package directories and pnpm symlinks. The app server changes its working directory to the standalone folder; the PDF font is traced there.
+
+## B1 custom domain core
+
+The existing control-plane tenant_domains table represents pending (verified_at null), verified (verified_at present) and primary (is_primary) domains. No migration is required: global hostname uniqueness, challenge hash/expiry and the partial unique primary index already exist. BETTER_AUTH_URL supplies the platform origin; PLATFORM_BASE_DOMAIN supplies the generated subdomain namespace. Independent customer parent domains use exact verified CUSTOM mappings. Tenant creation has no DNS dependency.
+
+Domain mutation APIs reuse withPlatformAdminRoute and its platform-host/session and same-origin checks. POST .../domains/:domainId/verification rotates a pending challenge; POST .../primary switches a verified same-tenant domain; DELETE .../domains/:domainId removes a non-primary domain while preserving a verified primary. Existing add/verify APIs remain. No authentication, SMS or registration implementation changes are included.

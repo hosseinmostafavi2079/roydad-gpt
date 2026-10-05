@@ -139,3 +139,32 @@ Use `SMS_TRANSPORT=test` only for explicit local/test processes. Production must
 Final Identity V2 local gate: check passed, unit 93/93 (17 files), PostgreSQL 30/30 (3 files), production build passed, Playwright 10/10 against that production build, Prisma tenant schema valid, dependency audit with no known vulnerabilities. Run PostgreSQL integration and Playwright sequentially: both exercise the shared local provisioning queue and must own their workers independently. The initial public-probe browser failures did not receive a timeout increase or weaker health assertion; focused provisioning passed 2/2 and the final full browser run passed including teardown. GitHub Actions remains pending push.
 
 Gitleaks v8.30.0 scanned all 435 tracked and new non-ignored source/configuration files (temporary test logs excluded), with redacted output: no leaks found. The source snapshot excludes private ignored environment and demo credential files.
+
+## B1 custom domain focused validation
+
+Run only the B1 gate: pnpm check; node node_modules/vitest/vitest.mjs run tests/unit/host.test.ts tests/unit/domain-verification.test.ts tests/unit/http-security.test.ts; node node_modules/vitest/vitest.mjs run tests/integration/custom-domains.test.ts --no-file-parallelism; node node_modules/prisma/build/index.js validate --schema prisma/tenant/schema.prisma; git diff --check.
+
+PostgreSQL fixtures exercise the real control-plane schema, constraints, transactions, audit and resolver. They register disposable control metadata; no operational tenant database/provisioning worker is required. DNS is injected for every verification test; the stalled resolver unit case uses fake timers. Coverage includes canonical/global uniqueness, ownership and expiry, rotation/commit races, cross-tenant resolution, primary concurrency/cache refresh, deletion, denied API authorization/CSRF and token-free audits. Existing Phase 1 DNS verification now uses the same injected seam. Full Playwright, production build and deployment checks are deferred to B3 as requested.
+
+Final B1 results: check passed with 93 warnings and 3 informational diagnostics, focused unit tests 22/22 (3 files), focused PostgreSQL tests 12/12, Prisma validation passed and git diff --check passed. No migrations, full Playwright, production build or deployment tests were run in B1.
+
+### B1 files changed
+
+- `docs/ADR/0003-tenant-resolution.md`
+- `docs/ARCHITECTURE.md`
+- `docs/SECURITY.md`
+- `docs/TESTING.md`
+- `docs/THREAT_MODEL.md`
+- `src/app/api/platform/tenants/[tenantId]/domains/[domainId]/primary/route.ts`
+- `src/app/api/platform/tenants/[tenantId]/domains/[domainId]/route.ts`
+- `src/app/api/platform/tenants/[tenantId]/domains/[domainId]/verification/route.ts`
+- `src/modules/platform/tenants/domains.ts`
+- `src/modules/platform/tenants/service.ts`
+- `src/modules/tenants/domain-verification.ts`
+- `src/modules/tenants/host.ts`
+- `src/modules/tenants/resolver.ts`
+- `TASKS.md`
+- `tests/integration/custom-domains.test.ts`
+- `tests/integration/phase-one.test.ts`
+- `tests/unit/domain-verification.test.ts`
+- `tests/unit/host.test.ts`

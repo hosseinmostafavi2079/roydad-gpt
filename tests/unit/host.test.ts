@@ -25,6 +25,12 @@ describe("tenant host normalization", () => {
     "example.com/path",
     "example.com?x=1",
     "example.com:99999",
+    "%65xample.com",
+    "example.com,attacker.com",
+    "user@example.com",
+    "https://example.com",
+    "example.com#fragment",
+    "-invalid.example",
   ])("rejects malformed or non-DNS tenant host %s", (host) => {
     expect(() => normalizeHostHeader(host)).toThrow(DomainError);
   });
@@ -37,5 +43,11 @@ describe("tenant host normalization", () => {
       DomainError,
     );
     expect(() => normalizeCustomDomain("localhost")).toThrow(DomainError);
+    expect(() => normalizeCustomDomain("tenant.localhost")).toThrow(
+      DomainError,
+    );
+    expect(normalizeCustomDomain("BÜCHER.Example.")).toBe(
+      "xn--bcher-kva.example",
+    );
   });
 });

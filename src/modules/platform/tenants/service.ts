@@ -1,7 +1,6 @@
 import "server-only";
 
-import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { resolveTxt } from "node:dns/promises";
+import { createHash, randomUUID } from "node:crypto";
 import { DomainError } from "@/shared/errors/domain-error";
 import { appendAuditRecord } from "@/modules/platform/audit/repository";
 import { getControlPool } from "@/infrastructure/db/control/pool";
@@ -15,7 +14,18 @@ import {
   type LimitKey,
 } from "@/modules/platform/plans/schema";
 import { enqueueProvisioningInTransaction } from "@/modules/platform/provisioning/queue";
-import { normalizeCustomDomain } from "@/modules/tenants/host";
+import {
+  normalizeCustomDomain,
+  normalizeHostHeader,
+} from "@/modules/tenants/host";
+import {
+  lookupDomainTxt,
+  matchesDomainChallenge,
+  newDomainChallenge,
+  type TxtResolver,
+} from "@/modules/tenants/domain-verification";
+import { lockDomainTenant } from "@/modules/platform/tenants/domains";
+import { invalidateTenantResolutionCache } from "@/modules/tenants/resolver";
 import type { PlatformActor } from "@/infrastructure/auth/platform-session";
 import type {
   CreateDomainInput,
@@ -150,6 +160,12 @@ export async function createTenant(
   const tenantId = randomUUID();
   const databaseName = `eventos_t_${tenantId.replaceAll("-", "")}`;
   const hostname = `${input.slug}.${config.PLATFORM_BASE_DOMAIN}`;
+  if (hostname === normalizeHostHeader(new URL(config.BETTER_AUTH_URL).host)) {
+    throw new DomainError(
+      "VALIDATION_FAILED",
+      "The platform hostname cannot be assigned to a tenant.",
+    );
+  }
   const creationKey = input.creationKey ?? null;
   const primaryColor = input.primaryColor ?? "#145D58";
   const preset = input.preset ?? "SIMPLE";
@@ -1041,19 +1057,25 @@ export async function createCustomDomain(
   requestId: string,
 ) {
   const hostname = normalizeCustomDomain(input.hostname);
-  const { PLATFORM_BASE_DOMAIN: baseDomain } = getServerConfig();
-  if (hostname === baseDomain || hostname.endsWith(`.${baseDomain}`)) {
+  const config = getServerConfig();
+  const baseDomain = config.PLATFORM_BASE_DOMAIN;
+  const platformHostname = normalizeHostHeader(
+    new URL(config.BETTER_AUTH_URL).host,
+  );
+  if (
+    hostname === platformHostname ||
+    hostname === baseDomain ||
+    hostname.endsWith(`.${baseDomain}`)
+  ) {
     throw new DomainError(
       "VALIDATION_FAILED",
       "Use tenant subdomains for the platform base domain.",
     );
   }
-  const verificationToken = randomBytes(32).toString("base64url");
-  const tokenHash = createHash("sha256")
-    .update(verificationToken)
-    .digest("hex");
+  const challenge = newDomainChallenge(hostname);
   try {
     return await withControlTransaction(async (client) => {
+      await lockDomainTenant(client, tenantId);
       const defaults = await tenantPlanDefaults(client, tenantId);
       const overrides = await currentTenantOverrides(client, tenantId);
       const features = { ...defaults.features, ...overrides.features };
@@ -1081,12 +1103,16 @@ export async function createCustomDomain(
           "Verify a custom domain before making it primary.",
         );
       }
-      const insert = await client.query<{ id: string; created_at: Date }>(
+      const insert = await client.query<{
+        id: string;
+        created_at: Date;
+        verification_expires_at: Date;
+      }>(
         `INSERT INTO tenant_domains
            (tenant_id, hostname, domain_type, is_primary, verification_token_hash, verification_expires_at, created_by)
          VALUES ($1, $2, 'CUSTOM', false, $3, now() + interval '24 hours', $4)
-         RETURNING id, created_at`,
-        [tenantId, hostname, tokenHash, actor.adminId],
+         RETURNING id, created_at, verification_expires_at`,
+        [tenantId, hostname, challenge.hash, actor.adminId],
       );
       const domain = insert.rows[0];
       if (!domain) {
@@ -1095,7 +1121,7 @@ export async function createCustomDomain(
       await appendAuditRecord(client, {
         actorType: "PLATFORM_ADMIN",
         actorId: actor.adminId,
-        action: "tenant.domain_added",
+        action: "domain.added",
         targetType: "TENANT_DOMAIN",
         targetId: domain.id,
         requestId,
@@ -1103,7 +1129,20 @@ export async function createCustomDomain(
           tenantId,
           hostname,
           verified: false,
-          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+          expiresAt: domain.verification_expires_at.toISOString(),
+        },
+      });
+      await appendAuditRecord(client, {
+        actorType: "PLATFORM_ADMIN",
+        actorId: actor.adminId,
+        action: "domain.verification_issued",
+        targetType: "TENANT_DOMAIN",
+        targetId: domain.id,
+        requestId,
+        afterState: {
+          tenantId,
+          hostname,
+          expiresAt: domain.verification_expires_at.toISOString(),
         },
       });
       return {
@@ -1115,10 +1154,8 @@ export async function createCustomDomain(
           createdAt: domain.created_at.toISOString(),
         },
         verification: {
-          recordName: `_eventos-verification.${hostname}`,
-          recordType: "TXT",
-          recordValue: `eventos-verification=${verificationToken}`,
-          expiresAt: new Date(Date.now() + 86400000).toISOString(),
+          ...challenge.verification,
+          expiresAt: domain.verification_expires_at.toISOString(),
         },
       };
     });
@@ -1139,6 +1176,7 @@ export async function verifyCustomDomain(
   domainId: string,
   actor: PlatformActor,
   requestId: string,
+  resolveTxt?: TxtResolver,
 ) {
   const domainResult = await getControlPool().query<{
     hostname: string;
@@ -1172,21 +1210,10 @@ export async function verifyCustomDomain(
     );
   }
 
-  let records: string[][];
-  try {
-    records = await resolveTxt(`_eventos-verification.${domain.hostname}`);
-  } catch {
-    throw new DomainError(
-      "DOMAIN_UNVERIFIED",
-      "The required DNS TXT verification record was not found.",
-    );
-  }
-  const verified = records.some(
-    (record) =>
-      record.join("").startsWith("eventos-verification=") &&
-      createHash("sha256")
-        .update(record.join("").slice("eventos-verification=".length))
-        .digest("hex") === domain.verification_token_hash,
+  const records = await lookupDomainTxt(domain.hostname, resolveTxt);
+  const verified = matchesDomainChallenge(
+    records,
+    domain.verification_token_hash,
   );
   if (!verified) {
     throw new DomainError(
@@ -1195,13 +1222,15 @@ export async function verifyCustomDomain(
     );
   }
 
-  return withControlTransaction(async (client) => {
+  const result = await withControlTransaction(async (client) => {
+    await lockDomainTenant(client, tenantId);
     const updated = await client.query<{ hostname: string; verified_at: Date }>(
       `UPDATE tenant_domains
        SET verified_at = now(), verification_token_hash = NULL, verification_expires_at = NULL
        WHERE id = $1 AND tenant_id = $2 AND verified_at IS NULL AND verification_expires_at > now()
+         AND verification_token_hash = $3
        RETURNING hostname, verified_at`,
-      [domainId, tenantId],
+      [domainId, tenantId, domain.verification_token_hash],
     );
     const verifiedDomain = updated.rows[0];
     if (!verifiedDomain) {
@@ -1213,7 +1242,7 @@ export async function verifyCustomDomain(
     await appendAuditRecord(client, {
       actorType: "PLATFORM_ADMIN",
       actorId: actor.adminId,
-      action: "tenant.domain_verified",
+      action: "domain.verified",
       targetType: "TENANT_DOMAIN",
       targetId: domainId,
       requestId,
@@ -1230,6 +1259,8 @@ export async function verifyCustomDomain(
       verifiedAt: verifiedDomain.verified_at.toISOString(),
     };
   });
+  invalidateTenantResolutionCache(tenantId);
+  return result;
 }
 
 export async function updateTenantHealth(

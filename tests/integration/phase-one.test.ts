@@ -7,7 +7,6 @@ import path from "node:path";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import { Client } from "pg";
-import { resolveTxt } from "node:dns/promises";
 import {
   acceptTenantInvitation,
   assignTenantUserRoles,
@@ -22,10 +21,6 @@ import {
 } from "@/modules/tenant-identity/request-auth";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-vi.mock("node:dns/promises", async (importOriginal) => {
-  const original = await importOriginal<typeof import("node:dns/promises")>();
-  return { ...original, resolveTxt: vi.fn() };
-});
 import {
   GET as getTenants,
   POST as createTenantRoute,
@@ -1750,14 +1745,12 @@ describe("Phase 1 real PostgreSQL gates", () => {
     await expect(
       resolveTenantContext(custom.domain.hostname),
     ).rejects.toMatchObject({ code: "DOMAIN_UNVERIFIED" });
-    vi.mocked(resolveTxt).mockResolvedValueOnce([
-      [`eventos-verification=${token}`],
-    ]);
     const verified = await verifyCustomDomain(
       first.tenant.id,
       custom.domain.id,
       actor,
       randomUUID(),
+      async () => [[`eventos-verification=${token}`]],
     );
     expect(verified.verified).toBe(true);
     invalidateTenantResolutionCache(first.tenant.id);

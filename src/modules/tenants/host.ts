@@ -5,7 +5,7 @@ import { DomainError } from "@/shared/errors/domain-error";
 export function normalizeHostHeader(value: string): string {
   if (
     value.length > 300 ||
-    /[\s/@?#\\]/.test(value) ||
+    /[\s/@?#\\%,]/.test(value) ||
     [...value].some((character) => {
       const code = character.codePointAt(0) ?? 0;
       return code < 0x20 || code === 0x7f;
@@ -69,7 +69,11 @@ export function normalizeCustomDomain(value: string): string {
     );
   }
   const hostname = normalizeHostHeader(value);
-  if (hostname === "localhost" || !hostname.includes(".")) {
+  if (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    !hostname.includes(".")
+  ) {
     throw new DomainError(
       "VALIDATION_FAILED",
       "Enter a fully qualified custom domain.",

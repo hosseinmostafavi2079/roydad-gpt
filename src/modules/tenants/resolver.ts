@@ -32,9 +32,10 @@ type TenantContext = Readonly<{
 }>;
 type CacheEntry = { value: TenantContext; expiresAt: number };
 const hostCache = new Map<string, CacheEntry>();
+let cacheGeneration = 0;
 
 export function clearTenantResolutionCacheForTests(): void {
-  hostCache.clear();
+  invalidateTenantResolutionCache();
 }
 
 export function tenantResolutionCacheSize(): number {
@@ -42,6 +43,7 @@ export function tenantResolutionCacheSize(): number {
 }
 
 export function invalidateTenantResolutionCache(tenantId?: string): void {
+  cacheGeneration++;
   if (!tenantId) {
     hostCache.clear();
     return;
@@ -76,10 +78,37 @@ export async function resolveTenantContext(
   hostHeader: string,
 ): Promise<TenantContext> {
   const hostname = normalizeHostHeader(hostHeader);
-  const hit = cached(hostname);
-  if (hit) return hit;
-
   const config = getServerConfig();
+  if (hostname === normalizeHostHeader(new URL(config.BETTER_AUTH_URL).host)) {
+    throw new DomainError(
+      "NOT_FOUND",
+      "The platform host is not a tenant domain.",
+    );
+  }
+  const generation = cacheGeneration;
+  const hit = cached(hostname);
+  if (hit) {
+    // Recheck domain ownership and primary on cache hits, including mutations in other processes.
+    const current = await getControlPool().query<{
+      primary_hostname: string | null;
+    }>(
+      `SELECT (SELECT hostname FROM tenant_domains WHERE tenant_id=t.id AND is_primary AND verified_at IS NOT NULL) AS primary_hostname
+       FROM tenant_domains d JOIN tenants t ON t.id=d.tenant_id
+       JOIN tenant_database_registry r ON r.tenant_id=t.id
+       WHERE d.hostname=$1 AND d.tenant_id=$2 AND d.verified_at IS NOT NULL
+         AND t.status='ACTIVE' AND r.migration_version IS NOT NULL AND r.database_name=$3
+         AND r.last_health_state IN ('HEALTHY','DEGRADED')`,
+      [hostname, hit.tenantId, hit.databaseName],
+    );
+    if (
+      current.rows[0] &&
+      (current.rows[0].primary_hostname || hostname) === hit.primaryHostname &&
+      generation === cacheGeneration
+    )
+      return hit;
+    hostCache.delete(hostname);
+  }
+
   const baseDomain = config.PLATFORM_BASE_DOMAIN;
   if (hostname === baseDomain || hostname.endsWith(`.${baseDomain}`)) {
     const prefix =
@@ -180,6 +209,6 @@ export async function resolveTenantContext(
       accentColor: row.accent_color,
     }),
   });
-  remember(hostname, context);
+  if (generation === cacheGeneration) remember(hostname, context);
   return context;
 }
