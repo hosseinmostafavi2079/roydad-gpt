@@ -168,3 +168,29 @@ Final B1 results: check passed with 93 warnings and 3 informational diagnostics,
 - `tests/integration/phase-one.test.ts`
 - `tests/unit/domain-verification.test.ts`
 - `tests/unit/host.test.ts`
+
+## B2 domain management browser validation
+
+Focused commands: pnpm check; node node_modules/vitest/vitest.mjs run tests/unit/domain-ui.test.ts; pnpm test:e2e:run tests/e2e/domain-management.spec.ts; git diff --check. A production build is used by the existing Playwright web server after UI edits.
+
+The domain browser test uses a disposable control-plane tenant fixture and real B1 domain mutation APIs. The E2E process preload replaces only the Node TXT resolver with a restricted .domain-ui.example fixture; application/domain-core code is unchanged and no public DNS lookup occurs. The temporary fixture file stays under the OS temporary directory, uses restrictive permissions and is cleaned up. The test covers add/TXT instructions, explicit clipboard feedback, pending-primary denial, safe DNS failure then deterministic verification, primary confirmation/summary update, secondary deletion, 390px overflow and optional wizard hostname handoff. Full suites and deployment validation are deferred to B3.
+
+Screenshots are saved under test-results/domain-ui: 1440-domain-section.png, 1440-add-domain.png, 1440-dns-instructions.png, 1440-primary-confirmation.png, 1440-verified-primary.png, 390-domain-section.png and 390-dns-instructions.png. They contain only synthetic test-domain verification records, never production credentials.
+
+Final B2 gate: check passed (94 warnings, 3 informational diagnostics), focused units 16/16 across 2 files, focused browser journey 1/1 including six required flows plus wizard handoff, production build passed and git diff --check passed. All seven screenshots listed above were inspected at 390/1440. Domain-management cards are full-width on desktop; the mobile DNS verification action remains in a visible dialog footer.
+
+### B2 files changed
+
+- `docs/TESTING.md`
+- `playwright.config.ts`
+- `scripts/e2e-server-pid.mjs`
+- `src/app/_components/tenant-create-form.tsx`
+- `src/app/_components/tenant-domains.tsx`
+- `src/app/_components/tenant-settings.tsx`
+- `src/app/globals.css`
+- `src/app/platform/tenants/[tenantId]/page.tsx`
+- `TASKS.md`
+- `tests/e2e/domain-dns.mjs`
+- `tests/e2e/domain-management.spec.ts`
+- `tests/e2e/global-teardown.ts`
+- `tests/unit/domain-ui.test.ts`

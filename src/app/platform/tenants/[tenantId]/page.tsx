@@ -45,7 +45,7 @@ export default async function TenantDetailsPage({
   }
   const plans = await listPlans();
   const primaryHostname = initial.domains.find(
-    (domain) => domain.isPrimary,
+    (domain) => domain.isPrimary && domain.verifiedAt,
   )?.hostname;
   const origin = new URL(getServerConfig().BETTER_AUTH_URL);
   const siteUrl = primaryHostname

@@ -2479,3 +2479,166 @@ th {
     flex-wrap: wrap;
   }
 }
+
+/* Tenant domain management: readable LTR values inside Persian, responsive cards. */
+.domain-section {
+  min-width: 0;
+}
+.domain-heading,
+.domain-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.domain-heading h2 {
+  margin: 8px 0;
+}
+.domain-heading p {
+  margin: 0;
+  max-width: 48ch;
+}
+.domain-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+}
+.domain-card {
+  border: 1px solid var(--border, #dce5e3);
+  border-radius: 16px;
+  padding: 20px;
+  background: var(--surface, #fff);
+  min-width: 0;
+}
+.domain-address {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--primary, #145d58);
+}
+.domain-address strong {
+  overflow-wrap: anywhere;
+  font-size: 16px;
+}
+.domain-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 22px;
+  margin: 18px 0;
+  color: #596b67;
+  font-size: 13px;
+}
+.domain-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.domain-empty {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 26px 16px;
+  margin-top: 20px;
+  background: #f5f9f8;
+  border-radius: 14px;
+}
+.domain-empty p {
+  margin: 0;
+  color: #596b67;
+}
+.domain-menu {
+  position: relative;
+  margin-inline-start: auto;
+}
+.domain-menu summary {
+  cursor: pointer;
+  padding: 8px;
+  border: 1px solid #dce5e3;
+  border-radius: 10px;
+  list-style: none;
+}
+.domain-menu[open] .admin-action {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 42px;
+  z-index: 5;
+  white-space: nowrap;
+  background: #fff;
+  box-shadow: 0 8px 30px #122f2526;
+}
+.domain-form,
+.domain-dns {
+  display: grid;
+  gap: 14px;
+}
+.domain-dns ol {
+  margin: 0;
+  padding-inline-start: 24px;
+  display: grid;
+  gap: 22px;
+}
+.domain-dns li::marker {
+  color: #145d58;
+  font-weight: bold;
+}
+.domain-dns-value {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #dce5e3;
+  background: #f7faf9;
+  border-radius: 12px;
+  min-width: 0;
+}
+.domain-dns-value code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  font-size: 13px;
+  user-select: all;
+  text-align: left;
+}
+.domain-dns-value .admin-action {
+  justify-self: start;
+}
+.domain-confirm-host {
+  overflow-wrap: anywhere;
+  padding: 18px;
+  background: #f5f9f8;
+  border-radius: 12px;
+  font-weight: bold;
+  text-align: center;
+}
+.domain-section :focus-visible {
+  outline: 3px solid #398479;
+  outline-offset: 3px;
+}
+@media (max-width: 600px) {
+  .domain-card {
+    padding: 16px;
+  }
+  .domain-heading {
+    align-items: stretch;
+  }
+  .domain-heading > .admin-action {
+    width: 100%;
+    justify-content: center;
+  }
+  .domain-address strong {
+    font-size: 14px;
+  }
+  .domain-card-top {
+    align-items: flex-start;
+  }
+  .domain-meta {
+    gap: 12px;
+    flex-direction: column;
+  }
+  .domain-section .admin-dialog {
+    max-width: calc(100vw - 24px);
+  }
+}

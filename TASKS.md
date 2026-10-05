@@ -263,3 +263,15 @@ Identity V2 final local results: pnpm check passed (93 warnings and 3 informatio
 B2 UI, B3 full browser/build/release gates and deployment work are outside B1.
 
 B1 final local result: pnpm check passed (93 warnings, 3 informational diagnostics, no errors); focused units 22/22 across 3 files; focused real PostgreSQL 12/12; Prisma validation and git diff --check passed. Zero migrations. Full browser/build/deployment/GitHub gates remain B3 work.
+
+## B2 — Custom domain management UI
+
+- [x] Replace the technical domain form with a dedicated full-width Persian domain section, cards and semantic ownership/primary badges.
+- [x] Add accessible add/DNS/primary/delete dialogs consuming B1 APIs; retain verification values only in component memory, with explicit clipboard actions and status feedback.
+- [x] Add an optional wizard hostname handoff; register via existing API on tenant details without making DNS a provisioning dependency. Failed registration remains visible and retryable.
+- [x] Retain verified primary hostnames in tenant summaries; do not change backend, resolver, auth, SMS or migrations.
+- [x] Complete final focused checks and visual review at 390/1440.
+
+Full PostgreSQL/browser regression, deployment and release gates belong to B3.
+
+B2 final local result: pnpm check passed with 94 warnings and 3 informational diagnostics (no errors); focused units 16/16 across 2 files; focused Playwright 1/1 covering all six requested flows and wizard handoff; production build succeeded for the production-mode browser server; git diff --check passed. Seven screenshots were visually inspected. No full regression, real DNS, migration or deployment work was performed.

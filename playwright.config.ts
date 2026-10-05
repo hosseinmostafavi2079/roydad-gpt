@@ -17,6 +17,10 @@ process.env.EVENTOS_E2E_SMS_HTTP_OUTBOX ||= path.join(
   os.tmpdir(),
   `eventos-e2e-sms-${randomUUID()}.jsonl`,
 );
+process.env.EVENTOS_E2E_DOMAIN_DNS_FILE ||= path.join(
+  os.tmpdir(),
+  `eventos-e2e-domain-${randomUUID()}.json`,
+);
 process.env.GOOGLE_CLIENT_ID ||= "eventos-e2e-google-client";
 process.env.GOOGLE_CLIENT_SECRET ||= randomBytes(32).toString("hex");
 process.env.GOOGLE_OAUTH_ALLOWED_ORIGINS ||= "e2e-local-tenants";

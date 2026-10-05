@@ -86,6 +86,16 @@ export default async function globalTeardown(): Promise<void> {
   const statePath = path.join(process.cwd(), "tests", ".e2e-state.json");
   if (!existsSync(statePath)) {
     stopE2eServer();
+    const domainDnsFile = path.resolve(
+      process.env.EVENTOS_E2E_DOMAIN_DNS_FILE ?? "",
+    );
+    if (
+      domainDnsFile.startsWith(
+        `${path.resolve(os.tmpdir())}${path.sep}eventos-e2e-domain-`,
+      ) &&
+      existsSync(domainDnsFile)
+    )
+      unlinkSync(domainDnsFile);
     return;
   }
   const state = JSON.parse(readFileSync(statePath, "utf8")) as State;

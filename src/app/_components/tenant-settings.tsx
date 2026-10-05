@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { apiRequest, errorMessage } from "@/app/_components/api-client";
+import { TenantDomains } from "./tenant-domains";
 import { PlatformSmsSettings } from "./platform-sms-settings";
 import {
   provisioningStateLabels,
@@ -150,14 +151,6 @@ export function TenantSettings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [domain, setDomain] = useState("");
-  const [verification, setVerification] = useState<{
-    recordName: string;
-    recordType: string;
-    recordValue: string;
-    expiresAt: string;
-  } | null>(null);
-
   const isProvisioning = details.tenant.status === "PROVISIONING";
   useEffect(() => {
     if (!isProvisioning) return;
@@ -273,35 +266,6 @@ export function TenantSettings({
       "طرح سازمان تغییر کرد.",
     );
   }
-  async function addDomain(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const result = await action(
-      () =>
-        apiRequest<{
-          domain: { hostname: string };
-          verification: typeof verification;
-        }>(`/api/platform/tenants/${details.tenant.id}/domains`, {
-          method: "POST",
-          body: { hostname: domain },
-        }),
-      "دامنه ثبت شد. رکورد DNS را برای تأیید اضافه کنید.",
-    );
-    if (result) {
-      setVerification(result.verification);
-      setDomain("");
-    }
-  }
-  async function verifyDomain(domainId: string) {
-    await action(
-      () =>
-        apiRequest(
-          `/api/platform/tenants/${details.tenant.id}/domains/${domainId}/verify`,
-          { method: "POST", body: {} },
-        ),
-      "دامنه با DNS تأیید شد.",
-    );
-  }
-
   const latestJob = details.provisioning[0];
   return (
     <>
@@ -395,6 +359,12 @@ export function TenantSettings({
         </section>
       )}
 
+      <TenantDomains
+        tenantId={details.tenant.id}
+        domains={details.domains}
+        enabled={details.features.custom_domain === true}
+        active={details.tenant.status === "ACTIVE"}
+      />
       <div className="detail-grid section">
         <div className="detail-stack">
           <section className="card card-pad">
@@ -728,86 +698,6 @@ export function TenantSettings({
                 {details.database.migrationVersion ?? "—"}
               </code>
             </div>
-          </section>
-
-          <section className="card card-pad">
-            <div className="section-header">
-              <div>
-                <h2>دامنه‌ها</h2>
-                <p>فقط دامنهٔ تأییدشده برای مسیریابی معتبر است.</p>
-              </div>
-            </div>
-            <div className="grid">
-              {details.domains.map((item) => (
-                <div className="check-row" key={item.id}>
-                  <div>
-                    <code className="mono">{item.hostname}</code>
-                    <div className="hint">
-                      {item.isPrimary ? "دامنهٔ اصلی" : "دامنهٔ اختصاصی"}
-                    </div>
-                  </div>
-                  <div>
-                    {item.verifiedAt ? (
-                      <span className="badge badge-green">تأییدشده</span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-small"
-                        disabled={busy}
-                        onClick={() => void verifyDomain(item.id)}
-                      >
-                        بررسی DNS
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <form
-              className="inline-form"
-              onSubmit={addDomain}
-              style={{ marginTop: 16 }}
-            >
-              <div className="field">
-                <label className="label" htmlFor="custom-domain">
-                  افزودن دامنهٔ اختصاصی
-                </label>
-                <input
-                  className="input mono"
-                  id="custom-domain"
-                  dir="ltr"
-                  placeholder="portal.example.com"
-                  value={domain}
-                  onChange={(event) => setDomain(event.target.value)}
-                  required
-                />
-              </div>
-              <button
-                type="submit"
-                className="btn btn-primary btn-small"
-                disabled={busy}
-              >
-                ثبت دامنه
-              </button>
-            </form>
-            {verification && (
-              <div className="notice" style={{ marginTop: 13 }}>
-                <strong>رکورد DNS برای تأیید</strong>
-                <p>
-                  یک TXT با نام{" "}
-                  <code className="mono">{verification.recordName}</code> و
-                  مقدار زیر اضافه کنید:
-                </p>
-                <code className="mono">{verification.recordValue}</code>
-                <p className="hint">
-                  اعتبار تا{" "}
-                  {new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
-                    dateStyle: "short",
-                    timeStyle: "short",
-                  }).format(new Date(verification.expiresAt))}
-                </p>
-              </div>
-            )}
           </section>
 
           <section className="card card-pad">

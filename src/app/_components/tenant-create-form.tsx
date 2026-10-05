@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { apiRequest, errorMessage } from "@/app/_components/api-client";
 import { suggestTenantSlug } from "@/modules/platform/tenants/slug";
 import { provisioningStateLabels } from "@/modules/platform/tenants/provisioning-view";
+import { domainInputValid } from "./tenant-domains";
 
 type Plan = {
   id: string;
@@ -45,6 +46,7 @@ export function TenantCreateForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [customHostname, setCustomHostname] = useState("");
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const [availability, setAvailability] = useState<
@@ -172,6 +174,10 @@ export function TenantCreateForm({
   }
   async function create() {
     if (busy || !creationKey || !plan) return;
+    if (customHostname && !domainInputValid(customHostname)) {
+      setError("نام دامنه اختصاصی را بدون آدرس، مسیر یا پورت وارد کنید.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -189,16 +195,36 @@ export function TenantCreateForm({
             primaryColor,
             preset,
             planCode,
-            featureOverrides: Object.entries(featureOverrides).map(
-              ([key, enabled]) => ({ key, enabled }),
-            ),
-            limitOverrides: Object.entries(limitOverrides).map(
-              ([key, value]) => ({ key, value }),
-            ),
+            featureOverrides: Object.entries(
+              customHostname
+                ? { ...featureOverrides, custom_domain: true }
+                : featureOverrides,
+            ).map(([key, enabled]) => ({ key, enabled })),
+            limitOverrides: Object.entries(
+              customHostname
+                ? {
+                    ...limitOverrides,
+                    max_custom_domains: Math.max(
+                      1,
+                      limitOverrides.max_custom_domains ??
+                        plan.limits.max_custom_domains ??
+                        0,
+                    ),
+                  }
+                : limitOverrides,
+            ).map(([key, value]) => ({ key, value })),
           },
         },
       );
       sessionStorage.setItem("eventos-tenant-created-id", result.tenant.id);
+      if (customHostname)
+        sessionStorage.setItem(
+          "eventos-domain-draft",
+          JSON.stringify({
+            tenantId: result.tenant.id,
+            hostname: customHostname,
+          }),
+        );
       if (logo) {
         setCreatedId(result.tenant.id);
       } else {
@@ -549,6 +575,32 @@ export function TenantCreateForm({
           {step === 3 && (
             <div>
               <h2 className="card-title">بررسی و ایجاد</h2>
+              <div className="field">
+                <label className="label" htmlFor="wizard-domain">
+                  دامنه اختصاصی (اختیاری)
+                </label>
+                <input
+                  className="input mono"
+                  id="wizard-domain"
+                  dir="ltr"
+                  placeholder="event.customer.ir"
+                  maxLength={253}
+                  value={customHostname}
+                  onChange={(event) => setCustomHostname(event.target.value)}
+                />
+                <p className="hint">
+                  فقط نام دامنه را وارد کنید. ثبت آن پس از ایجاد مجموعه انجام
+                  می‌شود و راه‌اندازی منتظر تایید DNS نمی‌ماند. قابلیت دامنه
+                  اختصاصی برای این مجموعه فعال خواهد شد.
+                </p>
+                <button
+                  className="btn btn-secondary btn-small"
+                  type="button"
+                  onClick={() => setCustomHostname("")}
+                >
+                  بعداً تنظیم می‌کنم
+                </button>
+              </div>
               <dl className="wizard-review">
                 <div>
                   <dt>مجموعه</dt>
