@@ -24,6 +24,8 @@ interface InvitationEmailProvider {
 
 class TestOutboxInvitationProvider implements InvitationEmailProvider {
   async send(message: MailMessage): Promise<void> {
+    if (message.email.endsWith("@phone.eventos.invalid"))
+      throw new Error("Internal phone identity cannot receive email.");
     const outboxPath = process.env.EVENTOS_TEST_MAIL_OUTBOX;
     const tempRoot = path.resolve(os.tmpdir());
     const resolved = outboxPath ? path.resolve(outboxPath) : "";
@@ -47,6 +49,8 @@ class SmtpInvitationProvider implements InvitationEmailProvider {
   ) {}
 
   async send(message: MailMessage): Promise<void> {
+    if (message.email.endsWith("@phone.eventos.invalid"))
+      throw new Error("Internal phone identity cannot receive email.");
     const transport = nodemailer.createTransport(this.smtpUrl);
     try {
       await transport.sendMail({
@@ -137,6 +141,8 @@ export async function sendTenantPasswordResetEmail(input: {
   email: string;
   resetUrl: string;
 }): Promise<void> {
+  if (input.email.endsWith("@phone.eventos.invalid"))
+    throw new Error("Internal phone identity cannot receive email.");
   const config = getServerConfig();
   if (!config.SMTP_URL) {
     throw new Error("Tenant password recovery email is not configured.");

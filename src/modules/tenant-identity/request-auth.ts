@@ -169,7 +169,7 @@ export async function requireTenantActor(
   );
   return {
     id: row.id,
-    email: row.email,
+    email: row.email.endsWith("@phone.eventos.invalid") ? "" : row.email,
     name: row.name,
     tenantId: tenant.tenantId,
     authenticationLevel:

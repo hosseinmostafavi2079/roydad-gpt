@@ -479,7 +479,7 @@ export async function listTenantUsers(
     PARTICIPANT: "tenant_participant_profiles",
   }[profileType];
   const result = await getTenantPool(context).query(
-    `SELECT account.id, account.name, account.email, account.status,
+    `SELECT account.id, account.name, CASE WHEN account.email LIKE '%@phone.eventos.invalid' THEN '' ELSE account.email END AS email, account.status,
             account."createdAt" AS created_at, account."lastLoginAt" AS last_login_at,
             COALESCE(array_agg(role.code ORDER BY role.code) FILTER (WHERE role.code IS NOT NULL), '{}') AS role_codes
      FROM tenant_users AS account

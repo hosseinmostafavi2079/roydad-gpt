@@ -1,4 +1,6 @@
 import { requireTenantPage } from "@/modules/tenant-identity/page-auth";
+import { IdentitySettingsEditor } from "@/app/_components/identity-settings-editor";
+import { IdentityAccountMethods } from "@/app/_components/identity-account-methods";
 
 const featureNames: Record<string, string> = {
   public_website: "وب‌سایت عمومی",
@@ -24,7 +26,7 @@ const featureNames: Record<string, string> = {
 };
 
 export default async function TenantSettingsPage() {
-  const { tenant } = await requireTenantPage("settings.read");
+  const { tenant, actor } = await requireTenantPage("settings.read");
   return (
     <main className="content">
       <div className="page-heading">
@@ -36,7 +38,11 @@ export default async function TenantSettingsPage() {
           </p>
         </div>
       </div>
+      <IdentitySettingsEditor
+        editable={actor.permissions.has("settings.manage")}
+      />
       <div className="detail-grid">
+        <IdentityAccountMethods />
         <section className="card card-pad">
           <h2 className="card-title">مشخصات</h2>
           <div className="check-row">

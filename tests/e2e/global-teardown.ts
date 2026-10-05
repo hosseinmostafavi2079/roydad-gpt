@@ -163,6 +163,10 @@ export default async function globalTeardown(): Promise<void> {
       await control.query("BEGIN");
       try {
         await control.query(
+          "DELETE FROM tenant_sms_provider_allowlist WHERE tenant_id=$1",
+          [tenantId],
+        );
+        await control.query(
           "DELETE FROM tenant_payment_provider_allowlist WHERE tenant_id = $1",
           [tenantId],
         );
@@ -201,6 +205,16 @@ export default async function globalTeardown(): Promise<void> {
         unlinkSync(outbox);
     }
     stopE2eServer();
+    const smsOutbox = path.resolve(
+      process.env.EVENTOS_E2E_SMS_HTTP_OUTBOX ?? "",
+    );
+    if (
+      smsOutbox.startsWith(
+        `${path.resolve(os.tmpdir())}${path.sep}eventos-e2e-sms-`,
+      ) &&
+      existsSync(smsOutbox)
+    )
+      unlinkSync(smsOutbox);
     if (cleanupComplete) unlinkSync(statePath);
   }
 }

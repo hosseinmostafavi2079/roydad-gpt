@@ -14,6 +14,7 @@ import { listOwnInvoices, listOwnPayments } from "@/modules/payments/finance";
 import { requireTenantActor } from "@/modules/tenant-identity/request-auth";
 import { publicPageContext } from "@/modules/public-site/page-context";
 import { DomainError } from "@/shared/errors/domain-error";
+import { IdentityProfileEditor } from "@/app/_components/identity-profile-editor";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -52,6 +53,7 @@ export default async function AccountPage() {
     : [[], []];
   return (
     <PublicSiteShell tenant={tenant} profile={profile}>
+      <IdentityProfileEditor />
       <section className="public-page-header">
         <span className="public-eyebrow">پنل شرکت‌کننده</span>
         <h1>سلام، {actor.name}</h1>

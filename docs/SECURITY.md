@@ -54,3 +54,15 @@ Per-event and per-instructor canonical overrides are restricted to local event o
 ## Pilot production deployment boundary
 
 The separate production Compose stack publishes only Caddy ports 80/443. PostgreSQL is on an internal Docker network without host port mapping; the app and provisioning worker run as `node`. Caddy terminates HTTPS for an explicit list of platform and tenant hosts, preserves Host, and overwrites `X-Real-IP`; application tenant lookup and origin checks still validate the hostname. Production preflight rejects test-mode markers, non-SMTP mail, HTTP object storage, missing or reused critical secrets, unlisted tenant hosts and inconsistent Google OAuth configuration. The existing runtime guards reject test mail, TEST payments and E2E Google mock outside the isolated browser harness. Real credentials live only in ignored `.env.production` or operator-managed secrets, never in the image or repository. See [DEPLOYMENT.md](DEPLOYMENT.md) for backup, restore and rollback procedures.
+
+## Identity V2 SMS and profile boundary
+
+Phone verification and username authentication use official Better Auth plugins. SMS delivery adapters do not verify codes or create sessions. Phones and usernames have tenant-scoped database uniqueness; phone changes require OTP. Resend, verification, source and monthly tenant delivery budgets are persisted. Delivery attempts consume budget even if the provider fails. Expired limiter cleanup preserves active quota windows.
+
+Tenant SMS credentials use authenticated AES-256-GCM encryption with tenant/provider binding. Configuration responses omit secrets; audits contain action/request identifiers only. Provider HTTP errors are normalized without URLs, API keys, OTPs or response bodies. TEST SMS delivery is rejected in production even when E2E flags are present. There are no test SMS routes or OTP acceptance shortcuts.
+
+Phone-created users keep an opaque non-routable internal email with emailVerified=false. UI/session DTOs hide it and mail adapters reject it. Username login requires a verified phone or verified real email without weakening real email/password verification. Login settings require a usable administrator method, and platform recovery restores email login without bypassing credentials or verification.
+
+Profile definitions and values are bounded, tenant-scoped and validated against current definitions. National ID starts disabled and requires the dedicated high-risk permission for staff access. Account profile values remain separate from event form answers. See SMS-PROVIDERS.md for the adapter extension contract.
+
+Account-dependent signup checks run in the Better Auth user-creation hook after the phone plugin verifies and consumes the OTP. Before phone ownership is proved, a missing/invalid code returns the same generic response for registered and unknown phones. Profile validation that depends only on the submitted form is independent of account existence. Existing-account signup payloads never overwrite credentials or profile data.

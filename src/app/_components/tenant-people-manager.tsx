@@ -89,6 +89,10 @@ export function TenantPeopleManager({
   const [profileEditing, setProfileEditing] = useState<Person | null>(null);
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [profileBusy, setProfileBusy] = useState(false);
+  const [participantProfile, setParticipantProfile] = useState<{
+    name: string;
+    fields: { key: string; label: string; value: unknown }[];
+  } | null>(null);
   const [profileOverrides, setProfileOverrides] = useState<
     Record<string, PublicProfile>
   >({});
@@ -722,6 +726,28 @@ export function TenantPeopleManager({
                         })()}
                       <span className="table-name">{person.name}</span>
                       <span className="table-sub">{person.email}</span>
+                      {collection === "participants" && (
+                        <AdminButton
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              const fields = await apiRequest<
+                                { key: string; label: string; value: unknown }[]
+                              >(
+                                `/api/tenant/identity/participants/${person.id}/profile`,
+                              );
+                              setParticipantProfile({
+                                name: person.name,
+                                fields,
+                              });
+                            } catch (error) {
+                              setError(errorMessage(error));
+                            }
+                          }}
+                        >
+                          اطلاعات پروفایل
+                        </AdminButton>
+                      )}
                     </td>
                     <td data-label="وضعیت حساب">
                       <StatusBadge status={person.status} />
@@ -910,6 +936,26 @@ export function TenantPeopleManager({
           </table>
         </div>
       )}
+      <AdminDialog
+        open={participantProfile !== null}
+        title={`پروفایل ${participantProfile?.name ?? ""}`}
+        onClose={() => setParticipantProfile(null)}
+      >
+        {participantProfile?.fields.map((field) => (
+          <div className="check-row" key={field.key}>
+            <strong>{field.label}</strong>
+            <span>
+              {Array.isArray(field.value)
+                ? field.value.join("، ")
+                : typeof field.value === "boolean"
+                  ? field.value
+                    ? "بله"
+                    : "خیر"
+                  : String(field.value ?? "")}
+            </span>
+          </div>
+        ))}
+      </AdminDialog>
       <AdminDialog
         open={dialog === "name" && editing !== null}
         title="ویرایش اطلاعات"

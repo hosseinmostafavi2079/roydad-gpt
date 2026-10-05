@@ -51,6 +51,7 @@ const serverConfigSchema = z
     TRUSTED_PROXY_CIDRS: z.string().default(""),
     SMTP_URL: z.string().optional().default(""),
     MAIL_TRANSPORT: z.enum(["smtp", "test"]).default("smtp"),
+    SMS_TRANSPORT: z.enum(["provider", "test"]).default("provider"),
     MEDIA_S3_ENDPOINT: z.string().default(""),
     MEDIA_S3_REGION: z.string().default("us-east-1"),
     MEDIA_S3_BUCKET: z.string().default(""),
@@ -88,6 +89,13 @@ const serverConfigSchema = z
       .default("info"),
   })
   .superRefine((config, ctx) => {
+    if (config.NODE_ENV === "production" && config.SMS_TRANSPORT === "test") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["SMS_TRANSPORT"],
+        message: "Test SMS transport is unavailable in production",
+      });
+    }
     if (
       config.NODE_ENV === "production" &&
       config.MAIL_TRANSPORT === "test" &&

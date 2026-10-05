@@ -1,7 +1,18 @@
 import "server-only";
 
 import { betterAuth, type BetterAuthOptions } from "better-auth";
-import { emailOTP } from "better-auth/plugins";
+import { APIError } from "better-auth/api";
+import { emailOTP, phoneNumber, username } from "better-auth/plugins";
+import {
+  normalizeIranianPhone,
+  normalizeUsername,
+  validateProfileValues,
+} from "./identity-v2-schema";
+import {
+  identityAudit,
+  sendIdentityOtp,
+  getIdentitySettings,
+} from "./identity-v2-repository";
 import { createHmac, randomUUID } from "node:crypto";
 import { getTenantPool } from "@/infrastructure/db/tenant/pool";
 import {
@@ -26,11 +37,15 @@ import { parseE2eGoogleIdentity } from "@/modules/tenant-identity/e2e-google";
 export type TenantContext = Awaited<ReturnType<typeof resolveTenantContext>>;
 const authCache = new Map<string, ReturnType<typeof betterAuth>>();
 
-export function getTenantAuth(context: TenantContext, origin: string) {
+export function getTenantAuth(
+  context: TenantContext,
+  origin: string,
+  usernameCredential = false,
+) {
   const googleEnabled =
     context.features.google_login && googleOAuthEnabledForOrigin(origin);
   const googleMock = googleMockEnabledForOrigin(origin);
-  const key = `${context.tenantId}:${context.databaseName}:${origin}:${googleEnabled}`;
+  const key = `${context.tenantId}:${context.databaseName}:${origin}:${googleEnabled}:${usernameCredential}:${JSON.stringify(context.features)}:${JSON.stringify(context.limits)}`;
   const cached = authCache.get(key);
   if (cached) {
     authCache.delete(key);
@@ -192,7 +207,7 @@ export function getTenantAuth(context: TenantContext, origin: string) {
     emailAndPassword: {
       enabled: true,
       disableSignUp: false,
-      requireEmailVerification: true,
+      requireEmailVerification: !usernameCredential,
       minPasswordLength: 12,
       maxPasswordLength: 128,
       autoSignIn: false,
@@ -210,6 +225,66 @@ export function getTenantAuth(context: TenantContext, origin: string) {
       },
     },
     plugins: [
+      username({
+        minUsernameLength: 3,
+        maxUsernameLength: 30,
+        displayUsername: false,
+        immutableUsername: true,
+        usernameNormalization: (value) => value.trim().toLowerCase(),
+        usernameValidator: (value) => {
+          try {
+            return normalizeUsername(value) === value;
+          } catch {
+            return false;
+          }
+        },
+        validationOrder: { username: "post-normalization" },
+      }),
+      phoneNumber({
+        otpLength: 6,
+        expiresIn: 300,
+        allowedAttempts: 3,
+        requireVerification: true,
+        phoneNumberValidator: (value) => {
+          try {
+            return normalizeIranianPhone(value) === value;
+          } catch {
+            return false;
+          }
+        },
+        signUpOnVerification: {
+          getTempEmail: (phone) =>
+            `${createHmac("sha256", getServerConfig().BETTER_AUTH_SECRET).update(`${context.tenantId}:${phone}`).digest("hex")}@phone.eventos.invalid`,
+          getTempName: () => "شرکت‌کننده",
+        },
+        sendOTP: async ({ phoneNumber: phone, code }, ctx) => {
+          try {
+            await sendIdentityOtp(
+              context,
+              phone,
+              code,
+              ctx?.request?.headers.get("x-request-id") ?? randomUUID(),
+            );
+          } catch (error) {
+            await ctx?.context.internalAdapter.deleteVerificationByIdentifier(
+              phone,
+            );
+            throw error;
+          }
+        },
+        callbackOnVerification: async ({ user }, ctx) => {
+          await pool.query(
+            `UPDATE tenant_users SET mobile="phoneNumber", "mobileVerifiedAt"=now() WHERE id=$1 AND "tenantId"=$2 AND "phoneNumberVerified"=true`,
+            [user.id, context.tenantId],
+          );
+          await identityAudit(
+            context,
+            user.id,
+            "auth.phone_verified",
+            ctx?.request?.headers.get("x-request-id") ?? randomUUID(),
+          );
+        },
+      }),
       emailOTP({
         disableSignUp: true,
         expiresIn: 300,
@@ -238,6 +313,9 @@ export function getTenantAuth(context: TenantContext, origin: string) {
         "/forget-password": { window: 60, max: 3 },
         "/reset-password": { window: 60, max: 5 },
         "/sign-up/email": { window: 60, max: 3 },
+        "/sign-in/username": { window: 60, max: 5 },
+        "/phone-number/send-otp": { window: 60, max: 3 },
+        "/phone-number/verify": { window: 60, max: 5 },
       },
     },
     advanced: {
@@ -255,6 +333,59 @@ export function getTenantAuth(context: TenantContext, origin: string) {
       user: {
         create: {
           before: async (user, hookContext) => {
+            const phoneSignup = Boolean(
+              hookContext?.request?.url.includes("/phone-number/verify"),
+            );
+            if (phoneSignup) {
+              if (!context.features.registration)
+                throw new APIError("BAD_REQUEST", {
+                  message: "ثبت‌نام در دسترس نیست.",
+                });
+              const count = await pool.query<{ count: number }>(
+                "SELECT count(*)::int AS count FROM tenant_participant_profiles WHERE tenant_id=$1",
+                [context.tenantId],
+              );
+              if (
+                (count.rows[0]?.count ?? 0) >= context.limits.max_participants
+              )
+                throw new APIError("BAD_REQUEST", {
+                  message: "ظرفیت ثبت‌نام تکمیل است.",
+                });
+              const body = hookContext?.body as
+                | {
+                    profile?: Record<string, unknown>;
+                    username?: string;
+                    phoneNumber?: string;
+                  }
+                | undefined;
+              const identity = await getIdentitySettings(context);
+              let profile: ReturnType<typeof validateProfileValues>;
+              try {
+                profile = validateProfileValues(
+                  identity.fields,
+                  { ...body?.profile, mobile: body?.phoneNumber },
+                  "signup",
+                );
+                if (identity.methods.username_password && !body?.username)
+                  throw new Error("Username required");
+                if (!identity.methods.username_password && body?.username)
+                  throw new Error("Username disabled");
+              } catch {
+                throw new APIError("BAD_REQUEST", {
+                  message: "اطلاعات ثبت‌نام معتبر یا کامل نیست.",
+                });
+              }
+              const name = `${profile.first_name} ${profile.last_name}`.trim();
+              return {
+                data: {
+                  ...user,
+                  name,
+                  emailVerified: false,
+                  tenantId: context.tenantId,
+                  status: "ACTIVE",
+                },
+              };
+            }
             if (isGoogleRequest(hookContext?.request?.url)) {
               if (!context.features.registration) return false;
               const count = await pool.query<{ count: number }>(
@@ -271,7 +402,11 @@ export function getTenantAuth(context: TenantContext, origin: string) {
             };
           },
           after: async (user, hookContext) => {
-            if (!isGoogleRequest(hookContext?.request?.url)) return;
+            if (
+              !isGoogleRequest(hookContext?.request?.url) &&
+              !hookContext?.request?.url.includes("/phone-number/verify")
+            )
+              return;
             await pool.query(
               `INSERT INTO tenant_participant_profiles (tenant_id,user_id,display_name)
                VALUES ($1,$2,$3) ON CONFLICT (tenant_id,user_id) DO NOTHING`,
@@ -292,14 +427,19 @@ export function getTenantAuth(context: TenantContext, origin: string) {
             const user = await pool.query<{
               status: string;
               locked_until: Date | null;
+              phoneNumberVerified: boolean;
+              emailVerified: boolean;
             }>(
-              `SELECT status, "lockedUntil" AS locked_until
+              `SELECT status, "lockedUntil" AS locked_until, "phoneNumberVerified", "emailVerified"
                FROM tenant_users WHERE id = $1 AND "tenantId" = $2`,
               [session.userId, context.tenantId],
             );
             const row = user.rows[0];
             if (
               !row ||
+              (usernameCredential &&
+                !row.phoneNumberVerified &&
+                !row.emailVerified) ||
               !canAuthenticateTenantUser(
                 row.status as "ACTIVE" | "INVITED" | "SUSPENDED" | "DISABLED",
                 row.locked_until,
@@ -320,9 +460,11 @@ export function getTenantAuth(context: TenantContext, origin: string) {
                   "/sign-in/email-otp",
                 )
                   ? "EMAIL_OTP"
-                  : isGoogleRequest(hookContext?.request?.url)
-                    ? "GOOGLE"
-                    : "PASSWORD",
+                  : hookContext?.request?.url.includes("/phone-number/verify")
+                    ? "SMS_OTP"
+                    : isGoogleRequest(hookContext?.request?.url)
+                      ? "GOOGLE"
+                      : "PASSWORD",
               },
             };
           },

@@ -22,6 +22,7 @@ import {
   tenantWallTimeToUtc,
 } from "@/modules/program-core/dates";
 import { runPhase6BrowserFlows } from "./payment-flows";
+import { runIdentityV2BrowserFlows } from "./identity-v2-flows";
 import {
   runPilotAuthBrowserFlows,
   runPilotGoogleNewUserFlow,
@@ -1546,6 +1547,14 @@ async function* tenantJourney({
       mailOutboxPath: e2eState.mailOutboxPath ?? "",
     });
     yield "pilot Google new participant";
+    await runIdentityV2BrowserFlows({
+      browser,
+      ownerPage: page,
+      tenantId,
+      tenantOrigin,
+      sourceRunId: phase3RunId,
+    });
+    yield "identity v2 SMS and profile flows";
 
     await page.goto(`${tenantOrigin}/calendar`);
     const calendarControl = new Client({
@@ -1968,6 +1977,7 @@ test.describe("platform and tenant journey", () => {
     "payment browser flows",
     "pilot authentication flows",
     "pilot Google new participant",
+    "identity v2 SMS and profile flows",
     "attendance and certificates",
     "tenant isolation and session revocation",
   ];

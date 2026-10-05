@@ -1,5 +1,10 @@
 import { getTenantAuth } from "@/modules/tenant-identity/auth";
 import {
+  handleIdentityV2Auth,
+  isIdentityV2Path,
+} from "@/modules/tenant-identity/identity-v2-auth-route";
+import { getIdentitySettings } from "@/modules/tenant-identity/identity-v2-repository";
+import {
   assertTenantSameOrigin,
   resolveTenantRequest,
 } from "@/modules/tenant-identity/request-auth";
@@ -113,6 +118,19 @@ async function cleanResponse(
       { status: response.status, headers },
     );
   }
+  if (path === "/get-session") {
+    const body = await response.json();
+    const user = body?.user ?? body?.data?.user;
+    if (
+      typeof user?.email === "string" &&
+      user.email.endsWith("@phone.eventos.invalid")
+    )
+      user.email = "";
+    return new Response(JSON.stringify(body), {
+      status: response.status,
+      headers,
+    });
+  }
   if (
     path !== "/sign-in/email" &&
     path !== "/sign-in/email-otp" &&
@@ -165,12 +183,31 @@ async function handle(request: Request): Promise<Response> {
   const requestId = requestIdFrom(request);
   let signupLock: PoolClient | undefined;
   let signupLockKey: string | undefined;
+  let socialRequestBody: string | undefined;
   try {
     const { tenant, origin } = await resolveTenantRequest(request);
     const path = new URL(request.url).pathname.replace(
       /^\/api\/tenant-auth/,
       "",
     );
+    if (isIdentityV2Path(path)) {
+      assertTenantSameOrigin(request, origin);
+      return await handleIdentityV2Auth(request, tenant, origin, path);
+    }
+    const identitySettings = await getIdentitySettings(tenant);
+    const method =
+      path === "/sign-in/email" ||
+      path === "/sign-up/email" ||
+      path === "/forget-password" ||
+      path === "/reset-password"
+        ? "email_password"
+        : path.includes("email-otp")
+          ? "email_otp"
+          : path === "/sign-in/social" || path === "/callback/google"
+            ? "google"
+            : null;
+    if (method && !identitySettings.methods[method])
+      throw new DomainError("FEATURE_DISABLED", "این روش ورود فعال نیست.");
     if (
       (request.method === "GET" && !allowedGetPaths.has(path)) ||
       (request.method === "POST" && !allowedPostPaths.has(path)) ||
@@ -217,7 +254,8 @@ async function handle(request: Request): Promise<Response> {
         );
     }
     if (path === "/sign-in/social") {
-      const body = await readAuthRequestBody(request.clone());
+      const body = await readAuthRequestBody(request);
+      socialRequestBody = body;
       let input: {
         provider?: unknown;
         callbackURL?: unknown;
@@ -263,6 +301,16 @@ async function handle(request: Request): Promise<Response> {
     const auth = getTenantAuth(tenant, origin);
     let attemptedEmail: string | undefined;
     let authRequest = request;
+    if (socialRequestBody !== undefined) {
+      const headers = new Headers(request.headers);
+      headers.delete("content-length");
+      authRequest = new Request(request.url, {
+        method: request.method,
+        headers,
+        body: socialRequestBody,
+        signal: request.signal,
+      });
+    }
     if (path === "/sign-in/email" || otpPath) {
       const requestBody = await readAuthRequestBody(request);
       if (path === "/email-otp/send-verification-otp") {

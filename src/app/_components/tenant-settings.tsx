@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { apiRequest, errorMessage } from "@/app/_components/api-client";
+import { PlatformSmsSettings } from "./platform-sms-settings";
 import {
   provisioningStateLabels,
   provisioningProgressStates,
@@ -304,6 +305,7 @@ export function TenantSettings({
   const latestJob = details.provisioning[0];
   return (
     <>
+      <PlatformSmsSettings tenantId={details.tenant.id} />
       {(error || success) && (
         <p
           className={`alert ${error ? "alert-error" : "alert-success"}`}

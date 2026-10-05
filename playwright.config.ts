@@ -12,6 +12,11 @@ process.env.EVENTOS_TEST_MAIL_OUTBOX ||= path.join(
   `eventos-e2e-mail-${randomUUID()}.jsonl`,
 );
 process.env.MAIL_TRANSPORT = "test";
+process.env.SMS_TRANSPORT = "provider";
+process.env.EVENTOS_E2E_SMS_HTTP_OUTBOX ||= path.join(
+  os.tmpdir(),
+  `eventos-e2e-sms-${randomUUID()}.jsonl`,
+);
 process.env.GOOGLE_CLIENT_ID ||= "eventos-e2e-google-client";
 process.env.GOOGLE_CLIENT_SECRET ||= randomBytes(32).toString("hex");
 process.env.GOOGLE_OAUTH_ALLOWED_ORIGINS ||= "e2e-local-tenants";

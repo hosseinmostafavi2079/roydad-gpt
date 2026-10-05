@@ -29,6 +29,8 @@ model TenantMetadata {
   auditLogs   TenantAuditLog[]
   website     TenantWebsiteProfile?
   media       TenantMedia[]
+  identitySettings TenantIdentitySettings?
+  identityThrottles TenantIdentityThrottle[]
 
   @@map("tenant_metadata")
 }
@@ -110,6 +112,9 @@ model TenantUser {
   lastLoginAt      DateTime? @db.Timestamptz(6)
   failedLoginCount Int       @default(0)
   lockedUntil      DateTime? @db.Timestamptz(6)
+  phoneNumber      String?   @db.VarChar(16)
+  phoneNumberVerified Boolean @default(false)
+  username         String?   @db.VarChar(30)
 
   tenant       TenantMetadata            @relation(fields: [tenantId], references: [tenantId], onDelete: Restrict)
   accounts     TenantAuthAccount[]
@@ -124,6 +129,8 @@ model TenantUser {
   @@unique([tenantId, id], map: "tenant_users_tenant_id_id_key")
   @@unique([tenantId, email], map: "tenant_users_tenant_id_email_key")
   @@unique([tenantId, mobile], map: "tenant_users_tenant_id_mobile_key")
+  @@unique([tenantId, phoneNumber], map: "tenant_users_phone_unique")
+  @@unique([tenantId, username], map: "tenant_users_username_unique")
   @@index([tenantId, status], map: "tenant_users_tenant_id_status_idx")
   @@map("tenant_users")
 }
@@ -288,6 +295,9 @@ model TenantParticipantProfile {
   tenantId    String   @map("tenant_id") @db.Uuid
   userId      String   @map("user_id") @db.VarChar(64)
   displayName String   @map("display_name") @db.VarChar(120)
+  firstName String @default("") @map("first_name") @db.VarChar(120)
+  lastName String @default("") @map("last_name") @db.VarChar(120)
+  profileValues Json @default("{}") @map("profile_values") @db.JsonB
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
@@ -295,6 +305,28 @@ model TenantParticipantProfile {
 
   @@id([tenantId, userId])
   @@map("tenant_participant_profiles")
+}
+
+model TenantIdentitySettings {
+  tenantId String @id @map("tenant_id") @db.Uuid
+  loginMethods Json @map("login_methods") @db.JsonB
+  profileFields Json @map("profile_fields") @db.JsonB
+  smsProviderKey String? @map("sms_provider_key") @db.VarChar(40)
+  smsConfigCiphertext Bytes? @map("sms_config_ciphertext")
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  tenant TenantMetadata @relation(fields: [tenantId],references: [tenantId],onDelete: Restrict)
+  @@map("tenant_identity_settings")
+}
+
+model TenantIdentityThrottle {
+  tenantId String @map("tenant_id") @db.Uuid
+  keyHash String @map("key_hash") @db.Char(64)
+  windowStart DateTime @map("window_start") @db.Timestamptz(6)
+  windowEnd DateTime @map("window_end") @db.Timestamptz(6)
+  count Int @default(1)
+  tenant TenantMetadata @relation(fields: [tenantId],references: [tenantId],onDelete: Restrict)
+  @@id([tenantId,keyHash])
+  @@map("tenant_identity_throttles")
 }
 
 model TenantInvitation {

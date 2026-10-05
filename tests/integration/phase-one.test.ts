@@ -672,8 +672,8 @@ describe("Phase 1 real PostgreSQL gates", () => {
       );
       expect(identity.rows[0]).toMatchObject({
         role_count: 11,
-        permission_count: 49,
-        owner_grant_count: 49,
+        permission_count: 50,
+        owner_grant_count: 50,
         owner_status: "INVITED",
       });
       const prismaHistory = await tenantDb.query<{ table_name: string | null }>(
@@ -730,9 +730,9 @@ describe("Phase 1 real PostgreSQL gates", () => {
         "SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL",
       );
       const appRows = await migrationCheck.query<{ count: number }>(
-        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0013_pilot_public_seo'",
+        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0014_identity_v2'",
       );
-      expect(prismaRows.rows[0]?.count).toBe(14);
+      expect(prismaRows.rows[0]?.count).toBe(15);
       expect(appRows.rows[0]?.count).toBe(1);
     } finally {
       await migrationCheck.end();
@@ -785,7 +785,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       ownerSessionHeaders,
     );
     expect(ownerActor.tenantId).toBe(first.tenant.id);
-    expect(ownerActor.permissions.size).toBe(49);
+    expect(ownerActor.permissions.size).toBe(50);
     const websiteBefore = await getWebsiteProfile(ownerContext);
     const websiteOrigin = `http://${slugA}.localhost:3000`;
     const websiteInput = {
@@ -1938,7 +1938,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       [created.tenant.id, created.tenant.id],
     );
     expect(firstUpgrade.rows[0]).toEqual({
-      migration_version: "0013_pilot_public_seo",
+      migration_version: "0014_identity_v2",
       audit_count: 1,
     });
 
@@ -1979,16 +1979,16 @@ describe("Phase 1 real PostgreSQL gates", () => {
            (SELECT count(*)::int FROM tenant_schema_migrations) AS identity_rows,
            (SELECT count(*)::int FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS prisma_rows`,
       );
-      expect(metadata.rows[0]?.schema_version).toBe("0013_pilot_public_seo");
+      expect(metadata.rows[0]?.schema_version).toBe("0014_identity_v2");
       expect(identity.rows[0]).toEqual({
         roles: 11,
-        permissions: 49,
-        owner_grants: 49,
+        permissions: 50,
+        owner_grants: 50,
       });
       expect(history.rows[0]).toEqual({
         phase1_rows: 1,
         identity_rows: 2,
-        prisma_rows: 14,
+        prisma_rows: 15,
       });
     } finally {
       await upgraded.end();

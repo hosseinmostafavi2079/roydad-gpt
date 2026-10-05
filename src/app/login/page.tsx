@@ -13,6 +13,11 @@ import {
 } from "@/modules/tenant-identity/auth-destination";
 import { googleOAuthEnabledForOrigin } from "@/modules/tenant-identity/google-config";
 import { getWebsiteProfile } from "@/modules/public-site/profile";
+import {
+  getIdentitySettings,
+  smsAvailable,
+} from "@/modules/tenant-identity/identity-v2-repository";
+import { IdentityV2Login } from "@/app/_components/identity-v2-login";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -53,6 +58,18 @@ export default async function TenantLoginPage({
     context.tenant.features.google_login &&
     googleOAuthEnabledForOrigin(context.origin);
   const nextQuery = next ? `&next=${encodeURIComponent(next)}` : "";
+  const identity = await getIdentitySettings(context.tenant);
+  const methods = {
+    ...identity.methods,
+    sms_otp: await smsAvailable(context.tenant, identity),
+    username_password:
+      identity.methods.username_password &&
+      context.tenant.features.password_login,
+    email_password:
+      identity.methods.email_password && context.tenant.features.password_login,
+    email_otp: identity.methods.email_otp && context.tenant.features.email_otp,
+    google: identity.methods.google && googleEnabled,
+  };
   return (
     <TenantAuthShell
       brandName={context.tenant.branding.brandName}
@@ -76,17 +93,24 @@ export default async function TenantLoginPage({
           </Link>
         )}
       </nav>
-      {mode === "register" ? (
+      {methods.sms_otp || methods.username_password ? (
+        <IdentityV2Login
+          methods={methods}
+          fields={identity.fields}
+          register={mode === "register"}
+          next={next}
+        />
+      ) : mode === "register" ? (
         <ParticipantRegisterForm
           next={next ?? "/account"}
-          passwordEnabled={context.tenant.features.password_login}
-          googleEnabled={googleEnabled}
+          passwordEnabled={methods.email_password}
+          googleEnabled={methods.google}
         />
       ) : (
         <TenantSignInForm
-          otpEnabled={context.tenant.features.email_otp}
-          passwordEnabled={context.tenant.features.password_login}
-          googleEnabled={googleEnabled}
+          otpEnabled={methods.email_otp}
+          passwordEnabled={methods.email_password}
+          googleEnabled={methods.google}
           next={next}
         />
       )}

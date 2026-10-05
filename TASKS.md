@@ -236,3 +236,17 @@ Final local gate: `pnpm check` passed with 24 lint advisories, 62/62 unit tests,
 Local status after the provisioning isolation fix: the focused integration case passed 5/5 consecutive runs, and the full PostgreSQL suite passed 16/16. The worker's integration-only public probe now targets a reserved unreachable local endpoint, avoiding the unrelated app on port 3000 that opened two tenant pool sessions. A post-suite check found zero tenant pool sessions. `pnpm check`, unit tests 67/67, production build, Playwright 9/9 with installed Chrome, Prisma tenant schema validation, production Compose syntax, preflight, read-only local smoke, pinned Gitleaks v8.30.0 across 11 source/config targets, and the production dependency audit passed. Docker Desktop is still stopped and the daemon pipe inaccessible, so the image, Caddy container, production-like stack, container smoke and disposable-container backup verification remain unvalidated. GitHub Actions must pass after push before this step is complete.
 
 Final pilot release-candidate audit: production preflight now rejects the committed template's documentation domains, sample SMTP/storage credentials and repeated-character application secrets. Focused deployment tests passed 6/6. The final non-container gate passed: `pnpm check` (24 existing image advisories), unit 68/68, PostgreSQL integration 16/16, production build, Playwright 9/9, Prisma validation, production dependency audit with no known vulnerabilities, Gitleaks across 11 targets, and `git diff --check`. A synthetic ignored production configuration passed preflight and Compose parsing. Docker Desktop remains stopped and its daemon pipe inaccessible; production image, Caddy, container health, container smoke, disposable tenant provisioning, backup and restore cannot be accepted. The current patch also awaits both GitHub workflows after push. Do not mark this release ready.
+
+## Identity V2 — SMS providers and configurable profiles
+
+- [x] Provider-neutral registry and first Kavenegar VerifyLookup adapter; typed encrypted configuration and platform allowance.
+- [x] Official Better Auth phone and username plugins, canonical Iranian phones, tenant uniqueness and OTP-only phone changes.
+- [x] Tenant method configuration and administrator recovery; existing email/Google flows retained.
+- [x] Bounded participant profile builder, protected identity fields and private staff views.
+- [x] Focused unit and real PostgreSQL identity checks before full gates.
+- [x] Full local release gate and browser validation completed.
+- [ ] GitHub Actions green for the pushed Identity V2 commit.
+
+No custom-domain, deployment, payment, attendance or certificate feature work is included.
+
+Identity V2 final local results: pnpm check passed (93 warnings and 3 informational diagnostics; no errors), unit tests 93/93 across 17 files, real PostgreSQL integration tests 30/30 across 3 files, production build succeeded, Playwright 10/10 including teardown, Prisma tenant validation passed, and dependency audit found no known vulnerabilities. Focused identity PostgreSQL tests passed 14/14 before the final gate. The final Gitleaks working-tree scan is recorded in docs/TESTING.md. Two initial full browser attempts failed on the existing public provisioning probe (fetch TypeError before any HTTP status); its focused rerun and the final full suite passed without changing the probe, health assertion or timeouts. GitHub Actions has not run on this uncommitted change; completion remains pending its quality gate.

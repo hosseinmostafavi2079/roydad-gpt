@@ -44,6 +44,10 @@ export default async function globalSetup(): Promise<void> {
     );
   }
   writeFileSync(mailOutboxPath, "", { mode: 0o600 });
+  const smsOutbox = path.resolve(process.env.EVENTOS_E2E_SMS_HTTP_OUTBOX ?? "");
+  if (!smsOutbox.startsWith(`${tempRoot}${path.sep}eventos-e2e-sms-`))
+    throw new Error("Invalid E2E SMS outbox");
+  writeFileSync(smsOutbox, "", { mode: 0o600 });
 
   const seeded = spawnSync(
     process.execPath,

@@ -87,4 +87,20 @@ describe("server configuration", () => {
       }),
     ).toThrow(/Test mail transport is unavailable in production/);
   });
+  it("rejects test SMS in production without any E2E exception", () => {
+    expect(parseServerConfig(validConfig).SMS_TRANSPORT).toBe("provider");
+    expect(() =>
+      parseServerConfig({
+        ...validConfig,
+        NODE_ENV: "production",
+        SMS_TRANSPORT: "test",
+        SMTP_URL: "smtps://mail.example.com",
+        TENANT_BOOTSTRAP_ENCRYPTION_KEY: "a".repeat(32),
+      }),
+    ).toThrow("Test SMS transport is unavailable in production");
+    expect(
+      parseServerConfig({ ...validConfig, SMS_TRANSPORT: "test" })
+        .SMS_TRANSPORT,
+    ).toBe("test");
+  });
 });
