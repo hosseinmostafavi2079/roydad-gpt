@@ -3,14 +3,13 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-const tenantContexts = vi.hoisted(() => new Map<string, unknown>());
-vi.mock("@/modules/tenants/resolver", () => ({
-  resolveTenantContext: async (host: string) => {
-    const tenant = tenantContexts.get(host.split(":")[0] ?? "");
-    if (!tenant) throw new Error("Unknown test tenant");
-    return tenant;
-  },
-}));
+const pageHeaders = vi.hoisted(() => ({ value: new Headers() }));
+vi.mock("next/headers", () => ({ headers: async () => pageHeaders.value }));
+import TenantLoginPage from "@/app/login/page";
+import AuthContinuePage from "@/app/auth/continue/page";
+import { resolveTenantContext } from "@/modules/tenants/resolver";
+import { resolveTenantRequest } from "@/modules/tenant-identity/request-auth";
+import { makeDomainPrimary } from "@/modules/platform/tenants/domains";
 import { GET as settingsGet } from "@/app/api/tenant/identity/settings/route";
 import { GET as profileGet } from "@/app/api/tenant/identity/profile/route";
 import { POST as usernameSet } from "@/app/api/tenant/identity/username/route";
@@ -235,8 +234,6 @@ describe("Identity V2 real PostgreSQL", () => {
       throw new Error("Disposable local PostgreSQL is required.");
     a = context(await makeFixture());
     b = context(await makeFixture());
-    tenantContexts.set(a.hostname, a);
-    tenantContexts.set(b.hostname, b);
     for (const tenant of [a, b]) {
       await getControlPool().query(
         `INSERT INTO tenants (id,slug,legal_name,display_name,status,plan_id,created_by) SELECT $1,$2,'Identity fixture','Identity fixture','ACTIVE',id,'identity-v2-test' FROM plans LIMIT 1`,
@@ -246,11 +243,37 @@ describe("Identity V2 real PostgreSQL", () => {
         "INSERT INTO tenant_sms_provider_allowlist (tenant_id,provider_key,allowed) VALUES ($1,'KAVENEGAR',$2)",
         [tenant.tenantId, tenant === a],
       );
+      await getControlPool().query(
+        "INSERT INTO tenant_database_registry(tenant_id,database_name,migration_version,last_health_state) VALUES($1,$2,'0014_identity_v2','HEALTHY')",
+        [tenant.tenantId, tenant.databaseName],
+      );
+      await getControlPool().query(
+        "INSERT INTO tenant_branding(tenant_id,brand_name,updated_by) VALUES($1,$2,'identity-v2-test')",
+        [tenant.tenantId, tenant.branding.brandName],
+      );
+      await getControlPool().query(
+        "INSERT INTO tenant_domains(tenant_id,hostname,domain_type,is_primary,verified_at,created_by) VALUES($1,$2,'PLATFORM_SUBDOMAIN',true,now(),'identity-v2-test')",
+        [tenant.tenantId, tenant.hostname],
+      );
+      for (const [key, enabled] of Object.entries(tenant.features))
+        await getControlPool().query(
+          "INSERT INTO tenant_features(tenant_id,feature_key,enabled,updated_by) VALUES($1,$2,$3,'identity-v2-test')",
+          [tenant.tenantId, key, enabled],
+        );
+      for (const [key, value] of Object.entries(tenant.limits))
+        await getControlPool().query(
+          "INSERT INTO tenant_limits(tenant_id,limit_key,limit_value,updated_by) VALUES($1,$2,$3,'identity-v2-test')",
+          [tenant.tenantId, key, value],
+        );
     }
   }, 120000);
   afterAll(async () => {
     clearTenantAuthCache();
     for (const fixture of fixtures) {
+      await getControlPool().query(
+        "DELETE FROM tenant_database_registry WHERE tenant_id=$1",
+        [fixture.tenantId],
+      );
       await getControlPool().query(
         "DELETE FROM tenant_sms_provider_allowlist WHERE tenant_id=$1",
         [fixture.tenantId],
@@ -735,6 +758,105 @@ describe("Identity V2 real PostgreSQL", () => {
     expect(body).not.toContain("a".repeat(32));
     expect(body).not.toContain("sms_config_ciphertext");
     expect(body).toContain('"otpTemplate":"verify"');
+  });
+  it("authenticates on a verified custom Host and isolates sessions through primary changes", async () => {
+    const hostname = `event-${a.tenantId.slice(0, 8)}.tenant-test.example.test`;
+    const result = await getControlPool().query<{ id: string }>(
+      "INSERT INTO tenant_domains(tenant_id,hostname,domain_type,is_primary,verified_at,created_by) VALUES($1,$2,'CUSTOM',false,now(),'identity-v2-test') RETURNING id",
+      [a.tenantId, hostname],
+    );
+    const custom = await resolveTenantContext(hostname);
+    expect(custom.tenantId).toBe(a.tenantId);
+    expect(custom.branding.brandName).toBe(a.branding.brandName);
+    pageHeaders.value = new Headers({ host: `${hostname}:3000` });
+    const page = await TenantLoginPage({ searchParams: Promise.resolve({}) });
+    expect(page.props.brandName).toBe(a.branding.brandName);
+    const resolved = await resolveTenantRequest(
+      request(custom, "/phone-number/send-otp", {}),
+    );
+    expect(resolved.origin).toBe(`http://${hostname}:3000`);
+    const customPhone = "+989121234590";
+    expect(
+      (
+        await tenantAuthPost(
+          request(custom, "/phone-number/send-otp", {
+            phoneNumber: customPhone,
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    const code = readTestSms(a.tenantId, customPhone)?.code;
+    expect(code).toMatch(/^\d{6}$/);
+    expect(readTestSms(b.tenantId, customPhone)).toBeUndefined();
+    const verified = await tenantAuthPost(
+      request(custom, "/phone-number/verify", {
+        phoneNumber: customPhone,
+        code,
+        username: "custom_host_person",
+        password,
+        profile: {
+          first_name: "Custom",
+          last_name: "Host",
+          occupation: "Tester",
+        },
+      }),
+    );
+    expect(verified.status, await verified.clone().text()).toBe(200);
+    const customCookie = verified.headers
+      .getSetCookie()
+      .map((value) => value.split(";")[0])
+      .join("; ");
+    expect(
+      verified.headers
+        .getSetCookie()
+        .every((value) => !/;\s*domain=/i.test(value)),
+    ).toBe(true);
+    const login = await tenantAuthPost(
+      request(custom, "/sign-in/username", {
+        username: "custom_host_person",
+        password,
+      }),
+    );
+    expect(login.status, await login.clone().text()).toBe(200);
+    const profileRequest = (host: string) =>
+      new Request(`http://${host}:3000/api/tenant/identity/profile`, {
+        headers: { host: `${host}:3000`, cookie: customCookie },
+      });
+    expect((await profileGet(profileRequest(hostname))).status).toBe(200);
+    pageHeaders.value = new Headers({
+      host: `${hostname}:3000`,
+      cookie: customCookie,
+    });
+    await expect(
+      AuthContinuePage({
+        searchParams: Promise.resolve({ next: "/events/custom-host-event" }),
+      }),
+    ).rejects.toMatchObject({
+      digest: expect.stringContaining(";/events/custom-host-event;"),
+    });
+    expect((await profileGet(profileRequest(b.hostname))).status).toBe(401);
+    const domainId = result.rows[0]?.id;
+    if (!domainId) throw new Error("Missing custom domain fixture");
+    await makeDomainPrimary(
+      a.tenantId,
+      domainId,
+      {
+        adminId: randomUUID(),
+        userId: randomUUID(),
+        email: "gate@example.test",
+        name: "Gate",
+        twoFactorEnabled: false,
+      },
+      randomUUID(),
+    );
+    expect((await resolveTenantContext(hostname)).primaryHostname).toBe(
+      hostname,
+    );
+    expect((await resolveTenantContext(a.hostname)).primaryHostname).toBe(
+      hostname,
+    );
+    expect((await profileGet(profileRequest(hostname))).status).toBe(200);
+    expect((await profileGet(profileRequest(b.hostname))).status).toBe(401);
   });
   it("rejects disabled SMS endpoints and unsafe lockout configuration", async () => {
     const settings = await getIdentitySettings(a);

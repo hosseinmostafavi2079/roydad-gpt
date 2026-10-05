@@ -194,3 +194,13 @@ Final B2 gate: check passed (94 warnings, 3 informational diagnostics), focused 
 - `tests/e2e/domain-management.spec.ts`
 - `tests/e2e/global-teardown.ts`
 - `tests/unit/domain-ui.test.ts`
+
+## B3 combined release regression gate
+
+The identity PostgreSQL suite now uses the real tenant resolver for protected/auth routes instead of a tenant-map mock. Its control-plane fixtures include verified domains, registry health, branding, and feature/limit overrides matching the operational tenant fixtures. Only Next's request-header accessor is supplied by the test when calling server pages.
+
+The combined custom-domain case verifies exact Host resolution and login-page branding, tenant-scoped SMS registration, username/password login, host-only session cookies, a relative event continuation redirect, cross-tenant profile denial, primary switching and retained secondary resolution. It uses disposable real PostgreSQL databases and captured test SMS; no external DNS/SMS service is involved and no sessions are copied between browser hosts.
+
+Local B3 gate (2026-10-05): `pnpm check` passed with 94 warnings and 3 informational diagnostics; units 114/114; PostgreSQL integration 43/43; production build passed; full Playwright 11/11 including teardown; Prisma validation passed; production dependency audit reported no known vulnerabilities; Gitleaks reported no leaks; `git diff --check` passed. The full suite was run once after focused identity tests passed (15/15). Existing clean provisioning and forward upgrade/idempotency coverage reached `0014_identity_v2`; no new migration was necessary.
+
+Focused security review found no regression in tenant/session isolation, strict host/origin checks, TXT proof ownership, primary switching, encrypted SMS configuration, generic OTP logging, or scoped profile/sensitive-field authorization. No application architecture, production configuration, CI workflow or deployment changes are included. GitHub Quality Gates and CodeQL must pass on the pushed B3 commit before the release gate is approved.

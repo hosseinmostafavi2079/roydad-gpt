@@ -275,3 +275,12 @@ B1 final local result: pnpm check passed (93 warnings, 3 informational diagnosti
 Full PostgreSQL/browser regression, deployment and release gates belong to B3.
 
 B2 final local result: pnpm check passed with 94 warnings and 3 informational diagnostics (no errors); focused units 16/16 across 2 files; focused Playwright 1/1 covering all six requested flows and wizard handoff; production build succeeded for the production-mode browser server; git diff --check passed. Seven screenshots were visually inspected. No full regression, real DNS, migration or deployment work was performed.
+
+## B3 — Identity and custom-domain release regression gate
+
+- [x] Replace the identity integration resolver mock with real control-plane domain/registry/branding fixtures and matching feature/limit overrides.
+- [x] Exercise verified custom Host login-page branding, SMS registration, username login, host-only cookies, event continuation, cross-tenant session rejection and primary switching without real DNS or external SMS.
+- [x] Review tenant/host/origin boundaries, domain ownership, SMS secrets/OTP logs and profile PII authorization; no application regression requiring a production-code change was found.
+- [x] Run the full local gate once: check; 114 unit tests; 43 PostgreSQL integration tests; production build; 11 Playwright tests; Prisma validation; production dependency audit; Gitleaks; diff check.
+
+Clean provisioning and the existing forward upgrade/idempotency tests passed through `0014_identity_v2`. No migrations, reset, deployment or feature changes. The starting commit had successful GitHub Quality Gates and CodeQL runs; the B3 commit must independently pass both before release approval.
