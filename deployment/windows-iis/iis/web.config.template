@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- TEMPLATE ONLY. Apply only to a dedicated EventOS site in a later authorized task.
+     Add each VERIFIED tenant host explicitly to BOTH host patterns and SNI bindings.
+     ARR preserveHostHeader=true is a prerequisite, not changed here.
+     Server variables must already be allowed by an IIS administrator. -->
+<configuration>
+  <system.webServer>
+    <rewrite>
+      <rules>
+        <rule name="EventOS reject unknown hosts" stopProcessing="true">
+          <match url=".*" />
+          <conditions><add input="{HTTP_HOST}" pattern="^event\.mediasanat\.ir$" negate="true" /></conditions>
+          <action type="CustomResponse" statusCode="404" statusReason="Not Found" statusDescription="Unknown host" />
+        </rule>
+        <rule name="EventOS HTTPS" stopProcessing="true">
+          <match url="(.*)" />
+          <conditions><add input="{HTTPS}" pattern="^OFF$" /></conditions>
+          <action type="Redirect" url="https://{HTTP_HOST}/{R:1}" redirectType="Permanent" appendQueryString="true" />
+        </rule>
+        <rule name="EventOS loopback backend" stopProcessing="true">
+          <match url="(.*)" />
+          <conditions><add input="{HTTPS}" pattern="^ON$" /></conditions>
+          <serverVariables>
+            <set name="HTTP_X_FORWARDED_PROTO" value="https" />
+            <set name="HTTP_X_FORWARDED_HOST" value="" />
+            <set name="HTTP_X_FORWARDED_FOR" value="{REMOTE_ADDR}" />
+          </serverVariables>
+          <action type="Rewrite" url="http://127.0.0.1:18280/{R:1}" appendQueryString="true" />
+        </rule>
+      </rules>
+    </rewrite>
+  </system.webServer>
+</configuration>

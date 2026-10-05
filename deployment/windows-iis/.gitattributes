@@ -1,0 +1,2 @@
+# WSL bash must receive LF even from a Windows checkout.
+backup.sh text eol=lf
