@@ -8,6 +8,7 @@ import {
 } from "@/modules/program-core/dates";
 import { apiRequest, errorMessage } from "./api-client";
 import { JalaliDateTimeInput } from "./jalali-datetime-input";
+import { AdminDialog, ConfirmationDialog, StatusBadge } from "./admin-ui";
 
 type Session = {
   id: string;
@@ -70,6 +71,7 @@ export function SessionsManager({
     [error, setError] = useState("");
   const [venueId, setVenueId] = useState("");
   const [editing, setEditing] = useState<Session | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Session | null>(null);
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -130,7 +132,6 @@ export function SessionsManager({
     }
   }
   async function cancel(item: Session) {
-    if (!window.confirm(`جلسه «${item.title}» لغو شود؟`)) return;
     setBusy(true);
     setError("");
     try {
@@ -138,6 +139,7 @@ export function SessionsManager({
         method: "POST",
       });
       await refresh();
+      setCancelTarget(null);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -174,164 +176,178 @@ export function SessionsManager({
           {error}
         </p>
       )}
-      {showForm && (
-        <section className="card card-pad section">
-          <h2 className="card-title">
-            {editing ? "ویرایش جلسه" : "جلسه جدید"}
-          </h2>
-          <form
-            key={editing?.id ?? "new"}
-            className="form-grid"
-            onSubmit={save}
-          >
-            <label className="field">
-              <span className="label">اجرا</span>
-              {editing && (
-                <input type="hidden" name="runId" value={editing.run_id} />
-              )}
-              <select
-                className="select"
-                name={editing ? undefined : "runId"}
-                defaultValue={editing?.run_id}
-                disabled={Boolean(editing)}
-                required
-              >
-                {runs
-                  .filter((r) => !["CANCELLED", "COMPLETED"].includes(r.state))
-                  .map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.title} · ظرفیت {r.capacity}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="field">
-              <span className="label">عنوان جلسه</span>
-              <input
-                className="input"
-                name="title"
-                required
-                maxLength={200}
-                defaultValue={editing?.title}
-              />
-            </label>
-            <div className="field">
-              <span className="label">شروع ({timezone})</span>
-              <JalaliDateTimeInput
-                name="startsAt"
-                defaultValue={
-                  editing
-                    ? formatTenantWallInput(editing.starts_at, timezone)
-                    : undefined
-                }
-                required
-              />
-            </div>
-            <div className="field">
-              <span className="label">پایان ({timezone})</span>
-              <JalaliDateTimeInput
-                name="endsAt"
-                defaultValue={
-                  editing
-                    ? formatTenantWallInput(editing.ends_at, timezone)
-                    : undefined
-                }
-                required
-              />
-            </div>
-            <label className="field">
-              <span className="label">شیوه برگزاری</span>
-              <select
-                name="deliveryMode"
-                className="select"
-                defaultValue={editing?.delivery_mode}
-              >
-                {Object.entries(modeLabels).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span className="label">مکان</span>
-              <select
-                name="venueId"
-                className="select"
-                value={venueId}
-                onChange={(e) => setVenueId(e.target.value)}
-              >
-                <option value="">بدون مکان</option>
-                {venues
-                  .filter((v) => v.active)
-                  .map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="field">
-              <span className="label">کلاس</span>
-              <select
-                name="roomId"
-                className="select"
-                defaultValue={editing?.room_id ?? ""}
-              >
-                <option value="">بدون کلاس</option>
-                {selectedVenue?.rooms
-                  .filter((r) => r.active)
-                  .map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name} · ظرفیت {r.capacity}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            {canAssign && (
+      <AdminDialog
+        open={showForm}
+        wide
+        title={editing ? "ویرایش جلسه" : "جلسه جدید"}
+        onClose={() => {
+          if (!busy) setShowForm(false);
+        }}
+      >
+        {showForm && (
+          <section className="card card-pad section">
+            <form
+              key={editing?.id ?? "new"}
+              className="form-grid"
+              onSubmit={save}
+            >
               <label className="field">
-                <span className="label">مدرسان جلسه (خالی = مدرسان اجرا)</span>
+                <span className="label">اجرا</span>
+                {editing && (
+                  <input type="hidden" name="runId" value={editing.run_id} />
+                )}
                 <select
-                  name="instructorIds"
                   className="select"
-                  multiple
-                  size={Math.min(5, Math.max(2, instructors.length))}
-                  defaultValue={editing?.instructors.map((i) => i.id) ?? []}
+                  name={editing ? undefined : "runId"}
+                  defaultValue={editing?.run_id}
+                  disabled={Boolean(editing)}
+                  required
                 >
-                  {instructors
-                    .filter((i) => i.status === "ACTIVE")
-                    .map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.name}
+                  {runs
+                    .filter(
+                      (r) => !["CANCELLED", "COMPLETED"].includes(r.state),
+                    )
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.title} · ظرفیت {r.capacity}
                       </option>
                     ))}
                 </select>
               </label>
-            )}
-            <label className="field field-full">
-              <span className="label">یادداشت</span>
-              <textarea
-                className="textarea"
-                name="notes"
-                maxLength={5000}
-                defaultValue={editing?.notes ?? ""}
-              />
-            </label>
-            <div className="form-actions field-full">
-              <button type="submit" className="btn btn-primary" disabled={busy}>
-                {editing ? "ذخیره تغییرات" : "ثبت جلسه"}
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setShowForm(false)}
-              >
-                انصراف
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
+              <label className="field">
+                <span className="label">عنوان جلسه</span>
+                <input
+                  className="input"
+                  name="title"
+                  required
+                  maxLength={200}
+                  defaultValue={editing?.title}
+                />
+              </label>
+              <div className="field">
+                <span className="label">شروع ({timezone})</span>
+                <JalaliDateTimeInput
+                  name="startsAt"
+                  defaultValue={
+                    editing
+                      ? formatTenantWallInput(editing.starts_at, timezone)
+                      : undefined
+                  }
+                  required
+                />
+              </div>
+              <div className="field">
+                <span className="label">پایان ({timezone})</span>
+                <JalaliDateTimeInput
+                  name="endsAt"
+                  defaultValue={
+                    editing
+                      ? formatTenantWallInput(editing.ends_at, timezone)
+                      : undefined
+                  }
+                  required
+                />
+              </div>
+              <label className="field">
+                <span className="label">شیوه برگزاری</span>
+                <select
+                  name="deliveryMode"
+                  className="select"
+                  defaultValue={editing?.delivery_mode}
+                >
+                  {Object.entries(modeLabels).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span className="label">مکان</span>
+                <select
+                  name="venueId"
+                  className="select"
+                  value={venueId}
+                  onChange={(e) => setVenueId(e.target.value)}
+                >
+                  <option value="">بدون مکان</option>
+                  {venues
+                    .filter((v) => v.active)
+                    .map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="field">
+                <span className="label">کلاس</span>
+                <select
+                  name="roomId"
+                  className="select"
+                  defaultValue={editing?.room_id ?? ""}
+                >
+                  <option value="">بدون کلاس</option>
+                  {selectedVenue?.rooms
+                    .filter((r) => r.active)
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} · ظرفیت {r.capacity}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {canAssign && (
+                <label className="field">
+                  <span className="label">
+                    مدرسان جلسه (خالی = مدرسان اجرا)
+                  </span>
+                  <select
+                    name="instructorIds"
+                    className="select"
+                    multiple
+                    size={Math.min(5, Math.max(2, instructors.length))}
+                    defaultValue={editing?.instructors.map((i) => i.id) ?? []}
+                  >
+                    {instructors
+                      .filter((i) => i.status === "ACTIVE")
+                      .map((i) => (
+                        <option key={i.id} value={i.id}>
+                          {i.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              )}
+              <label className="field field-full">
+                <span className="label">یادداشت</span>
+                <textarea
+                  className="textarea"
+                  name="notes"
+                  maxLength={5000}
+                  defaultValue={editing?.notes ?? ""}
+                />
+              </label>
+              <div className="form-actions field-full">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={busy}
+                >
+                  {editing ? "ذخیره تغییرات" : "ثبت جلسه"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowForm(false)}
+                >
+                  انصراف
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
+      </AdminDialog>
       <section className="card">
         {loading ? (
           <p className="card-pad">در حال بارگذاری…</p>
@@ -371,25 +387,18 @@ export function SessionsManager({
                     <td>{item.room_name ?? item.venue_name ?? "—"}</td>
                     <td>{modeLabels[item.delivery_mode]}</td>
                     <td>
-                      <span className="badge badge-green">
-                        {item.status === "SCHEDULED"
-                          ? "برنامه‌ریزی‌شده"
-                          : item.status === "CANCELLED"
-                            ? "لغوشده"
-                            : "تکمیل‌شده"}
-                      </span>
+                      <StatusBadge status={item.status} />
                     </td>
                     <td>
                       {canManage && item.status === "SCHEDULED" && (
                         <button
                           type="button"
-                          className="btn btn-small btn-secondary"
+                          className="admin-action admin-action-info"
                           disabled={busy}
                           onClick={() => {
                             setEditing(item);
                             setVenueId(item.venue_id ?? "");
                             setShowForm(true);
-                            window.scrollTo({ top: 0, behavior: "smooth" });
                           }}
                         >
                           ویرایش
@@ -398,9 +407,9 @@ export function SessionsManager({
                       {canManage && item.status === "SCHEDULED" && (
                         <button
                           type="button"
-                          className="btn btn-small btn-danger"
+                          className="admin-action admin-action-danger"
                           disabled={busy}
-                          onClick={() => void cancel(item)}
+                          onClick={() => setCancelTarget(item)}
                         >
                           لغو
                         </button>
@@ -413,6 +422,17 @@ export function SessionsManager({
           </div>
         )}
       </section>
+      <ConfirmationDialog
+        open={cancelTarget !== null}
+        title="لغو جلسه"
+        description={`جلسه «${cancelTarget?.title ?? ""}» لغو شود؟`}
+        busy={busy}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={() => {
+          if (cancelTarget) void cancel(cancelTarget);
+        }}
+        confirmText="لغو جلسه"
+      />
     </main>
   );
 }

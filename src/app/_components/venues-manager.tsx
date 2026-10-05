@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiRequest, errorMessage } from "./api-client";
+import { AdminDialog } from "./admin-ui";
 
 type Venue = {
   id: string;
@@ -131,74 +132,81 @@ export function VenuesManager({ canManage }: { canManage: boolean }) {
           {error}
         </p>
       )}
-      {showVenue && (
-        <section className="card card-pad section">
-          <h2 className="card-title">
-            {editingVenue ? "ویرایش مکان" : "مکان جدید"}
-          </h2>
-          <form
-            key={editingVenue?.id ?? "new"}
-            className="form-grid"
-            onSubmit={addVenue}
-          >
-            <label className="field">
-              <span className="label">نام</span>
-              <input
-                className="input"
-                name="name"
-                required
-                defaultValue={editingVenue?.name}
-              />
-            </label>
-            <label className="field">
-              <span className="label">شهر</span>
-              <input
-                className="input"
-                name="city"
-                defaultValue={editingVenue?.city}
-              />
-            </label>
-            <label className="field field-full">
-              <span className="label">نشانی</span>
-              <input
-                className="input"
-                name="address"
-                defaultValue={editingVenue?.address}
-              />
-            </label>
-            <label className="field field-full">
-              <span className="label">توضیح</span>
-              <textarea
-                className="textarea"
-                name="description"
-                defaultValue={editingVenue?.description}
-              />
-            </label>
-            <label className="field">
-              <span>
+      <AdminDialog
+        open={showVenue}
+        title={editingVenue ? "ویرایش مکان" : "مکان جدید"}
+        onClose={() => !busy && setShowVenue(false)}
+      >
+        {showVenue && (
+          <section className="card card-pad section">
+            <form
+              key={editingVenue?.id ?? "new"}
+              className="form-grid"
+              onSubmit={addVenue}
+            >
+              <label className="field">
+                <span className="label">نام</span>
                 <input
-                  type="checkbox"
-                  name="active"
-                  defaultChecked={editingVenue?.active ?? true}
-                />{" "}
-                فعال
-              </span>
-            </label>
-            <div className="form-actions field-full">
-              <button type="submit" className="btn btn-primary" disabled={busy}>
-                ذخیره
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setShowVenue(false)}
-              >
-                انصراف
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
+                  className="input"
+                  name="name"
+                  required
+                  defaultValue={editingVenue?.name}
+                />
+              </label>
+              <label className="field">
+                <span className="label">شهر</span>
+                <input
+                  className="input"
+                  name="city"
+                  defaultValue={editingVenue?.city}
+                />
+              </label>
+              <label className="field field-full">
+                <span className="label">نشانی</span>
+                <input
+                  className="input"
+                  name="address"
+                  defaultValue={editingVenue?.address}
+                />
+              </label>
+              <label className="field field-full">
+                <span className="label">توضیح</span>
+                <textarea
+                  className="textarea"
+                  name="description"
+                  defaultValue={editingVenue?.description}
+                />
+              </label>
+              <label className="field">
+                <span>
+                  <input
+                    type="checkbox"
+                    name="active"
+                    defaultChecked={editingVenue?.active ?? true}
+                  />{" "}
+                  فعال
+                </span>
+              </label>
+              <div className="form-actions field-full">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={busy}
+                >
+                  ذخیره
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowVenue(false)}
+                >
+                  انصراف
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
+      </AdminDialog>
       {loading ? (
         <p>در حال بارگذاری…</p>
       ) : venues.length === 0 ? (
@@ -224,11 +232,10 @@ export function VenuesManager({ canManage }: { canManage: boolean }) {
               {canManage && (
                 <button
                   type="button"
-                  className="btn btn-small btn-secondary"
+                  className="admin-action admin-action-info"
                   onClick={() => {
                     setEditingVenue(venue);
                     setShowVenue(true);
-                    window.scrollTo({ top: 0, behavior: "smooth" });
                   }}
                 >
                   ویرایش مکان
@@ -245,7 +252,7 @@ export function VenuesManager({ canManage }: { canManage: boolean }) {
                     {canManage && (
                       <button
                         type="button"
-                        className="btn btn-small btn-secondary"
+                        className="admin-action admin-action-info"
                         onClick={() => {
                           setRoomFor(venue.id);
                           setEditingRoom(room);
@@ -269,68 +276,74 @@ export function VenuesManager({ canManage }: { canManage: boolean }) {
                   افزودن کلاس
                 </button>
               )}
-              {roomFor === venue.id && (
-                <form
-                  key={editingRoom?.id ?? "new"}
-                  className="form-grid"
-                  onSubmit={addRoom}
-                >
-                  <label className="field">
-                    <span className="label">نام کلاس</span>
-                    <input
-                      className="input"
-                      name="name"
-                      required
-                      defaultValue={editingRoom?.name}
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="label">ظرفیت</span>
-                    <input
-                      className="input"
-                      name="capacity"
-                      type="number"
-                      min="1"
-                      required
-                      defaultValue={editingRoom?.capacity}
-                    />
-                  </label>
-                  <label className="field field-full">
-                    <span className="label">توضیح</span>
-                    <input
-                      className="input"
-                      name="description"
-                      defaultValue={editingRoom?.description}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>
+              <AdminDialog
+                open={roomFor === venue.id}
+                title={editingRoom ? "ویرایش کلاس" : "افزودن کلاس"}
+                onClose={() => !busy && setRoomFor("")}
+              >
+                {roomFor === venue.id && (
+                  <form
+                    key={editingRoom?.id ?? "new"}
+                    className="form-grid"
+                    onSubmit={addRoom}
+                  >
+                    <label className="field">
+                      <span className="label">نام کلاس</span>
                       <input
-                        type="checkbox"
-                        name="active"
-                        defaultChecked={editingRoom?.active ?? true}
-                      />{" "}
-                      فعال
-                    </span>
-                  </label>
-                  <div className="form-actions field-full">
-                    <button
-                      type="submit"
-                      className="btn btn-primary"
-                      disabled={busy}
-                    >
-                      ذخیره کلاس
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => setRoomFor("")}
-                    >
-                      انصراف
-                    </button>
-                  </div>
-                </form>
-              )}
+                        className="input"
+                        name="name"
+                        required
+                        defaultValue={editingRoom?.name}
+                      />
+                    </label>
+                    <label className="field">
+                      <span className="label">ظرفیت</span>
+                      <input
+                        className="input"
+                        name="capacity"
+                        type="number"
+                        min="1"
+                        required
+                        defaultValue={editingRoom?.capacity}
+                      />
+                    </label>
+                    <label className="field field-full">
+                      <span className="label">توضیح</span>
+                      <input
+                        className="input"
+                        name="description"
+                        defaultValue={editingRoom?.description}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>
+                        <input
+                          type="checkbox"
+                          name="active"
+                          defaultChecked={editingRoom?.active ?? true}
+                        />{" "}
+                        فعال
+                      </span>
+                    </label>
+                    <div className="form-actions field-full">
+                      <button
+                        type="submit"
+                        className="btn btn-primary"
+                        disabled={busy}
+                      >
+                        ذخیره کلاس
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => setRoomFor("")}
+                      >
+                        انصراف
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </AdminDialog>
             </section>
           ))}
         </div>

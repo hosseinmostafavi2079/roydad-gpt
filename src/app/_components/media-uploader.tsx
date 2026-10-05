@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { MediaKind } from "@/modules/media/validation";
+import { FileText } from "lucide-react";
+import { mediaKinds, type MediaKind } from "@/modules/media/validation";
 
 export function MediaUploader({
   kind,
@@ -20,6 +21,7 @@ export function MediaUploader({
 }) {
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const isVideo = kind === "PROGRAM_VIDEO";
   const isPdf = kind === "INSTRUCTOR_RESUME";
   const accept = isVideo
@@ -31,6 +33,14 @@ export function MediaUploader({
         : "image/jpeg,image/png,image/webp";
   const path = `/api/tenant/media?${new URLSearchParams({ kind, ...(programId ? { programId } : {}), ...(resourceId ? { resourceId } : {}) })}`;
   function upload(file: File) {
+    if (
+      !mediaKinds[kind].types.some((type) => type === file.type) ||
+      file.size === 0 ||
+      file.size > mediaKinds[kind].maxBytes
+    ) {
+      setError("نوع یا اندازه فایل مجاز نیست.");
+      return;
+    }
     const form = new FormData();
     form.set("file", file);
     const xhr = new XMLHttpRequest();
@@ -66,13 +76,22 @@ export function MediaUploader({
       return;
     }
     onChange("");
+    setConfirmRemove(false);
   }
   return (
-    <div className="media-uploader">
+    <div className={`media-uploader ${isPdf ? "admin-resume-uploader" : ""}`}>
       <strong>{label}</strong>
       {value &&
         (isPdf ? (
-          <a href={value}>رزومهٔ بارگذاری‌شده (PDF)</a>
+          <div className="admin-resume-file">
+            <FileText size={28} aria-hidden="true" />
+            <div>
+              <strong>فایل رزومه PDF</strong>
+              <a href={value} target="_blank" rel="noopener noreferrer">
+                رزومهٔ بارگذاری‌شده (PDF)
+              </a>
+            </div>
+          </div>
         ) : isVideo ? (
           // biome-ignore lint/a11y/useMediaCaption: Uploaded media has no caption asset in this product version.
           <video controls preload="metadata" src={value} />
@@ -96,7 +115,7 @@ export function MediaUploader({
         <button
           className="btn btn-danger btn-small"
           type="button"
-          onClick={() => void remove()}
+          onClick={() => setConfirmRemove(true)}
         >
           حذف
         </button>
@@ -108,6 +127,25 @@ export function MediaUploader({
         <span className="alert alert-error" role="alert">
           {error}
         </span>
+      )}
+      {confirmRemove && (
+        <fieldset className="admin-inline-confirm">
+          <legend>{`تأیید حذف ${label}`}</legend>
+          <button
+            type="button"
+            className="admin-action admin-action-neutral"
+            onClick={() => setConfirmRemove(false)}
+          >
+            انصراف
+          </button>
+          <button
+            type="button"
+            className="admin-action admin-action-danger"
+            onClick={() => void remove()}
+          >
+            حذف رسانه
+          </button>
+        </fieldset>
       )}
     </div>
   );

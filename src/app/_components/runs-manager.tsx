@@ -9,6 +9,7 @@ import {
 } from "@/modules/program-core/dates";
 import { apiRequest, errorMessage } from "./api-client";
 import { JalaliDateTimeInput } from "./jalali-datetime-input";
+import { AdminDialog, ConfirmationDialog, StatusBadge } from "./admin-ui";
 
 type Program = { id: string; title: string; status: string };
 type Instructor = { id: string; name: string; status: string };
@@ -39,13 +40,6 @@ type Run = {
   instructors: { id: string; name: string }[];
 };
 const value = (data: FormData, key: string) => String(data.get(key) ?? "");
-const stateLabels: Record<string, string> = {
-  DRAFT: "پیش‌نویس",
-  PRIVATE: "خصوصی",
-  PUBLISHED: "منتشرشده",
-  CANCELLED: "لغوشده",
-  COMPLETED: "تکمیل‌شده",
-};
 const modeLabels: Record<string, string> = {
   IN_PERSON: "حضوری",
   ONLINE: "آنلاین",
@@ -78,6 +72,7 @@ export function RunsManager({
     [showForm, setShowForm] = useState(false),
     [error, setError] = useState("");
   const [editing, setEditing] = useState<Run | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Run | null>(null);
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -154,16 +149,12 @@ export function RunsManager({
     run: Run,
     state: "PRIVATE" | "PUBLISHED" | "CANCELLED" | "COMPLETED",
   ) {
-    if (
-      state === "CANCELLED" &&
-      !window.confirm(`اجرای «${run.title}» لغو شود؟`)
-    )
-      return;
     setBusy(true);
     setError("");
     try {
       await apiRequest(`/api/tenant/runs/${run.id}/state`, { body: { state } });
       await refresh();
+      setCancelTarget(null);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -198,262 +189,277 @@ export function RunsManager({
           {error}
         </p>
       )}
-      {showForm && (
-        <section className="card card-pad section">
-          <h2 className="card-title">
-            {editing ? "ویرایش اجرا" : "اجرای جدید"}
-          </h2>
-          <form
-            key={editing?.id ?? "new"}
-            onSubmit={save}
-            className="form-grid"
-          >
-            <label className="field">
-              <span className="label">برنامه</span>
-              {editing && (
-                <input
-                  type="hidden"
-                  name="programId"
-                  value={editing.program_id}
-                />
-              )}
-              <select
-                name={editing ? undefined : "programId"}
-                className="select"
-                defaultValue={editing?.program_id}
-                disabled={Boolean(editing)}
-                required
-              >
-                {programs
-                  .filter((p) => p.status === "ACTIVE")
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.title}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="field">
-              <span className="label">عنوان اجرا</span>
-              <input className="input" name="title" required maxLength={200} />
-            </label>
-            <div className="field">
-              <span className="label">شروع اجرا ({timezone})</span>
-              <JalaliDateTimeInput
-                name="startsAt"
-                defaultValue={
-                  editing
-                    ? formatTenantWallInput(editing.starts_at, timezone)
-                    : undefined
-                }
-                required
-              />
-            </div>
-            <div className="field">
-              <span className="label">پایان اجرا ({timezone})</span>
-              <JalaliDateTimeInput
-                name="endsAt"
-                defaultValue={
-                  editing
-                    ? formatTenantWallInput(editing.ends_at, timezone)
-                    : undefined
-                }
-                required
-              />
-            </div>
-            <div className="field">
-              <span className="label">شروع ثبت‌نام</span>
-              <JalaliDateTimeInput
-                name="registrationStartsAt"
-                defaultValue={
-                  editing?.registration_starts_at
-                    ? formatTenantWallInput(
-                        editing.registration_starts_at,
-                        timezone,
-                      )
-                    : undefined
-                }
-              />
-            </div>
-            <div className="field">
-              <span className="label">پایان ثبت‌نام</span>
-              <JalaliDateTimeInput
-                name="registrationEndsAt"
-                defaultValue={
-                  editing?.registration_ends_at
-                    ? formatTenantWallInput(
-                        editing.registration_ends_at,
-                        timezone,
-                      )
-                    : undefined
-                }
-              />
-            </div>
-            <label className="field">
-              <span className="label">روش برگزاری</span>
-              <select
-                className="select"
-                name="deliveryMode"
-                defaultValue={editing?.delivery_mode}
-              >
-                {Object.entries(modeLabels).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span className="label">حداکثر ظرفیت</span>
-              <input
-                className="input"
-                type="number"
-                min="1"
-                max="100000"
-                name="capacity"
-                defaultValue={editing?.capacity}
-                required
-              />
-            </label>
-            <label className="field">
-              <span className="label">حداقل ظرفیت (اختیاری)</span>
-              <input
-                className="input"
-                type="number"
-                min="1"
-                name="minimumCapacity"
-                defaultValue={editing?.minimum_capacity ?? ""}
-              />
-            </label>
-            <label className="field">
-              <span className="label">مبلغ ثبت‌نام (۰ برای رایگان)</span>
-              <input
-                className="input"
-                type="number"
-                min="0"
-                step="1"
-                max="1000000000000"
-                name="priceAmount"
-                defaultValue={editing?.price_amount ?? "0"}
-                required
-              />
-            </label>
-            <label className="field">
-              <span className="label">واحد پول</span>
-              <input
-                className="input"
-                name="priceCurrency"
-                maxLength={3}
-                pattern="[A-Z]{3}"
-                defaultValue={editing?.price_currency ?? "IRR"}
-                required
-              />
-            </label>
-            <label className="field">
-              <span className="label">مکان پیش‌فرض</span>
-              <select
-                className="select"
-                name="venueId"
-                defaultValue={editing?.venue_id ?? ""}
-              >
-                <option value="">بدون مکان</option>
-                {venues
-                  .filter((v) => v.active)
-                  .map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            {canAssign && (
-              <label className="field field-full">
-                <span className="label">مدرسان (انتخاب چندتایی)</span>
+      <AdminDialog
+        open={showForm}
+        wide
+        title={editing ? "ویرایش اجرا" : "اجرای جدید"}
+        onClose={() => {
+          if (!busy) setShowForm(false);
+        }}
+      >
+        {showForm && (
+          <section className="card card-pad section">
+            <form
+              key={editing?.id ?? "new"}
+              onSubmit={save}
+              className="form-grid"
+            >
+              <label className="field">
+                <span className="label">برنامه</span>
+                {editing && (
+                  <input
+                    type="hidden"
+                    name="programId"
+                    value={editing.program_id}
+                  />
+                )}
                 <select
+                  name={editing ? undefined : "programId"}
                   className="select"
-                  name="instructorIds"
-                  multiple
-                  size={Math.min(5, Math.max(2, instructors.length))}
-                  defaultValue={editing?.instructors.map((i) => i.id) ?? []}
+                  defaultValue={editing?.program_id}
+                  disabled={Boolean(editing)}
+                  required
                 >
-                  {instructors
-                    .filter((i) => i.status === "ACTIVE")
-                    .map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.name}
+                  {programs
+                    .filter((p) => p.status === "ACTIVE")
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title}
                       </option>
                     ))}
                 </select>
               </label>
-            )}
-            <label className="field field-full">
-              <span className="label">یادداشت</span>
-              <textarea
-                className="textarea"
-                name="notes"
-                maxLength={5000}
-                defaultValue={editing?.notes ?? ""}
-              />
-            </label>
-            <label className="field field-full">
-              <span className="label">عنوان سئو (اختیاری)</span>
-              <input
-                name="seoTitle"
-                maxLength={160}
-                defaultValue={editing?.seo_title ?? ""}
-              />
-            </label>
-            <label className="field field-full">
-              <span className="label">توضیح سئو (اختیاری)</span>
-              <textarea
-                name="seoDescription"
-                maxLength={300}
-                defaultValue={editing?.seo_description ?? ""}
-              />
-            </label>
-            <label className="field field-full">
-              <span className="label">
-                مسیر canonical (اختیاری، فقط مسیر همین سایت)
-              </span>
-              <input
-                name="canonicalPath"
-                placeholder="/events/شناسه-اجرا"
-                defaultValue={editing?.canonical_path ?? ""}
-              />
-            </label>
-            <label className="field field-full">
-              <span className="label">تصویر اشتراک‌گذاری (اختیاری)</span>
-              <input
-                name="ogImageUrl"
-                placeholder="/api/media/..."
-                defaultValue={editing?.og_image_url ?? ""}
-              />
-            </label>
-            <label className="field field-full">
-              <span>
+              <label className="field">
+                <span className="label">عنوان اجرا</span>
                 <input
-                  type="checkbox"
-                  name="waitlistEnabled"
-                  defaultChecked={editing?.waitlist_enabled ?? false}
-                />{" "}
-                امکان فهرست انتظار
-              </span>
-            </label>
-            <div className="form-actions field-full">
-              <button type="submit" className="btn btn-primary" disabled={busy}>
-                ذخیره
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setShowForm(false)}
-              >
-                انصراف
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
+                  className="input"
+                  name="title"
+                  required
+                  maxLength={200}
+                />
+              </label>
+              <div className="field">
+                <span className="label">شروع اجرا ({timezone})</span>
+                <JalaliDateTimeInput
+                  name="startsAt"
+                  defaultValue={
+                    editing
+                      ? formatTenantWallInput(editing.starts_at, timezone)
+                      : undefined
+                  }
+                  required
+                />
+              </div>
+              <div className="field">
+                <span className="label">پایان اجرا ({timezone})</span>
+                <JalaliDateTimeInput
+                  name="endsAt"
+                  defaultValue={
+                    editing
+                      ? formatTenantWallInput(editing.ends_at, timezone)
+                      : undefined
+                  }
+                  required
+                />
+              </div>
+              <div className="field">
+                <span className="label">شروع ثبت‌نام</span>
+                <JalaliDateTimeInput
+                  name="registrationStartsAt"
+                  defaultValue={
+                    editing?.registration_starts_at
+                      ? formatTenantWallInput(
+                          editing.registration_starts_at,
+                          timezone,
+                        )
+                      : undefined
+                  }
+                />
+              </div>
+              <div className="field">
+                <span className="label">پایان ثبت‌نام</span>
+                <JalaliDateTimeInput
+                  name="registrationEndsAt"
+                  defaultValue={
+                    editing?.registration_ends_at
+                      ? formatTenantWallInput(
+                          editing.registration_ends_at,
+                          timezone,
+                        )
+                      : undefined
+                  }
+                />
+              </div>
+              <label className="field">
+                <span className="label">روش برگزاری</span>
+                <select
+                  className="select"
+                  name="deliveryMode"
+                  defaultValue={editing?.delivery_mode}
+                >
+                  {Object.entries(modeLabels).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span className="label">حداکثر ظرفیت</span>
+                <input
+                  className="input"
+                  type="number"
+                  min="1"
+                  max="100000"
+                  name="capacity"
+                  defaultValue={editing?.capacity}
+                  required
+                />
+              </label>
+              <label className="field">
+                <span className="label">حداقل ظرفیت (اختیاری)</span>
+                <input
+                  className="input"
+                  type="number"
+                  min="1"
+                  name="minimumCapacity"
+                  defaultValue={editing?.minimum_capacity ?? ""}
+                />
+              </label>
+              <label className="field">
+                <span className="label">مبلغ ثبت‌نام (۰ برای رایگان)</span>
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  step="1"
+                  max="1000000000000"
+                  name="priceAmount"
+                  defaultValue={editing?.price_amount ?? "0"}
+                  required
+                />
+              </label>
+              <label className="field">
+                <span className="label">واحد پول</span>
+                <input
+                  className="input"
+                  name="priceCurrency"
+                  maxLength={3}
+                  pattern="[A-Z]{3}"
+                  defaultValue={editing?.price_currency ?? "IRR"}
+                  required
+                />
+              </label>
+              <label className="field">
+                <span className="label">مکان پیش‌فرض</span>
+                <select
+                  className="select"
+                  name="venueId"
+                  defaultValue={editing?.venue_id ?? ""}
+                >
+                  <option value="">بدون مکان</option>
+                  {venues
+                    .filter((v) => v.active)
+                    .map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              {canAssign && (
+                <label className="field field-full">
+                  <span className="label">مدرسان (انتخاب چندتایی)</span>
+                  <select
+                    className="select"
+                    name="instructorIds"
+                    multiple
+                    size={Math.min(5, Math.max(2, instructors.length))}
+                    defaultValue={editing?.instructors.map((i) => i.id) ?? []}
+                  >
+                    {instructors
+                      .filter((i) => i.status === "ACTIVE")
+                      .map((i) => (
+                        <option key={i.id} value={i.id}>
+                          {i.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              )}
+              <label className="field field-full">
+                <span className="label">یادداشت</span>
+                <textarea
+                  className="textarea"
+                  name="notes"
+                  maxLength={5000}
+                  defaultValue={editing?.notes ?? ""}
+                />
+              </label>
+              <label className="field field-full">
+                <span className="label">عنوان سئو (اختیاری)</span>
+                <input
+                  name="seoTitle"
+                  maxLength={160}
+                  defaultValue={editing?.seo_title ?? ""}
+                />
+              </label>
+              <label className="field field-full">
+                <span className="label">توضیح سئو (اختیاری)</span>
+                <textarea
+                  name="seoDescription"
+                  maxLength={300}
+                  defaultValue={editing?.seo_description ?? ""}
+                />
+              </label>
+              <label className="field field-full">
+                <span className="label">
+                  مسیر canonical (اختیاری، فقط مسیر همین سایت)
+                </span>
+                <input
+                  name="canonicalPath"
+                  placeholder="/events/شناسه-اجرا"
+                  defaultValue={editing?.canonical_path ?? ""}
+                />
+              </label>
+              <label className="field field-full">
+                <span className="label">تصویر اشتراک‌گذاری (اختیاری)</span>
+                <input
+                  name="ogImageUrl"
+                  placeholder="/api/media/..."
+                  defaultValue={editing?.og_image_url ?? ""}
+                />
+              </label>
+              <label className="field field-full">
+                <span>
+                  <input
+                    type="checkbox"
+                    name="waitlistEnabled"
+                    defaultChecked={editing?.waitlist_enabled ?? false}
+                  />{" "}
+                  امکان فهرست انتظار
+                </span>
+              </label>
+              <div className="form-actions field-full">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={busy}
+                >
+                  ذخیره
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowForm(false)}
+                >
+                  انصراف
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
+      </AdminDialog>
       <section className="card">
         {loading ? (
           <p className="card-pad">در حال بارگذاری…</p>
@@ -493,9 +499,7 @@ export function RunsManager({
                     <td>{run.session_count}</td>
                     <td>{run.capacity}</td>
                     <td>
-                      <span className="badge badge-green">
-                        {stateLabels[run.state]}
-                      </span>
+                      <StatusBadge status={run.state} />
                     </td>
                     <td>
                       {registrationEnabled && canEdit && (
@@ -510,12 +514,11 @@ export function RunsManager({
                         !["CANCELLED", "COMPLETED"].includes(run.state) && (
                           <button
                             type="button"
-                            className="btn btn-small btn-secondary"
+                            className="admin-action admin-action-info"
                             disabled={busy}
                             onClick={() => {
                               setEditing(run);
                               setShowForm(true);
-                              window.scrollTo({ top: 0, behavior: "smooth" });
                             }}
                           >
                             ویرایش
@@ -524,7 +527,7 @@ export function RunsManager({
                       {canManage && run.state === "DRAFT" && (
                         <button
                           type="button"
-                          className="btn btn-small btn-secondary"
+                          className="admin-action admin-action-neutral"
                           disabled={busy}
                           onClick={() => void transition(run, "PRIVATE")}
                         >
@@ -535,7 +538,7 @@ export function RunsManager({
                         ["DRAFT", "PRIVATE"].includes(run.state) && (
                           <button
                             type="button"
-                            className="btn btn-small btn-primary"
+                            className="admin-action admin-action-success"
                             disabled={busy}
                             onClick={() => void transition(run, "PUBLISHED")}
                           >
@@ -548,9 +551,9 @@ export function RunsManager({
                         ) && (
                           <button
                             type="button"
-                            className="btn btn-small btn-danger"
+                            className="admin-action admin-action-danger"
                             disabled={busy}
-                            onClick={() => void transition(run, "CANCELLED")}
+                            onClick={() => setCancelTarget(run)}
                           >
                             لغو
                           </button>
@@ -563,6 +566,17 @@ export function RunsManager({
           </div>
         )}
       </section>
+      <ConfirmationDialog
+        open={cancelTarget !== null}
+        title="لغو اجرا"
+        description={`اجرای «${cancelTarget?.title ?? ""}» لغو شود؟`}
+        busy={busy}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={() => {
+          if (cancelTarget) void transition(cancelTarget, "CANCELLED");
+        }}
+        confirmText="لغو اجرا"
+      />
     </main>
   );
 }

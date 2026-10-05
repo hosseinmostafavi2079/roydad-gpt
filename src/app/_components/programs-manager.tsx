@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiRequest, errorMessage } from "./api-client";
 import { MediaUploader } from "./media-uploader";
+import { AdminDialog, ConfirmationDialog, StatusBadge } from "./admin-ui";
 
 type Program = {
   id: string;
@@ -61,9 +62,11 @@ export function ProgramsManager({
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<Program | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<Program | null>(null);
   const [search, setSearch] = useState("");
   const [type, setType] = useState("");
   const [status, setStatus] = useState("");
+  const [formTab, setFormTab] = useState("basic");
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
@@ -116,6 +119,7 @@ export function ProgramsManager({
           lead_instructor: null,
           run_count: 0,
         });
+        setFormTab("media");
         setShowForm(true);
       } else {
         setShowForm(false);
@@ -129,8 +133,6 @@ export function ProgramsManager({
     }
   }
   async function changeState(item: Program, state: "ACTIVE" | "ARCHIVED") {
-    if (state === "ARCHIVED" && !window.confirm(`«${item.title}» بایگانی شود؟`))
-      return;
     setBusy(true);
     setError("");
     try {
@@ -139,6 +141,7 @@ export function ProgramsManager({
         body: { state },
       });
       await refresh();
+      setArchiveTarget(null);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -214,6 +217,7 @@ export function ProgramsManager({
             className="btn btn-primary"
             onClick={() => {
               setEditing(null);
+              setFormTab("basic");
               setShowForm(true);
             }}
           >
@@ -226,93 +230,187 @@ export function ProgramsManager({
           {error}
         </p>
       )}
-      {showForm && (
-        <section className="card card-pad section">
-          <h2 className="card-title">
-            {editing ? "ویرایش برنامه" : "برنامه جدید"}
-          </h2>
-          <form key={editing?.id ?? "new"} onSubmit={save}>
-            <h3>اطلاعات اصلی</h3>
-            <div className="form-grid">
-              {field("title", "عنوان")}
-              {field("slug", "شناسه لاتین")}
-              <label className="field">
-                <span className="label">نوع برنامه</span>
-                <select
-                  name="type"
-                  className="select"
-                  defaultValue={editing?.type ?? "COURSE"}
-                >
-                  {Object.entries(types).map(([code, label]) => (
-                    <option key={code} value={code}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {field("category", "دسته‌بندی")}
-              {field("shortDescription", "توضیح کوتاه", "textarea", true)}
-            </div>
-            <h3>محتوا و سرفصل‌ها</h3>
-            <div className="form-grid">
-              {field("description", "توضیحات", "textarea", true)}
-              {field("objectives", "اهداف", "textarea", true)}
-              {field("prerequisites", "پیش‌نیازها", "textarea", true)}
-              {field("intendedAudience", "مخاطبان", "textarea", true)}
-            </div>
-            <h3>زمان‌بندی و انتشار</h3>
-            <div className="form-grid">
-              {field("level", "سطح")}
-              {field("duration", "مدت پیش‌فرض (دقیقه)", "number")}
-            </div>
-            <h3>رسانه</h3>
-            {editing ? (
-              <div className="media-grid">
-                <MediaUploader
-                  kind="PROGRAM_COVER"
-                  programId={editing.id}
-                  label="تصویر شاخص / کاور"
-                  value={editing.cover_url ?? ""}
-                  onChange={(url) =>
-                    setEditing((current) =>
-                      current ? { ...current, cover_url: url } : current,
-                    )
-                  }
-                />
-                <MediaUploader
-                  kind="PROGRAM_VIDEO"
-                  programId={editing.id}
-                  label="ویدیوی معرفی MP4"
-                  value={editing.video_url ?? ""}
-                  onChange={(url) =>
-                    setEditing((current) =>
-                      current ? { ...current, video_url: url } : current,
-                    )
-                  }
-                />
-              </div>
-            ) : (
-              <p className="hint">
-                برای بارگذاری تصویر و ویدیو، ابتدا برنامه را ذخیره کنید.
-              </p>
-            )}
-            <div className="form-actions">
-              <button type="submit" className="btn btn-primary" disabled={busy}>
-                {busy ? "در حال ذخیره…" : "ذخیره"}
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setShowForm(false)}
+      <AdminDialog
+        open={showForm}
+        wide
+        title={editing ? "ویرایش برنامه" : "برنامه جدید"}
+        onClose={() => {
+          if (!busy) setShowForm(false);
+        }}
+      >
+        {showForm && (
+          <section className="admin-program-editor">
+            <form key={editing?.id ?? "new"} onSubmit={save}>
+              <nav
+                className="instructor-editor-tabs"
+                aria-label="بخش‌های ویرایش برنامه"
               >
-                انصراف
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
-      <section className="card">
-        <div className="card-pad form-grid">
+                {(
+                  [
+                    ["basic", "اطلاعات اصلی"],
+                    ["content", "محتوا"],
+                    ["media", "رسانه"],
+                    ["schedule", "زمان‌بندی"],
+                    ["instructor", "مدرس"],
+                    ["registration", "ثبت‌نام"],
+                    ["publication", "انتشار"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`admin-action ${formTab === key ? "admin-action-info" : "admin-action-neutral"}`}
+                    aria-current={formTab === key ? "page" : undefined}
+                    onClick={() => setFormTab(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+              <section hidden={formTab !== "basic"}>
+                <h3>اطلاعات اصلی</h3>
+                <div className="form-grid">
+                  {field("title", "عنوان")}
+                  {field("slug", "شناسه لاتین")}
+                  <label className="field">
+                    <span className="label">نوع برنامه</span>
+                    <select
+                      name="type"
+                      className="select"
+                      defaultValue={editing?.type ?? "COURSE"}
+                    >
+                      {Object.entries(types).map(([code, label]) => (
+                        <option key={code} value={code}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {field("category", "دسته‌بندی")}
+                  {field("shortDescription", "توضیح کوتاه", "textarea", true)}
+                </div>
+              </section>
+              <section hidden={formTab !== "content"}>
+                <h3>محتوا و سرفصل‌ها</h3>
+                <div className="form-grid">
+                  {field("description", "توضیحات", "textarea", true)}
+                  {field("objectives", "اهداف", "textarea", true)}
+                  {field("prerequisites", "پیش‌نیازها", "textarea", true)}
+                  {field("intendedAudience", "مخاطبان", "textarea", true)}
+                </div>
+              </section>
+              <section hidden={formTab !== "schedule"}>
+                <h3>زمان‌بندی</h3>
+                <div className="form-grid">
+                  {field("level", "سطح")}
+                  {field("duration", "مدت پیش‌فرض (دقیقه)", "number")}
+                </div>
+                <p className="hint">
+                  زمان اجرا و جلسه‌ها را از بخش اجراها تنظیم کنید.
+                </p>
+              </section>
+              <section hidden={formTab !== "media"}>
+                <h3>رسانه</h3>
+                {editing ? (
+                  <div className="media-grid">
+                    <MediaUploader
+                      kind="PROGRAM_COVER"
+                      programId={editing.id}
+                      label="تصویر شاخص / کاور"
+                      value={editing.cover_url ?? ""}
+                      onChange={(url) =>
+                        setEditing((current) =>
+                          current ? { ...current, cover_url: url } : current,
+                        )
+                      }
+                    />
+                    <MediaUploader
+                      kind="PROGRAM_VIDEO"
+                      programId={editing.id}
+                      label="ویدیوی معرفی MP4"
+                      value={editing.video_url ?? ""}
+                      onChange={(url) =>
+                        setEditing((current) =>
+                          current ? { ...current, video_url: url } : current,
+                        )
+                      }
+                    />
+                  </div>
+                ) : (
+                  <p className="hint">
+                    برای بارگذاری تصویر و ویدیو، ابتدا برنامه را ذخیره کنید.
+                  </p>
+                )}
+              </section>
+              <section hidden={formTab !== "instructor"}>
+                <h3>مدرس</h3>
+                <p className="hint">
+                  مدرس را برای هر اجرا در بخش اجراها تعیین کنید.
+                </p>
+              </section>
+              <section hidden={formTab !== "registration"}>
+                <h3>ثبت‌نام</h3>
+                <p className="hint">
+                  تنظیمات و فرم ثبت‌نام برای هر اجرا در بخش اجراها مدیریت می‌شود.
+                </p>
+              </section>
+              <section hidden={formTab !== "publication"}>
+                <h3>انتشار</h3>
+                <StatusBadge status={editing?.status ?? "DRAFT"} />
+                <p className="hint">
+                  پس از ذخیره، انتشار از فهرست برنامه‌ها انجام می‌شود.
+                </p>
+              </section>
+              <div className="form-actions">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={busy}
+                >
+                  {busy ? "در حال ذخیره…" : "ذخیره"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowForm(false)}
+                >
+                  انصراف
+                </button>
+              </div>
+            </form>
+          </section>
+        )}
+      </AdminDialog>
+      <div className="admin-metrics">
+        {(
+          [
+            ["کل برنامه‌ها", items.length],
+            ["فعال", items.filter((item) => item.status === "ACTIVE").length],
+            ["پیش‌نویس", items.filter((item) => item.status === "DRAFT").length],
+            [
+              "دارای اجرای آینده",
+              items.filter(
+                (item) =>
+                  item.next_run_at &&
+                  new Date(item.next_run_at).getTime() > Date.now(),
+              ).length,
+            ],
+          ] as const
+        ).map(([label, count]) => (
+          <div key={label}>
+            <span>{label}</span>
+            <strong>{count.toLocaleString("fa-IR")}</strong>
+          </div>
+        ))}
+      </div>
+      <section className="card admin-data-panel">
+        <div className="admin-panel-heading">
+          <div>
+            <h2>فهرست برنامه‌ها</h2>
+            <p>جستجو و مدیریت دوره‌ها و رویدادها</p>
+          </div>
+        </div>
+        <div className="admin-program-toolbar">
           <label className="field">
             <span className="label">جستجو</span>
             <input
@@ -359,7 +457,7 @@ export function ProgramsManager({
           <p className="empty">هنوز برنامه‌ای ثبت نشده است.</p>
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="admin-table admin-card-table">
               <thead>
                 <tr>
                   <th>تصویر و عنوان</th>
@@ -374,20 +472,27 @@ export function ProgramsManager({
               <tbody>
                 {items.map((item) => (
                   <tr key={item.id}>
-                    <td>
-                      {item.cover_url && (
+                    <td data-label="برنامه">
+                      {item.cover_url ? (
                         <img
                           className="program-list-cover"
                           src={item.cover_url}
                           alt=""
                           loading="lazy"
                         />
+                      ) : (
+                        <span
+                          className="program-list-cover admin-cover-placeholder"
+                          aria-hidden="true"
+                        >
+                          {item.title.slice(0, 1)}
+                        </span>
                       )}
                       <span className="table-name">{item.title}</span>
                       <span className="table-sub">{item.slug}</span>
                     </td>
-                    <td>{types[item.type] ?? item.type}</td>
-                    <td>
+                    <td data-label="نوع">{types[item.type] ?? item.type}</td>
+                    <td data-label="زمان بعدی">
                       {item.next_run_at
                         ? new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
                             dateStyle: "medium",
@@ -395,22 +500,20 @@ export function ProgramsManager({
                           }).format(new Date(item.next_run_at))
                         : "—"}
                     </td>
-                    <td>{item.lead_instructor || "—"}</td>
-                    <td>
-                      <span className="badge badge-green">
-                        {states[item.status] ?? item.status}
-                      </span>
+                    <td data-label="مدرس">{item.lead_instructor || "—"}</td>
+                    <td data-label="وضعیت">
+                      <StatusBadge status={item.status} />
                     </td>
-                    <td>{item.run_count}</td>
-                    <td>
+                    <td data-label="اجراها">{item.run_count}</td>
+                    <td data-label="عملیات">
                       {canEdit && item.status !== "ARCHIVED" && (
                         <button
                           type="button"
-                          className="btn btn-small btn-secondary"
+                          className="admin-action admin-action-info"
                           onClick={() => {
                             setEditing(item);
+                            setFormTab("basic");
                             setShowForm(true);
-                            window.scrollTo({ top: 0, behavior: "smooth" });
                           }}
                         >
                           ویرایش
@@ -419,7 +522,7 @@ export function ProgramsManager({
                       {canPublish && item.status === "DRAFT" && (
                         <button
                           type="button"
-                          className="btn btn-small btn-secondary"
+                          className="admin-action admin-action-success"
                           disabled={busy}
                           onClick={() => void changeState(item, "ACTIVE")}
                         >
@@ -429,9 +532,9 @@ export function ProgramsManager({
                       {canArchive && item.status !== "ARCHIVED" && (
                         <button
                           type="button"
-                          className="btn btn-small btn-danger"
+                          className="admin-action admin-action-warning"
                           disabled={busy}
-                          onClick={() => void changeState(item, "ARCHIVED")}
+                          onClick={() => setArchiveTarget(item)}
                         >
                           بایگانی
                         </button>
@@ -444,6 +547,17 @@ export function ProgramsManager({
           </div>
         )}
       </section>
+      <ConfirmationDialog
+        open={archiveTarget !== null}
+        title="بایگانی برنامه"
+        description={`«${archiveTarget?.title ?? ""}» بایگانی شود؟`}
+        busy={busy}
+        onClose={() => setArchiveTarget(null)}
+        onConfirm={() => {
+          if (archiveTarget) void changeState(archiveTarget, "ARCHIVED");
+        }}
+        confirmText="بایگانی"
+      />
     </main>
   );
 }

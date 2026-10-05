@@ -288,14 +288,20 @@ export async function runPhase6BrowserFlows(input: BrowserFlow): Promise<void> {
       .locator("article")
       .filter({ hasText: successRun.title });
     await refundCard.getByLabel("دلیل").fill("بازپرداخت آزمون");
-    ownerPage.once("dialog", (dialog) => void dialog.accept());
+    await refundCard.getByRole("button", { name: /بازپرداخت 4000/ }).click();
+    await expect(
+      ownerPage.getByRole("dialog", { name: "تأیید بازپرداخت" }),
+    ).toBeVisible();
     const [refundResponse] = await Promise.all([
       ownerPage.waitForResponse(
         (response) =>
           response.url().endsWith("/api/tenant/payments/refunds") &&
           response.request().method() === "POST",
       ),
-      refundCard.getByRole("button", { name: /بازپرداخت 4000/ }).click(),
+      ownerPage
+        .getByRole("dialog", { name: "تأیید بازپرداخت" })
+        .getByRole("button", { name: "ثبت بازپرداخت" })
+        .click(),
     ]);
     expect(refundResponse.status()).toBe(200);
     await expect(

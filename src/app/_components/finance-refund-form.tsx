@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { ConfirmationDialog } from "./admin-ui";
 
 export function FinanceRefundForm({
   paymentId,
@@ -15,11 +16,20 @@ export function FinanceRefundForm({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  const [pending, setPending] = useState<{
+    reason: string;
+    reference: string;
+  } | null>(null);
+  function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    if (!window.confirm("بازپرداخت این تراکنش را تأیید می‌کنید؟")) return;
+    const data = new FormData(event.currentTarget);
+    setPending({
+      reason: String(data.get("reason") ?? ""),
+      reference: String(data.get("reference") ?? ""),
+    });
+  }
+  async function confirmRefund() {
+    if (!pending) return;
     setBusy(true);
     setMessage("");
     try {
@@ -31,10 +41,8 @@ export function FinanceRefundForm({
           paymentId,
           amount,
           method,
-          reason: String(data.get("reason") ?? ""),
-          ...(method === "MANUAL"
-            ? { reference: String(data.get("reference") ?? "") }
-            : {}),
+          reason: pending.reason,
+          ...(method === "MANUAL" ? { reference: pending.reference } : {}),
         }),
       });
       const payload = (await response.json()) as {
@@ -43,6 +51,7 @@ export function FinanceRefundForm({
       if (!response.ok)
         throw new Error(payload.error?.message ?? "بازپرداخت ثبت نشد.");
       setMessage("درخواست بازپرداخت ثبت شد.");
+      setPending(null);
       router.refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "بازپرداخت ثبت نشد.");
@@ -70,6 +79,15 @@ export function FinanceRefundForm({
         بازپرداخت {amount} ریال
       </button>
       <p role="status">{message}</p>
+      <ConfirmationDialog
+        open={pending !== null}
+        title="تأیید بازپرداخت"
+        description="بازپرداخت این تراکنش را تأیید می‌کنید؟"
+        busy={busy}
+        onClose={() => setPending(null)}
+        onConfirm={() => void confirmRefund()}
+        confirmText="ثبت بازپرداخت"
+      />
     </form>
   );
 }

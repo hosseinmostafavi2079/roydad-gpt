@@ -10,6 +10,7 @@ import {
   type FormEvent,
 } from "react";
 import { apiRequest, errorMessage } from "@/app/_components/api-client";
+import { AdminButton, AdminDialog, ConfirmationDialog } from "./admin-ui";
 
 type Permission = {
   key: string;
@@ -80,6 +81,9 @@ export function TenantRolesManager({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [editingRole, setEditingRole] = useState<Role | null>(null);
+  const [deleteRole, setDeleteRole] = useState<Role | null>(null);
   const permissionGroups = useMemo(() => {
     const grouped = new Map<string, Permission[]>();
     for (const permission of permissions) {
@@ -125,6 +129,7 @@ export function TenantRolesManager({
       setDescription("");
       setSelected([]);
       setNotice("نقش ایجاد شد.");
+      setShowCreate(false);
       await load();
     } catch (cause) {
       setError(errorMessage(cause));
@@ -149,6 +154,7 @@ export function TenantRolesManager({
         },
       });
       setNotice("نقش به‌روزرسانی شد.");
+      setEditingRole(null);
       await load();
     } catch (cause) {
       setError(errorMessage(cause));
@@ -163,6 +169,7 @@ export function TenantRolesManager({
     try {
       await apiRequest(`/api/tenant/roles/${role.id}`, { method: "DELETE" });
       setNotice("نقش حذف شد.");
+      setDeleteRole(null);
       await load();
     } catch (cause) {
       setError(errorMessage(cause));
@@ -184,94 +191,114 @@ export function TenantRolesManager({
         </p>
       )}
       {canCreate && (
-        <form className="card card-pad" onSubmit={create}>
-          <h2 className="card-title">نقش سفارشی</h2>
-          <div className="form-grid">
-            <div className="field">
-              <label className="label" htmlFor="role-code">
-                شناسه
-              </label>
-              <input
-                className="input mono"
-                id="role-code"
-                required
-                minLength={2}
-                maxLength={80}
-                pattern="[a-z](?:[a-z0-9]|_|-){1,79}"
-                value={code}
-                onChange={(event) => setCode(event.target.value.toLowerCase())}
-              />
+        <AdminButton
+          type="button"
+          tone="primary"
+          icon="create"
+          onClick={() => setShowCreate(true)}
+        >
+          نقش جدید
+        </AdminButton>
+      )}
+      {canCreate && (
+        <AdminDialog
+          open={showCreate}
+          wide
+          title="نقش سفارشی"
+          onClose={() => !busy && setShowCreate(false)}
+        >
+          <form className="card card-pad" onSubmit={create}>
+            <div className="form-grid">
+              <div className="field">
+                <label className="label" htmlFor="role-code">
+                  شناسه
+                </label>
+                <input
+                  className="input mono"
+                  id="role-code"
+                  required
+                  minLength={2}
+                  maxLength={80}
+                  pattern="[a-z](?:[a-z0-9]|_|-){1,79}"
+                  value={code}
+                  onChange={(event) =>
+                    setCode(event.target.value.toLowerCase())
+                  }
+                />
+              </div>
+              <div className="field">
+                <label className="label" htmlFor="role-name">
+                  نام
+                </label>
+                <input
+                  className="input"
+                  id="role-name"
+                  required
+                  minLength={2}
+                  maxLength={120}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </div>
+              <div className="field field-full">
+                <label className="label" htmlFor="role-description">
+                  توضیح
+                </label>
+                <input
+                  className="input"
+                  id="role-description"
+                  maxLength={500}
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                />
+              </div>
             </div>
-            <div className="field">
-              <label className="label" htmlFor="role-name">
-                نام
-              </label>
-              <input
-                className="input"
-                id="role-name"
-                required
-                minLength={2}
-                maxLength={120}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
+            <div className="section">
+              <strong className="label">دسترسی‌ها</strong>
+              <div className="permission-groups">
+                {permissionGroups.map(([module, group]) => (
+                  <fieldset className="permission-group" key={module}>
+                    <legend className="permission-group-title">
+                      {MODULE_LABELS[module] ?? module}
+                    </legend>
+                    {group.map((permission) => (
+                      <label className="check-row" key={permission.key}>
+                        <span className="check-label">
+                          <input
+                            type="checkbox"
+                            checked={selected.includes(permission.key)}
+                            onChange={(event) =>
+                              setSelected((current) =>
+                                event.target.checked
+                                  ? [...current, permission.key]
+                                  : current.filter(
+                                      (key) => key !== permission.key,
+                                    ),
+                              )
+                            }
+                          />
+                          {permissionLabel(permission)}
+                        </span>
+                        <span className="permission-key mono">
+                          {permission.high_risk && (
+                            <span className="badge badge-red">
+                              دسترسی پرخطر
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    ))}
+                  </fieldset>
+                ))}
+              </div>
             </div>
-            <div className="field field-full">
-              <label className="label" htmlFor="role-description">
-                توضیح
-              </label>
-              <input
-                className="input"
-                id="role-description"
-                maxLength={500}
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-              />
+            <div className="form-actions">
+              <button type="submit" className="btn btn-primary" disabled={busy}>
+                {busy ? "در حال ذخیره…" : "ایجاد نقش"}
+              </button>
             </div>
-          </div>
-          <div className="section">
-            <strong className="label">دسترسی‌ها</strong>
-            <div className="permission-groups">
-              {permissionGroups.map(([module, group]) => (
-                <fieldset className="permission-group" key={module}>
-                  <legend className="permission-group-title">
-                    {MODULE_LABELS[module] ?? module}
-                  </legend>
-                  {group.map((permission) => (
-                    <label className="check-row" key={permission.key}>
-                      <span className="check-label">
-                        <input
-                          type="checkbox"
-                          checked={selected.includes(permission.key)}
-                          onChange={(event) =>
-                            setSelected((current) =>
-                              event.target.checked
-                                ? [...current, permission.key]
-                                : current.filter(
-                                    (key) => key !== permission.key,
-                                  ),
-                            )
-                          }
-                        />
-                        {permissionLabel(permission)}
-                      </span>
-                      <span className="permission-key mono">
-                        {permission.high_risk && (
-                          <span className="badge badge-red">دسترسی پرخطر</span>
-                        )}
-                      </span>
-                    </label>
-                  ))}
-                </fieldset>
-              ))}
-            </div>
-          </div>
-          <div className="form-actions">
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? "در حال ذخیره…" : "ایجاد نقش"}
-            </button>
-          </div>
-        </form>
+          </form>
+        </AdminDialog>
       )}
       <div className="grid grid-2">
         {roles.map((role) => (
@@ -305,94 +332,122 @@ export function TenantRolesManager({
               ))}
             </div>
             {!role.is_system && canUpdate && (
-              <details className="section">
-                <summary className="link">ویرایش نقش</summary>
-                <form onSubmit={(event) => void update(role, event)}>
-                  <div className="field">
-                    <label className="label" htmlFor={`role-name-${role.id}`}>
-                      نام
-                    </label>
-                    <input
-                      className="input"
-                      id={`role-name-${role.id}`}
-                      name="name"
-                      required
-                      minLength={2}
-                      maxLength={120}
-                      defaultValue={role.name}
-                    />
-                  </div>
-                  <div className="field">
-                    <label
-                      className="label"
-                      htmlFor={`role-description-${role.id}`}
-                    >
-                      توضیح
-                    </label>
-                    <input
-                      className="input"
-                      id={`role-description-${role.id}`}
-                      name="description"
-                      maxLength={500}
-                      defaultValue={role.description}
-                    />
-                  </div>
-                  <div className="permission-groups">
-                    {permissionGroups.map(([module, group]) => (
-                      <fieldset className="permission-group" key={module}>
-                        <legend className="permission-group-title">
-                          {MODULE_LABELS[module] ?? module}
-                        </legend>
-                        {group.map((permission) => (
-                          <label className="check-row" key={permission.key}>
-                            <span className="check-label">
-                              <input
-                                type="checkbox"
-                                name="permission"
-                                value={permission.key}
-                                defaultChecked={role.permission_keys.includes(
-                                  permission.key,
-                                )}
-                              />
-                              {permissionLabel(permission)}
-                            </span>
-                            <span className="permission-key mono">
-                              {permission.high_risk && (
-                                <span className="badge badge-red">
-                                  دسترسی پرخطر
-                                </span>
-                              )}
-                            </span>
-                          </label>
-                        ))}
-                      </fieldset>
-                    ))}
-                  </div>
-                  <div className="form-actions">
-                    <button
-                      type="submit"
-                      className="btn btn-primary btn-small"
-                      disabled={busy}
-                    >
-                      ذخیره تغییرها
-                    </button>
-                    {canDelete && (
-                      <button
-                        className="btn btn-danger btn-small"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void remove(role)}
+              <div className="admin-row-actions">
+                <AdminButton
+                  type="button"
+                  tone="info"
+                  icon="edit"
+                  onClick={() => setEditingRole(role)}
+                >
+                  ویرایش نقش
+                </AdminButton>
+                {canDelete && (
+                  <AdminButton
+                    type="button"
+                    tone="danger"
+                    onClick={() => setDeleteRole(role)}
+                  >
+                    حذف نقش
+                  </AdminButton>
+                )}
+              </div>
+            )}
+            {!role.is_system && canUpdate && (
+              <AdminDialog
+                open={editingRole?.id === role.id}
+                wide
+                title={`ویرایش نقش ${roleLabel(role.code, role.name)}`}
+                onClose={() => !busy && setEditingRole(null)}
+              >
+                {editingRole?.id === role.id && (
+                  <form onSubmit={(event) => void update(role, event)}>
+                    <div className="field">
+                      <label className="label" htmlFor={`role-name-${role.id}`}>
+                        نام
+                      </label>
+                      <input
+                        className="input"
+                        id={`role-name-${role.id}`}
+                        name="name"
+                        required
+                        minLength={2}
+                        maxLength={120}
+                        defaultValue={role.name}
+                      />
+                    </div>
+                    <div className="field">
+                      <label
+                        className="label"
+                        htmlFor={`role-description-${role.id}`}
                       >
-                        حذف نقش
+                        توضیح
+                      </label>
+                      <input
+                        className="input"
+                        id={`role-description-${role.id}`}
+                        name="description"
+                        maxLength={500}
+                        defaultValue={role.description}
+                      />
+                    </div>
+                    <div className="permission-groups">
+                      {permissionGroups.map(([module, group]) => (
+                        <fieldset className="permission-group" key={module}>
+                          <legend className="permission-group-title">
+                            {MODULE_LABELS[module] ?? module}
+                          </legend>
+                          {group.map((permission) => (
+                            <label className="check-row" key={permission.key}>
+                              <span className="check-label">
+                                <input
+                                  type="checkbox"
+                                  name="permission"
+                                  value={permission.key}
+                                  defaultChecked={role.permission_keys.includes(
+                                    permission.key,
+                                  )}
+                                />
+                                {permissionLabel(permission)}
+                              </span>
+                              <span className="permission-key mono">
+                                {permission.high_risk && (
+                                  <span className="badge badge-red">
+                                    دسترسی پرخطر
+                                  </span>
+                                )}
+                              </span>
+                            </label>
+                          ))}
+                        </fieldset>
+                      ))}
+                    </div>
+                    <div className="form-actions">
+                      <button
+                        type="submit"
+                        className="btn btn-primary btn-small"
+                        disabled={busy}
+                      >
+                        ذخیره تغییرها
                       </button>
-                    )}
-                  </div>
-                </form>
-              </details>
+                    </div>
+                  </form>
+                )}
+              </AdminDialog>
             )}
           </article>
         ))}
       </div>
+      <ConfirmationDialog
+        open={deleteRole !== null}
+        title="حذف نقش"
+        description={`نقش «${deleteRole?.name ?? ""}» حذف شود؟`}
+        busy={busy}
+        onClose={() => setDeleteRole(null)}
+        onConfirm={() => {
+          if (deleteRole) void remove(deleteRole);
+        }}
+        confirmText="حذف نقش"
+      />
     </div>
   );
 }

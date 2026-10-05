@@ -6,6 +6,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./public-polish.css";
 import "./public-redesign.css";
+import "./admin-ui.css";
 
 export const metadata: Metadata = {
   title: {

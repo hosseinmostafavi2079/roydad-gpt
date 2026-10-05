@@ -200,6 +200,36 @@ export function WebsiteEditor({
   }
   return (
     <form className="website-editor" onSubmit={save}>
+      <div className="admin-website-header">
+        <div>
+          <strong>ویرایش وب‌سایت مجموعه</strong>
+          <span>بخش موردنظر را انتخاب و تغییرات را ذخیره کنید.</span>
+        </div>
+        <div className="admin-toolbar-actions">
+          <a
+            className="admin-action admin-action-neutral"
+            href="/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            مشاهده سایت
+          </a>
+          <button
+            type="button"
+            className="admin-action admin-action-info"
+            onClick={() => setTab("پیش‌نمایش")}
+          >
+            پیش‌نمایش
+          </button>
+          <button
+            type="submit"
+            className="admin-action admin-action-primary"
+            disabled={saving}
+          >
+            {saving ? "در حال ذخیره…" : "ذخیره تغییرات"}
+          </button>
+        </div>
+      </div>
       <nav className="website-tabs" aria-label="بخش‌های وب‌سایت">
         {tabs.map((item) => (
           <button
@@ -1313,21 +1343,6 @@ export function WebsiteEditor({
         </a>
       </section>
       <div className="website-editor-actions">
-        <button
-          className="button button-primary"
-          disabled={saving}
-          type="submit"
-        >
-          {saving ? "در حال ذخیره…" : "ذخیره تغییرات"}
-        </button>
-        <a
-          className="button button-secondary"
-          href="/"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          پیش‌نمایش سایت
-        </a>
         <span role="status">{message}</span>
       </div>
     </form>

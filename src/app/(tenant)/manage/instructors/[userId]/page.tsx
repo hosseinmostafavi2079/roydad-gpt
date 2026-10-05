@@ -5,7 +5,7 @@ import {
   getAdminInstructorProfile,
   type InstructorContent,
 } from "@/modules/public-site/instructors";
-import { InstructorPublicEditor } from "@/app/_components/instructor-public-editor";
+import { InstructorProfileWorkspace } from "@/app/_components/instructor-profile-workspace";
 
 export default async function InstructorPublicProfileEditorPage({
   params,
@@ -69,7 +69,7 @@ export default async function InstructorPublicProfileEditorPage({
           </p>
         </div>
       </div>
-      <InstructorPublicEditor
+      <InstructorProfileWorkspace
         userId={userId}
         initial={{
           id: existing?.id ?? "",

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { once } from "node:events";
 import {
@@ -32,6 +32,132 @@ const tinyPng = Buffer.from(
   "base64",
 );
 const e2ePort = Number(process.env.EVENTOS_E2E_PORT ?? "3000");
+async function captureTenantAdminVisuals(page: Page, origin: string) {
+  if (process.env.EVENTOS_VISUAL_CAPTURE !== "true") return;
+  const directory = path.join("artifacts", "tenant-admin-visuals", "after");
+  mkdirSync(directory, { recursive: true });
+  const previous = page.viewportSize();
+  const capture = async (width: number, name: string) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.screenshot({
+      path: path.join(directory, `${width}-${name}.png`),
+      fullPage: true,
+      animations: "disabled",
+    });
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+  };
+  try {
+    for (const width of [1440, 390]) {
+      await page.goto(`${origin}/manage/instructors`);
+      await expect(
+        page.locator(".admin-instructor-card").first(),
+      ).toBeVisible();
+      const portrait = page
+        .locator(".admin-instructor-card")
+        .filter({ hasText: "E2E Instructor Identity" })
+        .locator("img");
+      await expect(portrait).toBeVisible();
+      await expect
+        .poll(() =>
+          portrait.evaluate(
+            (image: HTMLImageElement) =>
+              image.complete && image.naturalWidth > 0,
+          ),
+        )
+        .toBe(true);
+      await capture(width, "instructors");
+      await page
+        .locator(".admin-instructor-card")
+        .filter({ hasText: "E2E Instructor Identity" })
+        .getByRole("button", { name: "ویرایش پروفایل" })
+        .click();
+      await expect(
+        page.getByRole("dialog", { name: /ویرایش پروفایل/ }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("dialog").getByRole("button", { name: "اطلاعات اصلی" }),
+      ).toBeVisible();
+      await capture(width, "instructor-edit");
+      if (width === 1440) {
+        await page
+          .getByRole("dialog")
+          .getByRole("button", { name: "سوابق کاری" })
+          .click();
+        await expect(
+          page.getByRole("dialog").getByRole("button", { name: "سوابق کاری" }),
+        ).toHaveAttribute("aria-current", "page");
+        await capture(width, "instructor-experience");
+        await page
+          .getByRole("dialog")
+          .getByRole("button", { name: "رسانه و لینک‌ها" })
+          .click();
+        await expect(
+          page
+            .getByRole("dialog")
+            .getByRole("button", { name: "رسانه و لینک‌ها" }),
+        ).toHaveAttribute("aria-current", "page");
+        await capture(width, "instructor-media");
+        await page
+          .getByRole("dialog")
+          .getByRole("button", { name: "رزومه", exact: true })
+          .click();
+        await expect(
+          page
+            .getByRole("dialog")
+            .getByRole("button", { name: "رزومه", exact: true }),
+        ).toHaveAttribute("aria-current", "page");
+        await capture(width, "instructor-resume");
+        await page
+          .getByRole("dialog")
+          .getByRole("button", { name: "نمایش عمومی" })
+          .click();
+        await expect(
+          page.getByRole("dialog").getByRole("button", { name: "نمایش عمومی" }),
+        ).toHaveAttribute("aria-current", "page");
+        await capture(width, "instructor-publication");
+      }
+      await page.getByRole("button", { name: "بستن" }).click();
+      await page.goto(`${origin}/enrollments`);
+      await capture(width, "enrollments");
+      if (width === 1440) {
+        await page.getByRole("button", { name: "لغو ثبت‌نام" }).first().click();
+        await capture(width, "enrollment-cancel");
+        await page
+          .getByRole("dialog", { name: "لغو ثبت‌نام" })
+          .getByRole("button", { name: "انصراف" })
+          .click();
+      }
+      await page.goto(`${origin}/programs`);
+      await expect(
+        page.locator(".admin-card-table tbody tr").first(),
+      ).toBeVisible();
+      const cover = page
+        .locator(".admin-card-table tbody tr img.program-list-cover")
+        .first();
+      await expect(cover).toBeVisible();
+      await expect
+        .poll(() =>
+          cover.evaluate(
+            (image: HTMLImageElement) =>
+              image.complete && image.naturalWidth > 0,
+          ),
+        )
+        .toBe(true);
+      await capture(width, "programs");
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${origin}/website`);
+    await capture(1440, "website");
+  } finally {
+    if (previous) await page.setViewportSize(previous);
+  }
+}
 async function setJalali(
   page: import("@playwright/test").Page,
   index: number,
@@ -728,6 +854,7 @@ async function* tenantJourney({
       .filter({ hasText: "مدیریت" })
       .click();
     await page.getByRole("link", { name: "نقش‌ها و دسترسی‌ها" }).first().click();
+    await page.getByRole("button", { name: "نقش جدید" }).click();
     await expect(page.locator(".permission-group-title").first()).toBeVisible();
     await expect(page.getByText("دسترسی پرخطر").first()).toBeVisible();
     await page.getByLabel("شناسه").fill("e2e_read_only_staff");
@@ -756,7 +883,10 @@ async function* tenantJourney({
       .locator(".sidebar")
       .getByRole("link", { name: "کارکنان" })
       .click();
-    const staffForm = page.locator("form").filter({ hasText: "دعوت کاربر" });
+    await page.getByRole("button", { name: "دعوت کاربر" }).click();
+    const staffForm = page
+      .getByRole("dialog", { name: "دعوت کاربر" })
+      .locator("form");
     await expect(
       staffForm.getByRole("checkbox", { name: "Read-only staff" }),
     ).toBeVisible();
@@ -840,12 +970,36 @@ async function* tenantJourney({
     ).toHaveCount(0);
 
     await page.goto(`${tenantOrigin}/staff`);
-    await page.getByLabel(`وضعیت ${staffName}`).selectOption("SUSPENDED");
+    if (process.env.EVENTOS_VISUAL_CAPTURE === "true") {
+      const directory = path.join("artifacts", "tenant-admin-visuals", "after");
+      mkdirSync(directory, { recursive: true });
+      await expect(
+        page.getByRole("row").filter({ hasText: staffName }),
+      ).toBeVisible();
+      const previousViewport = page.viewportSize();
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.screenshot({
+        path: path.join(directory, "1440-staff.png"),
+        fullPage: true,
+        animations: "disabled",
+      });
+      if (previousViewport) await page.setViewportSize(previousViewport);
+    }
+    await page
+      .getByRole("row")
+      .filter({ hasText: staffName })
+      .locator("summary")
+      .click();
+    await page.getByRole("button", { name: "تعلیق حساب" }).click();
+    await page
+      .getByRole("dialog", { name: "تعلیق حساب" })
+      .getByRole("button", { name: "تأیید" })
+      .click();
     await expect(
       page
         .getByRole("row")
         .filter({ hasText: staffName })
-        .getByText("SUSPENDED", { exact: true }),
+        .getByText("تعلیق‌شده", { exact: true }),
     ).toBeVisible();
     expect(
       await staffPage.evaluate(
@@ -859,10 +1013,16 @@ async function* tenantJourney({
       name: string,
       email: string,
       retainSession = false,
+      activateOnly = false,
     ) {
       await page.goto(
         `${tenantOrigin}/${collection === "instructors" ? "manage/instructors" : collection}`,
       );
+      await page
+        .getByRole("button", {
+          name: collection === "instructors" ? "دعوت مدرس" : "دعوت کاربر",
+        })
+        .click();
       await page.locator("#invite-name").fill(name);
       await page.locator("#invite-email").fill(email);
       await page.getByRole("button", { name: "ارسال دعوت" }).click();
@@ -887,6 +1047,10 @@ async function* tenantJourney({
       await expect(portalPage.getByRole("status")).toContainText(
         "حساب شما فعال شد",
       );
+      if (activateOnly) {
+        await portalContext.close();
+        return null;
+      }
       await portalPage.goto(`${tenantOrigin}/login`);
       await portalPage.getByLabel("ایمیل", { exact: true }).fill(email);
       await portalPage
@@ -939,26 +1103,64 @@ async function* tenantJourney({
       return payload.data.find((item) => item.email === email)?.id ?? "";
     }, phase3InstructorEmail);
     expect(publicInstructorId).toBeTruthy();
+    expect(
+      await phase3InstructorSession.page.evaluate(
+        async (id) =>
+          (await fetch(`/api/tenant/instructors/${id}/public-profile`)).status,
+        publicInstructorId,
+      ),
+    ).toBe(403);
     await page.goto(`${tenantOrigin}/manage/instructors/${publicInstructorId}`);
+    await page.getByRole("button", { name: "ویرایش پروفایل" }).click();
+    await page.getByLabel("عنوان حرفه‌ای").fill("تغییر ذخیره‌نشده");
+    await page.getByRole("button", { name: "بستن" }).click();
+    await page.getByRole("button", { name: "ویرایش پروفایل" }).click();
+    await expect(page.getByLabel("عنوان حرفه‌ای")).not.toHaveValue(
+      "تغییر ذخیره‌نشده",
+    );
     await page.getByLabel("عنوان حرفه‌ای").fill("مدرس ارشد آزمایشی");
     await page.getByLabel("معرفی کوتاه").fill("مدرس باتجربه در آموزش رویداد");
     await page
       .getByLabel("زندگی‌نامه")
       .fill("سابقه تدریس و برگزاری دوره‌های آموزشی.");
-    await page
-      .getByLabel("تخصص‌ها (هر خط یک مورد)")
-      .fill("آموزش\nمدیریت رویداد");
+    await page.getByLabel("تخصص‌ها").fill("آموزش");
+    await page.getByLabel("تخصص‌ها").press("Enter");
+    await page.getByLabel("تخصص‌ها").fill("مدیریت رویداد");
+    await page.getByLabel("تخصص‌ها").press("Enter");
+    const publicInstructorSlug = await page
+      .getByLabel("شناسه صفحه")
+      .inputValue();
+    await page.getByRole("button", { name: "سوابق کاری" }).click();
     await page.getByRole("button", { name: "+ افزودن سابقه" }).click();
     await page.getByLabel("سمت").fill("مدرس");
     await page
       .getByRole("textbox", { name: "سازمان", exact: true })
       .fill("مجموعه آزمایشی");
+    await page.getByRole("button", { name: "تحصیلات" }).click();
     await page.getByRole("button", { name: "+ افزودن تحصیلات" }).click();
     await page.getByLabel("مدرک").fill("کارشناسی");
     await page.getByLabel("رشته").fill("آموزش");
     await page.getByLabel("مؤسسه").fill("دانشگاه نمونه");
-    await page.getByRole("button", { name: "ذخیره پروفایل" }).click();
-    await expect(page.getByRole("status")).toHaveText("پروفایل ذخیره شد.");
+    await page.getByRole("button", { name: "ذخیره تغییرات" }).click();
+    await expect(page.getByRole("status")).toHaveText(
+      "تغییرات با موفقیت ذخیره شد.",
+    );
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "ویرایش پروفایل" }).click();
+    await expect(
+      page.getByRole("dialog", { name: /ویرایش پروفایل/ }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await page.getByRole("button", { name: "بستن" }).click();
+    await page.setViewportSize({ width: 1280, height: 850 });
+    await page.getByRole("button", { name: "ویرایش پروفایل" }).click();
+    await page.getByRole("button", { name: "رسانه و لینک‌ها" }).click();
     await page
       .locator(".media-uploader")
       .filter({ hasText: "تصویر مدرس" })
@@ -966,7 +1168,7 @@ async function* tenantJourney({
       .setInputFiles({
         name: "instructor.png",
         mimeType: "image/png",
-        buffer: tinyPng,
+        buffer: readFileSync("tests/fixtures/instructor-portrait.png"),
       });
     await expect(
       page
@@ -974,6 +1176,7 @@ async function* tenantJourney({
         .filter({ hasText: "تصویر مدرس" })
         .locator("img"),
     ).toBeVisible();
+    await page.getByRole("button", { name: "رزومه", exact: true }).click();
     await page
       .locator(".media-uploader")
       .filter({ hasText: "رزومه PDF" })
@@ -989,13 +1192,13 @@ async function* tenantJourney({
         .filter({ hasText: "رزومه PDF" })
         .getByText("رزومهٔ بارگذاری‌شده (PDF)"),
     ).toBeVisible();
-    await page.getByLabel("نمایش لینک رزومه پس از انتشار").check();
+    await page.getByRole("button", { name: "نمایش عمومی" }).click();
+    await page.getByLabel("نمایش فایل رزومه").check();
     await page.getByLabel("انتشار پروفایل عمومی").check();
-    await page.getByRole("button", { name: "ذخیره پروفایل" }).click();
-    await expect(page.getByRole("status")).toHaveText("پروفایل ذخیره شد.");
-    const publicInstructorSlug = await page
-      .getByLabel("شناسه صفحه")
-      .inputValue();
+    await page.getByRole("button", { name: "ذخیره تغییرات" }).click();
+    await expect(page.getByRole("status")).toHaveText(
+      "تغییرات با موفقیت ذخیره شد.",
+    );
     await page.goto(`${tenantOrigin}/instructors`);
     await expect(
       page.getByRole("link", { name: "E2E Instructor Identity" }).first(),
@@ -1055,7 +1258,7 @@ async function* tenantJourney({
       .setInputFiles({
         name: "cover.png",
         mimeType: "image/png",
-        buffer: tinyPng,
+        buffer: readFileSync("tests/fixtures/program-cover.png"),
       });
     await expect(
       page
@@ -1072,6 +1275,10 @@ async function* tenantJourney({
       );
     }, phase3ProgramTitle);
     expect(firstCoverUrl).toMatch(/^\/api\/media\//);
+    await page
+      .getByRole("dialog", { name: "ویرایش برنامه" })
+      .getByRole("button", { name: "بستن" })
+      .click();
     await page
       .getByRole("row")
       .filter({ hasText: phase3ProgramTitle })
@@ -1212,6 +1419,49 @@ async function* tenantJourney({
     await expect(
       phase5ParticipantSession.page.getByRole("status"),
     ).toContainText("ثبت‌نام شما تأیید شد");
+    const manualParticipantEmail = `manual-${randomUUID()}@example.test`;
+    await invitePortalIdentity(
+      "participants",
+      "Manual E2E Participant",
+      manualParticipantEmail,
+      false,
+      true,
+    );
+    await page.goto(`${tenantOrigin}/enrollments`);
+    await page.getByRole("button", { name: "ثبت‌نام دستی" }).click();
+    await expect(
+      page.getByRole("dialog", { name: "ثبت‌نام دستی" }),
+    ).toBeVisible();
+    await page
+      .getByRole("dialog", { name: "ثبت‌نام دستی" })
+      .getByLabel("برنامه")
+      .selectOption(phase3RunId);
+    await page
+      .getByRole("dialog", { name: "ثبت‌نام دستی" })
+      .getByLabel("ایمیل شرکت‌کننده")
+      .fill(manualParticipantEmail);
+    await page
+      .getByRole("dialog", { name: "ثبت‌نام دستی" })
+      .getByRole("button", { name: "ثبت‌نام" })
+      .click();
+    const manualRow = page
+      .getByRole("row")
+      .filter({ hasText: manualParticipantEmail });
+    await expect(manualRow).toBeVisible();
+    await manualRow.getByRole("button", { name: "لغو ثبت‌نام" }).click();
+    await page
+      .getByRole("dialog", { name: "لغو ثبت‌نام" })
+      .getByRole("button", { name: "انصراف" })
+      .click();
+    await expect(manualRow).not.toContainText("لغوشده");
+    await manualRow.getByRole("button", { name: "لغو ثبت‌نام" }).click();
+    await page
+      .getByRole("dialog", { name: "لغو ثبت‌نام" })
+      .getByRole("button", { name: "لغو ثبت‌نام" })
+      .click();
+    await expect(manualRow).toContainText("لغوشده");
+    await captureTenantAdminVisuals(page, tenantOrigin);
+    await page.goto(`${tenantOrigin}/enrollments`);
     const publicContext = await browser.newContext();
     const publicPage = await publicContext.newPage();
     await publicPage.goto(`${tenantOrigin}/`);
@@ -1498,6 +1748,7 @@ async function* tenantJourney({
 
     const wrongHostEmail = `wrong-host-${randomUUID()}@example.test`;
     await page.goto(`${tenantOrigin}/staff`);
+    await page.getByRole("button", { name: "دعوت کاربر" }).click();
     await page.locator("#invite-name").fill("Wrong Host Invite");
     await page.locator("#invite-email").fill(wrongHostEmail);
     await page.getByRole("button", { name: "ارسال دعوت" }).click();
@@ -1721,18 +1972,20 @@ test.describe("platform and tenant journey", () => {
     "tenant isolation and session revocation",
   ];
   const focusAttendance = process.env.EVENTOS_E2E_FOCUS_ATTENDANCE === "true";
+  const focusPhase = process.env.EVENTOS_E2E_FOCUS_PHASE;
   for (const [index, phase] of phases.entries()) {
     if (focusAttendance && phase !== "attendance and certificates") continue;
+    if (focusPhase && phase !== focusPhase) continue;
     test(phase, async () => {
       test.setTimeout(
-        focusAttendance
+        focusAttendance || focusPhase
           ? 600_000
           : phase === "pilot Google new participant"
             ? 120_000
             : 240_000,
       );
       try {
-        const start = focusAttendance ? 0 : index;
+        const start = focusAttendance || focusPhase ? 0 : index;
         for (let phaseIndex = start; phaseIndex <= index; phaseIndex++) {
           const result = await journey.next();
           expect(result.done).toBe(phaseIndex === phases.length - 1);

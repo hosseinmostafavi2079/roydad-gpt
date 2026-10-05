@@ -1,7 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiRequest, errorMessage } from "./api-client";
+import {
+  AdminButton,
+  AdminDialog,
+  ConfirmationDialog,
+  StatusBadge,
+} from "./admin-ui";
 
 type Entry = {
   id: string;
@@ -24,11 +30,19 @@ export function EnrollmentsManager({
 }) {
   const [entries, setEntries] = useState(initial);
   const [runId, setRunId] = useState("");
+  const [registrationRunId, setRegistrationRunId] = useState("");
+  const [registrationOpen, setRegistrationOpen] = useState(false);
+  const [cancelId, setCancelId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  useEffect(() => {
+    if (!message) return;
+    const timer = window.setTimeout(() => setMessage(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [message]);
   const shown = entries.filter(
     (entry) =>
       (!runId || entry.run_id === runId) &&
@@ -44,7 +58,6 @@ export function EnrollmentsManager({
   }
 
   async function cancel(id: string) {
-    if (!window.confirm("این ثبت‌نام لغو شود؟")) return;
     setBusy(true);
     setMessage("");
     try {
@@ -54,6 +67,7 @@ export function EnrollmentsManager({
       });
       await refresh();
       setMessage("ثبت‌نام لغو شد.");
+      setCancelId(null);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -63,7 +77,7 @@ export function EnrollmentsManager({
 
   async function register(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!runId) {
+    if (!registrationRunId) {
       setMessage("برنامه را انتخاب کنید.");
       return;
     }
@@ -72,11 +86,16 @@ export function EnrollmentsManager({
     try {
       await apiRequest("/api/tenant/enrollments/manage", {
         method: "POST",
-        body: { runId, participantEmail: email, answers: {} },
+        body: {
+          runId: registrationRunId,
+          participantEmail: email,
+          answers: {},
+        },
       });
       await refresh();
       setMessage("شرکت‌کننده ثبت‌نام شد.");
       setEmail("");
+      setRegistrationOpen(false);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -85,9 +104,37 @@ export function EnrollmentsManager({
   }
 
   return (
-    <div className="stack">
-      <section className="card card-pad">
-        <div className="form-grid">
+    <div className="admin-workspace">
+      <div className="admin-metrics">
+        {(
+          [
+            ["کل ثبت‌نام‌ها", entries.length],
+            [
+              "تأییدشده",
+              entries.filter((entry) => entry.status === "CONFIRMED").length,
+            ],
+            [
+              "در انتظار",
+              entries.filter((entry) =>
+                ["PENDING", "AWAITING_PAYMENT", "WAITLISTED"].includes(
+                  entry.status,
+                ),
+              ).length,
+            ],
+            [
+              "لغوشده",
+              entries.filter((entry) => entry.status === "CANCELLED").length,
+            ],
+          ] as const
+        ).map(([label, count]) => (
+          <div key={label}>
+            <span>{label}</span>
+            <strong>{count.toLocaleString("fa-IR")}</strong>
+          </div>
+        ))}
+      </div>
+      <section className="admin-list-toolbar">
+        <div className="admin-toolbar">
           <label>
             برنامه
             <select
@@ -122,27 +169,47 @@ export function EnrollmentsManager({
             />
           </label>
         </div>
-        <a
-          className="button button-secondary"
-          href={`/api/tenant/enrollments/manage/export${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`}
-        >
-          دریافت CSV
-        </a>
+        <div className="admin-toolbar-actions">
+          <a
+            className="admin-action admin-action-neutral"
+            href={`/api/tenant/enrollments/manage/export${runId ? `?runId=${encodeURIComponent(runId)}` : ""}`}
+          >
+            دریافت CSV
+          </a>
+          {canManage && (
+            <AdminButton
+              type="button"
+              tone="primary"
+              icon="create"
+              onClick={() => setRegistrationOpen(true)}
+            >
+              ثبت‌نام دستی
+            </AdminButton>
+          )}
+        </div>
       </section>
       {canManage && (
-        <section className="card card-pad">
-          <h2 className="card-title">ثبت‌نام دستی</h2>
+        <AdminDialog
+          open={registrationOpen}
+          title="ثبت‌نام دستی"
+          onClose={() => !busy && setRegistrationOpen(false)}
+          description="شرکت‌کننده باید از قبل حساب فعال داشته باشد."
+        >
           <p className="hint">
             شرکت‌کننده باید از قبل حساب فعال داشته باشد. برای برنامه‌هایی با فرم
             اختصاصی، ثبت‌نام از صفحه عمومی انجام شود.
           </p>
-          <form onSubmit={register} className="form-grid">
+          <form
+            id="manual-enrollment-form"
+            onSubmit={register}
+            className="form-grid"
+          >
             <label>
               برنامه
               <select
                 required
-                value={runId}
-                onChange={(event) => setRunId(event.target.value)}
+                value={registrationRunId}
+                onChange={(event) => setRegistrationRunId(event.target.value)}
               >
                 <option value="">انتخاب کنید</option>
                 {runs.map(([id, title]) => (
@@ -161,19 +228,24 @@ export function EnrollmentsManager({
                 onChange={(event) => setEmail(event.target.value)}
               />
             </label>
-            <button
-              type="submit"
-              className="button button-primary"
-              disabled={busy}
-            >
-              ثبت‌نام
-            </button>
+            <AdminButton type="submit" tone="primary" disabled={busy}>
+              {busy ? "در حال ثبت‌نام..." : "ثبت‌نام"}
+            </AdminButton>
           </form>
-        </section>
+        </AdminDialog>
       )}
-      <section className="card card-pad">
+      <section className="card admin-data-panel">
+        <div className="admin-panel-heading">
+          <div>
+            <h2>فهرست ثبت‌نام‌ها</h2>
+            <p>
+              {shown.length.toLocaleString("fa-IR")} مورد بر اساس فیلترهای
+              انتخاب‌شده
+            </p>
+          </div>
+        </div>
         <div className="table-wrap">
-          <table>
+          <table className="admin-table admin-card-table">
             <thead>
               <tr>
                 <th>شرکت‌کننده</th>
@@ -186,34 +258,30 @@ export function EnrollmentsManager({
             <tbody>
               {shown.map((entry) => (
                 <tr key={entry.id}>
-                  <td>
-                    {entry.name}
+                  <td data-label="شرکت‌کننده">
+                    <strong className="admin-primary-text">{entry.name}</strong>
                     <br />
                     <small dir="ltr">{entry.email}</small>
                   </td>
-                  <td>{entry.run_title}</td>
-                  <td>
-                    {entry.status === "CONFIRMED"
-                      ? "تأیید شده"
-                      : entry.status === "WAITLISTED"
-                        ? "فهرست انتظار"
-                        : "لغو شده"}
+                  <td data-label="برنامه">{entry.run_title}</td>
+                  <td data-label="وضعیت">
+                    <StatusBadge status={entry.status} />
                   </td>
-                  <td>
+                  <td data-label="تاریخ ثبت‌نام">
                     {new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
                       dateStyle: "medium",
                     }).format(new Date(entry.registered_at))}
                   </td>
-                  <td>
+                  <td data-label="عملیات">
                     {canManage && entry.status !== "CANCELLED" && (
-                      <button
+                      <AdminButton
                         type="button"
-                        className="button button-secondary"
+                        tone="danger"
                         disabled={busy}
-                        onClick={() => cancel(entry.id)}
+                        onClick={() => setCancelId(entry.id)}
                       >
-                        لغو
-                      </button>
+                        لغو ثبت‌نام
+                      </AdminButton>
                     )}
                   </td>
                 </tr>
@@ -221,9 +289,29 @@ export function EnrollmentsManager({
             </tbody>
           </table>
         </div>
-        {shown.length === 0 && <p className="hint">ثبت‌نامی پیدا نشد.</p>}
-        <p role="status">{message}</p>
+        {shown.length === 0 && (
+          <div className="admin-empty-state">
+            <strong>ثبت‌نامی پیدا نشد.</strong>
+            <p>فیلترها را تغییر دهید یا ثبت‌نام دستی ایجاد کنید.</p>
+          </div>
+        )}
+        {message && (
+          <p role="status" className="admin-notice">
+            {message}
+          </p>
+        )}
       </section>
+      <ConfirmationDialog
+        open={cancelId !== null}
+        title="لغو ثبت‌نام"
+        description={`آیا از لغو ثبت‌نام «${entries.find((entry) => entry.id === cancelId)?.name ?? ""}» در «${entries.find((entry) => entry.id === cancelId)?.run_title ?? ""}» اطمینان دارید؟`}
+        busy={busy}
+        onClose={() => setCancelId(null)}
+        onConfirm={() => {
+          if (cancelId) void cancel(cancelId);
+        }}
+        confirmText="لغو ثبت‌نام"
+      />
     </div>
   );
 }
