@@ -4,6 +4,7 @@ import { getAuth } from "@/infrastructure/auth/auth";
 import { SignInForm } from "@/app/_components/sign-in-form";
 import { getServerConfig } from "@/shared/config/env";
 import { notFound } from "next/navigation";
+import { emailServiceAvailable } from "@/infrastructure/auth/mailer";
 
 export const metadata = { title: "ورود مدیر پلتفرم" };
 export const dynamic = "force-dynamic";
@@ -48,6 +49,12 @@ export default async function SignInPage() {
           <h2>ورود مدیر پلتفرم</h2>
           <p>برای ادامه، با حساب مدیریتی خود وارد شوید.</p>
           <SignInForm />
+          {!emailServiceAvailable() && (
+            <p className="hint">
+              بازیابی رمز از طریق ایمیل در دسترس نیست. برای بازیابی حساب با
+              اپراتور سامانه تماس بگیرید.
+            </p>
+          )}
           <p className="hint" style={{ marginTop: 19, textAlign: "center" }}>
             دسترسی فقط برای مدیران پلتفرم فعال است.
           </p>

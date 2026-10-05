@@ -93,6 +93,11 @@ export default async function TenantLoginPage({
           </Link>
         )}
       </nav>
+      {!identity.mailAvailable && (
+        <p className="hint">
+          سرویس ایمیل در دسترس نیست. از روش‌های ورود فعال سازمان استفاده کنید.
+        </p>
+      )}
       {methods.sms_otp || methods.username_password ? (
         <IdentityV2Login
           methods={methods}

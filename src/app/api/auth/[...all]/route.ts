@@ -3,6 +3,8 @@ import { getAuth } from "@/infrastructure/auth/auth";
 import { requestLogger } from "@/infrastructure/logging/logger";
 import { jsonResponse, requestIdFrom } from "@/shared/http/api-response";
 import { getServerConfig } from "@/shared/config/env";
+import { assertEmailServiceAvailable } from "@/infrastructure/auth/mailer";
+import { DomainError } from "@/shared/errors/domain-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,11 +28,30 @@ async function handleAuthRequest(request: Request): Promise<Response> {
         { status: 404 },
       );
     }
+    const path = new URL(request.url).pathname.replace(/^\/api\/auth/, "");
+    if (
+      [
+        "/forget-password",
+        "/forgot-password",
+        "/request-password-reset",
+        "/reset-password",
+        "/send-verification-email",
+        "/verify-email",
+      ].includes(path) ||
+      path.startsWith("/reset-password/") ||
+      path.includes("email-otp")
+    )
+      assertEmailServiceAvailable();
     const handlers = toNextJsHandler(getAuth());
     return await (request.method === "GET" ? handlers.GET : handlers.POST)(
       request,
     );
   } catch (error) {
+    if (error instanceof DomainError)
+      return jsonResponse(
+        { error: { code: error.code, message: error.message, requestId } },
+        { status: error.status },
+      );
     requestLogger(requestId).error(
       {
         module: "auth",

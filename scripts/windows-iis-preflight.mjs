@@ -18,11 +18,14 @@ export function validateWindowsIisEnvironment(env, runtimeOnly = false) {
   };
   for (const [key, expected] of Object.entries({
     NODE_ENV: "production",
-    MAIL_TRANSPORT: "smtp",
     SMS_TRANSPORT: "provider",
     MEDIA_S3_ALLOW_HTTP_LOCAL: "false",
   }))
     if (value(key) !== expected) errors.push(`${key}: must be ${expected}`);
+  if (!["disabled", "smtp"].includes(value("MAIL_TRANSPORT")))
+    errors.push(
+      "MAIL_TRANSPORT: production requires disabled or smtp; test forbidden",
+    );
   for (const key of Object.keys(env))
     if (/^EVENTOS_(E2E|TEST)_/.test(key) && value(key))
       errors.push(`${key}: test mode forbidden`);
@@ -107,18 +110,19 @@ export function validateWindowsIisEnvironment(env, runtimeOnly = false) {
       errors.push(`${key}: private role-separated PostgreSQL URL required`);
     }
   }
-  // SMTP is mandatory in the current runtime, independently of tenant login settings.
-  try {
-    const url = new URL(requireValue("SMTP_URL"));
-    if (url.protocol !== "smtps:" || !url.username || !url.password)
-      throw new Error();
-  } catch {
-    errors.push(
-      "SMTP_URL: real TLS SMTP required, even with email login disabled",
-    );
+  if (value("MAIL_TRANSPORT") === "smtp") {
+    try {
+      const url = new URL(requireValue("SMTP_URL"));
+      if (url.protocol !== "smtps:" || !url.username || !url.password)
+        throw new Error();
+    } catch {
+      errors.push("SMTP_URL: real TLS SMTP required for smtp transport");
+    }
+    if (
+      !/^[^<>\r\n]+<[^\s@]+@[^\s@]+\.[^\s@]+>$/.test(requireValue("SMTP_FROM"))
+    )
+      errors.push("SMTP_FROM: real sender required");
   }
-  if (!/^[^<>\r\n]+<[^\s@]+@[^\s@]+\.[^\s@]+>$/.test(requireValue("SMTP_FROM")))
-    errors.push("SMTP_FROM: real sender required");
   try {
     const url = new URL(requireValue("MEDIA_S3_ENDPOINT"));
     if (

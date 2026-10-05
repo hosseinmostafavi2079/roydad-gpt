@@ -62,6 +62,26 @@ function fixture() {
 }
 test("IIS production env accepts private role-separated configuration", () =>
   assert.deepEqual(validateWindowsIisEnvironment(fixture()), []));
+test("disabled production mail needs no SMTP, but smtp needs credentials", () => {
+  const env = fixture();
+  env.MAIL_TRANSPORT = "disabled";
+  env.SMTP_URL = "";
+  env.SMTP_FROM = "";
+  assert.deepEqual(validateWindowsIisEnvironment(env), []);
+  env.MAIL_TRANSPORT = "smtp";
+  assert.ok(
+    validateWindowsIisEnvironment(env).some((error) =>
+      error.includes("SMTP_URL"),
+    ),
+  );
+  env.SMTP_URL = "smtps://smtp.example.test";
+  env.SMTP_FROM = "Test <test@example.test>";
+  assert.ok(
+    validateWindowsIisEnvironment(env).some((error) =>
+      error.includes("SMTP_URL"),
+    ),
+  );
+});
 test("production rejects test transports and bypass flags", () => {
   for (const key of [
     "SMS_TRANSPORT",

@@ -14,6 +14,15 @@ import { GET as settingsGet } from "@/app/api/tenant/identity/settings/route";
 import { GET as profileGet } from "@/app/api/tenant/identity/profile/route";
 import { POST as usernameSet } from "@/app/api/tenant/identity/username/route";
 import { POST as tenantAuthPost } from "@/app/api/tenant-auth/[...all]/route";
+import { POST as platformAuthPost } from "@/app/api/auth/[...all]/route";
+import {
+  issueTenantUserInvitation,
+  issueInitialTenantOwnerInvitation,
+} from "@/modules/tenant-identity/repository";
+import {
+  getServerConfig,
+  resetServerConfigForTests,
+} from "@/shared/config/env";
 import { hashPlatformPassword } from "@/infrastructure/auth/password";
 import { applySqlMigrations } from "@/infrastructure/db/migrations/runner";
 import { applyTenantPrismaMigrations } from "@/infrastructure/db/tenant/prisma-migrations";
@@ -857,6 +866,199 @@ describe("Identity V2 real PostgreSQL", () => {
     );
     expect((await profileGet(profileRequest(hostname))).status).toBe(200);
     expect((await profileGet(profileRequest(b.hostname))).status).toBe(401);
+  });
+  it("keeps phone, username and platform login working without mail and rejects email before writes", async () => {
+    const previousMail = process.env.MAIL_TRANSPORT;
+    const adminId = randomUUID();
+    vi.stubEnv("MAIL_TRANSPORT", "disabled");
+    resetServerConfigForTests();
+    try {
+      const settings = await getIdentitySettings(a);
+      expect(settings.mailAvailable).toBe(false);
+      expect(settings.methods).toMatchObject({
+        email_password: false,
+        email_otp: false,
+        username_password: true,
+      });
+      const newPhone = "+989121234592";
+      expect(
+        (
+          await tenantAuthPost(
+            request(a, "/phone-number/send-otp", { phoneNumber: newPhone }),
+          )
+        ).status,
+      ).toBe(200);
+      const code = readTestSms(a.tenantId, newPhone)?.code;
+      expect(code).toMatch(/^\d{6}$/);
+      const registration = await tenantAuthPost(
+        request(a, "/phone-number/verify", {
+          phoneNumber: newPhone,
+          code,
+          username: "mail_disabled_person",
+          password,
+          profile: {
+            first_name: "SMS",
+            last_name: "Only",
+            occupation: "Tester",
+          },
+        }),
+      );
+      expect(registration.status, await registration.clone().text()).toBe(200);
+      const login = await tenantAuthPost(
+        request(a, "/sign-in/username", {
+          username: "mail_disabled_person",
+          password,
+        }),
+      );
+      expect(login.status, await login.clone().text()).toBe(200);
+      const snapshot = async () =>
+        (
+          await getTenantPool(a).query(
+            "SELECT (SELECT count(*)::int FROM tenant_users) AS users,(SELECT count(*)::int FROM tenant_invitations) AS invitations,(SELECT count(*)::int FROM tenant_auth_verifications) AS verifications",
+          )
+        ).rows[0];
+      const before = await snapshot();
+      for (const path of [
+        "/email-otp/send-verification-otp",
+        "/sign-in/email-otp",
+        "/sign-in/email",
+        "/sign-up/email",
+        "/forget-password",
+        "/reset-password",
+      ]) {
+        const response = await tenantAuthPost(
+          request(a, path, { email: "unavailable@example.test" }),
+        );
+        expect(response.status).toBe(403);
+        expect(await response.text()).toContain("سرویس ایمیل در دسترس نیست");
+      }
+      const actor = {
+        id: fixtures[0]?.ownerId ?? "",
+        tenantId: a.tenantId,
+        email: "owner@example.test",
+        name: "Owner",
+        authenticationLevel: "PASSWORD",
+        permissions: new Set(["participant.create"]),
+      };
+      await expect(
+        issueTenantUserInvitation(
+          a,
+          {
+            name: "No invitation",
+            email: "unavailable@example.test",
+            roleCodes: ["participant"],
+            profileType: "PARTICIPANT",
+          },
+          actor,
+          randomUUID(),
+          `http://${a.hostname}:3000`,
+        ),
+      ).rejects.toMatchObject({ code: "FEATURE_DISABLED" });
+      await expect(
+        issueInitialTenantOwnerInvitation(
+          a,
+          { name: "No owner invite", email: "owner-unavailable@example.test" },
+          randomUUID(),
+          `http://${a.hostname}:3000`,
+        ),
+      ).rejects.toMatchObject({ code: "FEATURE_DISABLED" });
+      await expect(
+        saveIdentitySettings(
+          a,
+          userId,
+          {
+            methods: { ...settings.methods, email_otp: true },
+            fields: settings.fields,
+          },
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ code: "FEATURE_DISABLED" });
+      await expect(
+        saveIdentitySettings(
+          a,
+          userId,
+          {
+            methods: { ...settings.methods, email_password: true },
+            fields: settings.fields,
+          },
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ code: "FEATURE_DISABLED" });
+      expect(await snapshot()).toEqual(before);
+      await expect(
+        saveIdentitySettings(
+          a,
+          userId,
+          {
+            methods: {
+              sms_otp: false,
+              username_password: false,
+              email_password: false,
+              email_otp: false,
+              google: true,
+            },
+            fields: settings.fields,
+          },
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+      const platformOrigin = getServerConfig().BETTER_AUTH_URL;
+      const platformRequest = (path: string, body: unknown) =>
+        new Request(`${platformOrigin}/api/auth${path}`, {
+          method: "POST",
+          headers: {
+            host: new URL(platformOrigin).host,
+            origin: platformOrigin,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+      expect(
+        (
+          await platformAuthPost(
+            platformRequest("/request-password-reset", {
+              email: "unavailable@example.test",
+            }),
+          )
+        ).status,
+      ).toBe(403);
+      await getControlPool().query(
+        'INSERT INTO platform_auth_users(id,name,email,"emailVerified","createdAt","updatedAt") VALUES($1,\'Mail disabled admin\',$2,true,now(),now())',
+        [adminId, `${adminId}@example.test`],
+      );
+      await getControlPool().query(
+        'INSERT INTO platform_auth_accounts(id,"accountId","providerId","userId",password,"createdAt","updatedAt") VALUES($1,$2,\'credential\',$2,$3,now(),now())',
+        [randomUUID(), adminId, await hashPlatformPassword(password)],
+      );
+      await getControlPool().query(
+        "INSERT INTO platform_admins(id,auth_user_id,email,display_name) VALUES($1::uuid,$1::text,$2,'Mail disabled admin')",
+        [adminId, `${adminId}@example.test`],
+      );
+      const platformLogin = await platformAuthPost(
+        platformRequest("/sign-in/email", {
+          email: `${adminId}@example.test`,
+          password,
+        }),
+      );
+      expect(platformLogin.status, await platformLogin.clone().text()).toBe(
+        200,
+      );
+    } finally {
+      for (const table of ["platform_auth_sessions", "platform_auth_accounts"])
+        await getControlPool().query(`DELETE FROM ${table} WHERE "userId"=$1`, [
+          adminId,
+        ]);
+      await getControlPool().query(
+        "DELETE FROM platform_admins WHERE auth_user_id=$1",
+        [adminId],
+      );
+      await getControlPool().query(
+        "DELETE FROM platform_auth_users WHERE id=$1",
+        [adminId],
+      );
+      vi.stubEnv("MAIL_TRANSPORT", previousMail);
+      resetServerConfigForTests();
+    }
   });
   it("rejects disabled SMS endpoints and unsafe lockout configuration", async () => {
     const settings = await getIdentitySettings(a);

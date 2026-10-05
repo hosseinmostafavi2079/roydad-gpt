@@ -127,9 +127,11 @@ export function TenantSignInForm({
           >
             ادامه با گوگل
           </button>
-          <p className="hint" aria-hidden="true">
-            یا با ایمیل ادامه دهید
-          </p>
+          {(otpEnabled || passwordEnabled) && (
+            <p className="hint" aria-hidden="true">
+              یا با ایمیل ادامه دهید
+            </p>
+          )}
         </>
       )}
       {otpEnabled && passwordEnabled && (
@@ -155,80 +157,84 @@ export function TenantSignInForm({
           {error}
         </p>
       )}
-      <div className="field">
-        <label className="label" htmlFor="tenant-email">
-          ایمیل
-        </label>
-        <input
-          id="tenant-email"
-          className="input"
-          type="email"
-          dir="ltr"
-          autoComplete="username"
-          required
-          maxLength={320}
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-      </div>
-      {mode === "otp" && (
-        <div className="field">
-          <label className="label" htmlFor="tenant-otp">
-            کد یک‌بارمصرف ایمیلی
-          </label>
-          <input
-            id="tenant-otp"
-            className="input"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={6}
-            minLength={6}
-            pattern="[0-9]{6}"
-            value={otp}
-            onChange={(event) => setOtp(event.target.value)}
-            required
-          />
-          <button
-            type="button"
-            className="btn btn-secondary"
-            disabled={busy || !email || cooldown > 0}
-            onClick={sendOtp}
-          >
-            {cooldown > 0
-              ? `ارسال دوباره تا ${cooldown} ثانیه`
-              : sent
-                ? "ارسال دوباره کد"
-                : "دریافت کد"}
-          </button>
-          {sent && (
-            <p className="hint">
-              اگر حسابی با این ایمیل وجود داشته باشد، کد ارسال شده است. کد شش
-              رقمی تا پنج دقیقه معتبر است.
-            </p>
+      {(otpEnabled || passwordEnabled) && (
+        <>
+          <div className="field">
+            <label className="label" htmlFor="tenant-email">
+              ایمیل
+            </label>
+            <input
+              id="tenant-email"
+              className="input"
+              type="email"
+              dir="ltr"
+              autoComplete="username"
+              required
+              maxLength={320}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
+          </div>
+          {mode === "otp" && (
+            <div className="field">
+              <label className="label" htmlFor="tenant-otp">
+                کد یک‌بارمصرف ایمیلی
+              </label>
+              <input
+                id="tenant-otp"
+                className="input"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                minLength={6}
+                pattern="[0-9]{6}"
+                value={otp}
+                onChange={(event) => setOtp(event.target.value)}
+                required
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={busy || !email || cooldown > 0}
+                onClick={sendOtp}
+              >
+                {cooldown > 0
+                  ? `ارسال دوباره تا ${cooldown} ثانیه`
+                  : sent
+                    ? "ارسال دوباره کد"
+                    : "دریافت کد"}
+              </button>
+              {sent && (
+                <p className="hint">
+                  اگر حسابی با این ایمیل وجود داشته باشد، کد ارسال شده است. کد
+                  شش رقمی تا پنج دقیقه معتبر است.
+                </p>
+              )}
+            </div>
           )}
-        </div>
+          {mode === "password" && (
+            <div className="field">
+              <label className="label" htmlFor="tenant-password">
+                گذرواژه
+              </label>
+              <input
+                id="tenant-password"
+                className="input"
+                type="password"
+                autoComplete="current-password"
+                required
+                minLength={12}
+                maxLength={128}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </div>
+          )}
+          <button className="btn btn-primary" type="submit" disabled={busy}>
+            {busy ? "در حال بررسی…" : "ورود امن"}
+          </button>
+        </>
       )}
-      {mode === "password" && (
-        <div className="field">
-          <label className="label" htmlFor="tenant-password">
-            گذرواژه
-          </label>
-          <input
-            id="tenant-password"
-            className="input"
-            type="password"
-            autoComplete="current-password"
-            required
-            minLength={12}
-            maxLength={128}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </div>
-      )}
-      <button className="btn btn-primary" type="submit" disabled={busy}>
-        {busy ? "در حال بررسی…" : "ورود امن"}
-      </button>
     </form>
   );
 }

@@ -18,6 +18,7 @@ const validConfig = {
   BETTER_AUTH_URL: "http://localhost:3000",
   BETTER_AUTH_SECRET: "a".repeat(48),
   PLATFORM_BASE_DOMAIN: "localhost",
+  SMTP_FROM: "EventOS <test@example.test>",
 };
 
 describe("server configuration", () => {
@@ -34,7 +35,7 @@ describe("server configuration", () => {
         ...validConfig,
         NODE_ENV: "production",
         PLATFORM_REQUIRE_MFA: "false",
-        SMTP_URL: "smtps://mail.example.com",
+        SMTP_URL: "smtps://test:test@mail.example.com",
         TENANT_BOOTSTRAP_ENCRYPTION_KEY: "a".repeat(32),
       }).PLATFORM_REQUIRE_MFA,
     ).toBe(false);
@@ -61,6 +62,35 @@ describe("server configuration", () => {
     ).toThrow(/dedicated 32-character secret/);
   });
 
+  it("allows production disabled mail without SMTP and rejects credentialless smtp", () => {
+    const production = {
+      ...validConfig,
+      NODE_ENV: "production",
+      TENANT_BOOTSTRAP_ENCRYPTION_KEY: "a".repeat(32),
+    };
+    expect(
+      parseServerConfig({
+        ...production,
+        MAIL_TRANSPORT: "disabled",
+        SMTP_URL: "",
+        SMTP_FROM: "",
+      }).MAIL_TRANSPORT,
+    ).toBe("disabled");
+    expect(() =>
+      parseServerConfig({
+        ...production,
+        MAIL_TRANSPORT: "smtp",
+        SMTP_URL: "smtps://mail.example.com",
+      }),
+    ).toThrow(/credentialed/);
+    expect(
+      parseServerConfig({
+        ...production,
+        MAIL_TRANSPORT: "smtp",
+        SMTP_URL: "smtps://test:test@mail.example.com",
+      }).MAIL_TRANSPORT,
+    ).toBe("smtp");
+  });
   it("rejects empty and scaffold placeholder secrets", () => {
     expect(() =>
       parseServerConfig({
@@ -86,6 +116,30 @@ describe("server configuration", () => {
         TENANT_BOOTSTRAP_ENCRYPTION_KEY: "a".repeat(32),
       }),
     ).toThrow(/Test mail transport is unavailable in production/);
+  });
+  it("does not grant a production test-mail exception to E2E markers", () => {
+    const marker = Symbol.for("eventos.e2e.mail.outbox");
+    const target = globalThis as Record<symbol, unknown>;
+    const previous = target[marker];
+    const previousPath = process.env.EVENTOS_E2E_SERVER_PID_FILE;
+    target[marker] = true;
+    process.env.EVENTOS_E2E_SERVER_PID_FILE = "tests/.e2e-server.json";
+    try {
+      expect(() =>
+        parseServerConfig({
+          ...validConfig,
+          NODE_ENV: "production",
+          MAIL_TRANSPORT: "test",
+          TENANT_BOOTSTRAP_ENCRYPTION_KEY: "a".repeat(32),
+        }),
+      ).toThrow(/Test mail transport is unavailable in production/);
+    } finally {
+      if (previous === undefined) delete target[marker];
+      else target[marker] = previous;
+      if (previousPath === undefined)
+        delete process.env.EVENTOS_E2E_SERVER_PID_FILE;
+      else process.env.EVENTOS_E2E_SERVER_PID_FILE = previousPath;
+    }
   });
   it("rejects test SMS in production without any E2E exception", () => {
     expect(parseServerConfig(validConfig).SMS_TRANSPORT).toBe("provider");

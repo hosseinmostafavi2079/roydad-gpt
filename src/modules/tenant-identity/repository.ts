@@ -4,7 +4,10 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { DomainError } from "@/shared/errors/domain-error";
 import { hashPlatformPassword } from "@/infrastructure/auth/password";
-import { sendTenantInvitationEmail } from "@/infrastructure/auth/mailer";
+import {
+  sendTenantInvitationEmail,
+  assertEmailServiceAvailable,
+} from "@/infrastructure/auth/mailer";
 import {
   getTenantPool,
   type TenantPoolContext,
@@ -125,6 +128,7 @@ async function issueInvitation(
       }[profileType],
     );
   }
+  assertEmailServiceAvailable();
   const cleanEmail = input.email.trim().toLowerCase();
   const token = randomBytes(32).toString("base64url");
   const hash = tokenHash(token);
@@ -304,6 +308,7 @@ export function issueInitialTenantOwnerInvitation(
   allowExistingInvite = false,
 ) {
   return (async () => {
+    assertEmailServiceAvailable();
     const lock = await getTenantPool(context).connect();
     const lockName = `tenant-owner-bootstrap:${context.tenantId}`;
     try {

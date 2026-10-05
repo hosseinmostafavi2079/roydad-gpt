@@ -22,12 +22,17 @@ import {
 import { smsProviderRegistry } from "@/modules/sms/registry";
 import { SmsDeliveryError } from "@/modules/sms/provider";
 import { assertTestSmsAllowed } from "@/modules/sms/test-provider";
+import {
+  emailServiceAvailable,
+  assertEmailServiceAvailable,
+} from "@/infrastructure/auth/mailer";
 
 export type IdentitySettings = {
   methods: LoginMethods;
   fields: ProfileField[];
   providerKey: string | null;
   configured: boolean;
+  mailAvailable: boolean;
 };
 export async function getIdentitySettings(
   tenant: TenantContext,
@@ -42,7 +47,8 @@ export async function getIdentitySettings(
     [tenant.tenantId],
   );
   const row = result.rows[0];
-  return row
+  const mailAvailable = emailServiceAvailable();
+  const settings = row
     ? {
         methods: loginMethodsSchema.parse(row.login_methods),
         fields: profileFieldsSchema.parse(row.profile_fields),
@@ -53,14 +59,23 @@ export async function getIdentitySettings(
         methods: {
           sms_otp: tenant.features.sms,
           username_password: tenant.features.password_login,
-          email_password: tenant.features.password_login,
-          email_otp: tenant.features.email_otp,
+          email_password: tenant.features.password_login && mailAvailable,
+          email_otp: tenant.features.email_otp && mailAvailable,
           google: tenant.features.google_login,
         },
         fields: defaultProfileFields.map((field) => ({ ...field })),
         providerKey: null,
         configured: false,
       };
+  return {
+    ...settings,
+    mailAvailable,
+    methods: {
+      ...settings.methods,
+      email_password: settings.methods.email_password && mailAvailable,
+      email_otp: settings.methods.email_otp && mailAvailable,
+    },
+  };
 }
 export async function isSmsProviderAllowed(
   tenant: TenantContext,
@@ -227,6 +242,8 @@ export async function saveIdentitySettings(
 ): Promise<IdentitySettings> {
   const methods = loginMethodsSchema.parse(input.methods);
   const fields = profileFieldsSchema.parse(input.fields);
+  if (methods.email_password || methods.email_otp)
+    assertEmailServiceAvailable();
   if (
     ((methods.email_password || methods.username_password) &&
       !tenant.features.password_login) ||

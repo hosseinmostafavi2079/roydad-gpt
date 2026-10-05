@@ -18,6 +18,7 @@ type Provider = {
   }[];
 };
 type Settings = {
+  mailAvailable: boolean;
   publicSmsConfig?: Record<string, string>;
   methods: LoginMethods;
   fields: ProfileField[];
@@ -100,12 +101,21 @@ export function IdentitySettingsEditor({ editable }: { editable: boolean }) {
       <section className="card card-pad">
         <h2>ورود و ثبت‌نام</h2>
         <p>حداقل یک روش قابل استفاده برای حساب مدیر باید فعال بماند.</p>
+        {!settings.mailAvailable && (
+          <p role="status">
+            سرویس ایمیل در دسترس نیست؛ روش‌های ایمیلی قابل فعال‌سازی نیستند.
+          </p>
+        )}
         <fieldset disabled={!editable || busy}>
           {Object.entries(methodLabels).map(([key, label]) => (
             <label className="check-row" key={key}>
               <span>{label}</span>
               <input
                 type="checkbox"
+                disabled={
+                  !settings.mailAvailable &&
+                  (key === "email_password" || key === "email_otp")
+                }
                 checked={settings.methods[key as keyof LoginMethods]}
                 onChange={(event) =>
                   setSettings({

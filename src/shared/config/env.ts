@@ -50,7 +50,7 @@ const serverConfigSchema = z
       .transform((value) => value === "true"),
     TRUSTED_PROXY_CIDRS: z.string().default(""),
     SMTP_URL: z.string().optional().default(""),
-    MAIL_TRANSPORT: z.enum(["smtp", "test"]).default("smtp"),
+    MAIL_TRANSPORT: z.enum(["disabled", "smtp", "test"]).default("smtp"),
     SMS_TRANSPORT: z.enum(["provider", "test"]).default("provider"),
     MEDIA_S3_ENDPOINT: z.string().default(""),
     MEDIA_S3_REGION: z.string().default("us-east-1"),
@@ -61,10 +61,7 @@ const serverConfigSchema = z
       .enum(["true", "false"])
       .default("false")
       .transform((value) => value === "true"),
-    SMTP_FROM: z
-      .string()
-      .min(3)
-      .default("EventOS Security <security@example.invalid>"),
+    SMTP_FROM: z.string().default(""),
     TENANT_POOL_LIMIT: z.coerce.number().int().min(1).max(128).default(16),
     TENANT_POOL_CONNECTIONS_PER_DATABASE: z.coerce
       .number()
@@ -96,11 +93,7 @@ const serverConfigSchema = z
         message: "Test SMS transport is unavailable in production",
       });
     }
-    if (
-      config.NODE_ENV === "production" &&
-      config.MAIL_TRANSPORT === "test" &&
-      !isE2eTestServer()
-    ) {
+    if (config.NODE_ENV === "production" && config.MAIL_TRANSPORT === "test") {
       ctx.addIssue({
         code: "custom",
         path: ["MAIL_TRANSPORT"],
@@ -109,6 +102,7 @@ const serverConfigSchema = z
     }
     if (
       config.NODE_ENV === "production" &&
+      config.MAIL_TRANSPORT === "smtp" &&
       (!config.SMTP_URL || !config.SMTP_FROM)
     ) {
       ctx.addIssue({
@@ -132,6 +126,7 @@ const serverConfigSchema = z
     }
 
     if (
+      config.MAIL_TRANSPORT === "smtp" &&
       config.SMTP_URL &&
       !config.SMTP_URL.toLowerCase().startsWith("smtps://") &&
       config.NODE_ENV === "production"
@@ -141,6 +136,31 @@ const serverConfigSchema = z
         path: ["SMTP_URL"],
         message: "Production SMTP must use TLS (smtps://)",
       });
+    }
+    if (config.NODE_ENV === "production" && config.MAIL_TRANSPORT === "smtp") {
+      try {
+        const url = new URL(config.SMTP_URL);
+        if (
+          url.protocol !== "smtps:" ||
+          !url.hostname ||
+          !url.username ||
+          !url.password ||
+          /replace-with/i.test(config.SMTP_URL)
+        )
+          throw new Error();
+      } catch {
+        ctx.addIssue({
+          code: "custom",
+          path: ["SMTP_URL"],
+          message: "Production SMTP requires a valid credentialed SMTPS URL",
+        });
+      }
+      if (!/^[^<>\r\n]+<[^\s@]+@[^\s@]+\.[^\s@]+>$/.test(config.SMTP_FROM))
+        ctx.addIssue({
+          code: "custom",
+          path: ["SMTP_FROM"],
+          message: "Production SMTP requires a valid sender",
+        });
     }
   });
 

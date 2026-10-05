@@ -5,6 +5,23 @@ import os from "node:os";
 import path from "node:path";
 import nodemailer from "nodemailer";
 import { getServerConfig } from "@/shared/config/env";
+import { DomainError } from "@/shared/errors/domain-error";
+
+export function emailServiceAvailable(): boolean {
+  const config = getServerConfig();
+  return (
+    config.MAIL_TRANSPORT === "test" ||
+    (config.MAIL_TRANSPORT === "smtp" &&
+      Boolean(config.SMTP_URL && config.SMTP_FROM))
+  );
+}
+export function assertEmailServiceAvailable(): void {
+  if (!emailServiceAvailable())
+    throw new DomainError(
+      "FEATURE_DISABLED",
+      "سرویس ایمیل در دسترس نیست. برای دریافت راهنمایی با مدیر سامانه تماس بگیرید.",
+    );
+}
 
 type InvitationEmail = Readonly<{
   email: string;
@@ -67,6 +84,7 @@ class SmtpInvitationProvider implements InvitationEmailProvider {
 }
 
 function invitationProvider(): InvitationEmailProvider {
+  assertEmailServiceAvailable();
   const config = getServerConfig();
   if (config.MAIL_TRANSPORT === "test") {
     return new TestOutboxInvitationProvider();
@@ -81,23 +99,12 @@ export async function sendPasswordResetEmail(input: {
   email: string;
   resetUrl: string;
 }): Promise<void> {
-  const config = getServerConfig();
-  if (!config.SMTP_URL) {
-    throw new Error("Password recovery email is not configured.");
-  }
-
-  const transport = nodemailer.createTransport(config.SMTP_URL);
-  try {
-    await transport.sendMail({
-      from: config.SMTP_FROM,
-      to: input.email,
-      subject: "EventOS platform administrator password reset",
-      text: `A password reset was requested for your EventOS platform administrator account. Use this one-time link within one hour: ${input.resetUrl}`,
-      html: `<p>A password reset was requested for your EventOS platform administrator account.</p><p><a href="${escapeHtml(input.resetUrl)}">Reset your password</a></p><p>This one-time link expires after one hour. If you did not request it, ignore this message.</p>`,
-    });
-  } finally {
-    transport.close();
-  }
+  await invitationProvider().send({
+    email: input.email,
+    subject: "EventOS platform administrator password reset",
+    text: `A password reset was requested for your EventOS platform administrator account. Use this one-time link within one hour: ${input.resetUrl}`,
+    html: `<p>A password reset was requested for your EventOS platform administrator account.</p><p><a href="${escapeHtml(input.resetUrl)}">Reset your password</a></p><p>This one-time link expires after one hour. If you did not request it, ignore this message.</p>`,
+  });
 }
 
 export async function sendTenantInvitationEmail(
@@ -141,25 +148,13 @@ export async function sendTenantPasswordResetEmail(input: {
   email: string;
   resetUrl: string;
 }): Promise<void> {
-  if (input.email.endsWith("@phone.eventos.invalid"))
-    throw new Error("Internal phone identity cannot receive email.");
-  const config = getServerConfig();
-  if (!config.SMTP_URL) {
-    throw new Error("Tenant password recovery email is not configured.");
-  }
-  const transport = nodemailer.createTransport(config.SMTP_URL);
   const resetUrl = escapeHtml(input.resetUrl);
-  try {
-    await transport.sendMail({
-      from: config.SMTP_FROM,
-      to: input.email,
-      subject: "EventOS tenant account password reset",
-      text: `A password reset was requested for your EventOS tenant account. Use this one-time link within one hour: ${input.resetUrl}`,
-      html: `<p>A password reset was requested for your EventOS tenant account.</p><p><a href="${resetUrl}">Reset your password</a></p><p>This one-time link expires after one hour. If you did not request it, ignore this message.</p>`,
-    });
-  } finally {
-    transport.close();
-  }
+  await invitationProvider().send({
+    email: input.email,
+    subject: "EventOS tenant account password reset",
+    text: `A password reset was requested for your EventOS tenant account. Use this one-time link within one hour: ${input.resetUrl}`,
+    html: `<p>A password reset was requested for your EventOS tenant account.</p><p><a href="${resetUrl}">Reset your password</a></p><p>This one-time link expires after one hour. If you did not request it, ignore this message.</p>`,
+  });
 }
 
 function escapeHtml(value: string): string {

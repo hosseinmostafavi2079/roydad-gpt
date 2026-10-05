@@ -11,6 +11,7 @@ import {
 import { getTenantPool } from "@/infrastructure/db/tenant/pool";
 import { getControlPool } from "@/infrastructure/db/control/pool";
 import type { PoolClient } from "pg";
+import { assertEmailServiceAvailable } from "@/infrastructure/auth/mailer";
 import { jsonResponse, requestIdFrom } from "@/shared/http/api-response";
 import { DomainError } from "@/shared/errors/domain-error";
 import { googleOAuthEnabledForOrigin } from "@/modules/tenant-identity/google-config";
@@ -195,6 +196,17 @@ async function handle(request: Request): Promise<Response> {
       return await handleIdentityV2Auth(request, tenant, origin, path);
     }
     const identitySettings = await getIdentitySettings(tenant);
+    if (
+      [
+        "/sign-in/email",
+        "/sign-up/email",
+        "/forget-password",
+        "/reset-password",
+        "/verify-email",
+      ].includes(path) ||
+      path.includes("email-otp")
+    )
+      assertEmailServiceAvailable();
     const method =
       path === "/sign-in/email" ||
       path === "/sign-up/email" ||

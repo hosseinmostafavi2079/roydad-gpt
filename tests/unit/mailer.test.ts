@@ -3,7 +3,14 @@ import { readFile, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { sendTenantInvitationEmail } from "@/infrastructure/auth/mailer";
+import {
+  sendTenantInvitationEmail,
+  sendTenantEmailOtp,
+  sendTenantVerificationEmail,
+  sendTenantPasswordResetEmail,
+  sendPasswordResetEmail,
+  emailServiceAvailable,
+} from "@/infrastructure/auth/mailer";
 import { resetServerConfigForTests } from "@/shared/config/env";
 
 const keys = [
@@ -41,7 +48,7 @@ afterEach(async () => {
 
 function configureMailTest(
   nodeEnv: "test" | "development" | "production",
-  mailTransport: "smtp" | "test",
+  mailTransport: "disabled" | "smtp" | "test",
 ): void {
   mutableEnv.NODE_ENV = nodeEnv;
   mutableEnv.MAIL_TRANSPORT = mailTransport;
@@ -65,6 +72,63 @@ function configureMailTest(
 }
 
 describe("tenant invitation mail providers", () => {
+  it("uses the explicit test provider for tenant and platform password recovery", async () => {
+    configureMailTest("test", "test");
+    await sendPasswordResetEmail({
+      email: "platform@example.test",
+      resetUrl: "https://example.test/reset",
+    });
+    await sendTenantPasswordResetEmail({
+      email: "tenant@example.test",
+      resetUrl: "https://tenant.example.test/reset",
+    });
+    const messages = (await readFile(outboxPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(messages.map((message) => message.email)).toEqual([
+      "platform@example.test",
+      "tenant@example.test",
+    ]);
+  });
+  it("disabled production mail rejects every sender and creates no delivery record", async () => {
+    configureMailTest("production", "disabled");
+    expect(emailServiceAvailable()).toBe(false);
+    for (const send of [
+      () =>
+        sendTenantInvitationEmail({
+          email: "test@example.test",
+          tenantName: "Test",
+          inviteUrl: "https://example.test/invite",
+        }),
+      () =>
+        sendTenantEmailOtp({
+          email: "test@example.test",
+          tenantName: "Test",
+          otp: "123456",
+        }),
+      () =>
+        sendTenantVerificationEmail({
+          email: "test@example.test",
+          tenantName: "Test",
+          url: "https://example.test/verify",
+        }),
+      () =>
+        sendTenantPasswordResetEmail({
+          email: "test@example.test",
+          resetUrl: "https://example.test/reset",
+        }),
+      () =>
+        sendPasswordResetEmail({
+          email: "test@example.test",
+          resetUrl: "https://example.test/reset",
+        }),
+    ])
+      await expect(send()).rejects.toThrow("سرویس ایمیل در دسترس نیست");
+    await expect(readFile(outboxPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
   it("captures the recipient and invitation with explicit test transport without SMTP", async () => {
     configureMailTest("development", "test");
     const input = {
@@ -96,7 +160,7 @@ describe("tenant invitation mail providers", () => {
         tenantName: "Test Organization",
         inviteUrl: "http://localhost:3000/accept-invitation?token=test-token",
       }),
-    ).rejects.toThrow("Tenant invitation email delivery is not configured.");
+    ).rejects.toThrow("سرویس ایمیل در دسترس نیست");
   });
 
   it("rejects test transport in an ordinary production process", async () => {

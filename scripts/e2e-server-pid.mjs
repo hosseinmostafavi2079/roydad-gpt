@@ -32,6 +32,7 @@ writeFileSync(
   { flag: "wx", mode: 0o600 },
 );
 globalThis[Symbol.for("eventos.e2e.mail.outbox")] = true;
+await import("../tests/e2e/mail-transport.mjs");
 if (process.env.EVENTOS_E2E_SMS_HTTP_OUTBOX)
   await import("../tests/e2e/sms-http.mjs");
 if (process.env.EVENTOS_E2E_DOMAIN_DNS_FILE)

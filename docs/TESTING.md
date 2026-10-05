@@ -22,7 +22,7 @@ Tests are release gates, not optional follow-up. Use deterministic synthetic ide
 
 Phase 2 unit policy tests cover permission unions/default-deny, role-grant escalation, protected roles and owner grants, token shape/expiry/consumption, status eligibility, tenant-bound sessions, contextual resource authorization, and mass-assignment rejection. Integration tests use two independently provisioned PostgreSQL tenant databases and exercise migration, invitation, session, grant, race, audit, status, role, API, and cross-tenant boundaries.
 
-The Playwright suite runs the production-built standalone server with production cookie/configuration behavior. Its explicitly PID-tracked local E2E server uses a private temporary invitation outbox instead of connecting to real SMTP; regular production processes do not set the E2E marker and require TLS SMTP. The browser flow retains platform admin MFA, tenant provisioning failure/retry, settings, and logout checks; it additionally accepts owner/staff/instructor/participant invitations, creates and assigns a custom least-privilege role, checks grouped/high-risk permission controls and permitted/hidden navigation, checks direct role API denial and active-session rejection after suspension, verifies portal/admin boundaries, and rejects a Tenant A session and invitation on Tenant B. Attendance and finance are seeded future permission modules; their business routes are intentionally absent until Phase 3. RBAC grants and denials for those permissions are covered at policy/integration level rather than by introducing Phase 3 endpoints.
+The Playwright suite runs the production-built standalone server with production cookie/configuration behavior. Its explicitly PID-tracked local E2E server selects the SMTP adapter and a test-only preload captures Nodemailer delivery in a private temporary outbox without a network connection. Production configuration never permits the test adapter. The browser flow retains platform admin MFA, tenant provisioning failure/retry, settings, and logout checks; it additionally accepts owner/staff/instructor/participant invitations, creates and assigns a custom least-privilege role, checks grouped/high-risk permission controls and permitted/hidden navigation, checks direct role API denial and active-session rejection after suspension, verifies portal/admin boundaries, and rejects a Tenant A session and invitation on Tenant B. Attendance and finance are seeded future permission modules; their business routes are intentionally absent until Phase 3. RBAC grants and denials for those permissions are covered at policy/integration level rather than by introducing Phase 3 endpoints.
 
 ## Required commands
 
@@ -45,13 +45,13 @@ CodeQL is configured in `.github/workflows/codeql.yml` and has passed in GitHub 
 
 CI exports `NODE_ENV=development` for migrations and administrator seeding. Vitest previously inherited that value, so the invitation mailer chose SMTP instead of its private test outbox and failed because CI correctly leaves `SMTP_URL` empty. `vitest.config.ts` now sets `MAIL_TRANSPORT=test` inside the test runner; `NODE_ENV=test` remains scoped to Vitest for other test-only behavior and does not choose the mail provider. Run the integration suite with a parent `NODE_ENV=development` and `MAIL_TRANSPORT=smtp` to reproduce CI's environment and verify the isolation.
 
-Invitation delivery composes one recipient, subject, text, and HTML message before passing it to an SMTP provider or the test outbox provider. `MAIL_TRANSPORT` defaults to `smtp`; `test` is rejected in production except for the explicitly preloaded Playwright server. The outbox records the complete message in a mode-0600 temporary file because Playwright's standalone server and test process do not share memory. Integration and Playwright read the captured message to verify recipient, link, hashed-at-rest token, one-time acceptance, and wrong-tenant rejection. No test message is exposed through an application route. An ordinary production process uses SMTP and configuration rejects missing or non-TLS SMTP.
+Invitation delivery composes one recipient, subject, text, and HTML message before passing it to an SMTP provider or the test outbox provider. `MAIL_TRANSPORT` defaults to `smtp`; `test` is always rejected in production. The outbox records the complete message in a mode-0600 temporary file because Playwright's standalone server and test process do not share memory. Integration and Playwright read the captured message to verify recipient, link, hashed-at-rest token, one-time acceptance, and wrong-tenant rejection. No test message is exposed through an application route. Production with `smtp` rejects missing or non-TLS SMTP; explicit `disabled` makes email-dependent flows unavailable.
 
 ## Production build environment regression
 
 The CI job exports `NODE_ENV=development` for its setup steps. Running the old `next build` command under that inherited value reproduced the GitHub failure locally: Next warned about the environment, React reported missing keys in generated viewport/head boundaries, and `/_global-error` prerender failed with `useContext` on null. With `NODE_ENV=production`, the unchanged application built successfully with none of those warnings. React and React DOM are both pinned to 19.2.8, and the application has no custom global error component. The warnings did not originate from application list rendering, so no UI key changes were needed.
 
-`pnpm build` now runs `scripts/build.mjs`, which launches Next with `NODE_ENV=production` and `MAIL_TRANSPORT=smtp` regardless of its parent shell. The GitHub production-build step also sets those values explicitly without changing the job-wide development configuration. Playwright starts its production-built standalone server with an explicit test mail transport and the validated private preload.
+`pnpm build` now runs `scripts/build.mjs`, which launches Next with `NODE_ENV=production` and `MAIL_TRANSPORT=smtp` unless the parent explicitly selects `disabled`; it never builds with the test adapter. The GitHub production-build step also sets those values explicitly without changing the job-wide development configuration. Playwright starts its production-built standalone server with the SMTP adapter and a test-only Nodemailer capture preload, without a production test-transport exception.
 
 During the local browser rerun, Better Auth attempted to insert a platform verification without an ID. The existing `platform_auth_verifications.id` column had no database default, unlike the other authentication ID columns. Forward-only control migration `0006_auth_verification_id_default.sql` adds a UUID-text default; the PostgreSQL suite verifies the migration and column default. The browser flow passed on a clean rerun. One earlier local run had a connection reset late in the flow; its retry reused the already-mutated administrator and failed sign-in, so that attempt is not counted as a pass.
 
@@ -204,3 +204,41 @@ The combined custom-domain case verifies exact Host resolution and login-page br
 Local B3 gate (2026-10-05): `pnpm check` passed with 94 warnings and 3 informational diagnostics; units 114/114; PostgreSQL integration 43/43; production build passed; full Playwright 11/11 including teardown; Prisma validation passed; production dependency audit reported no known vulnerabilities; Gitleaks reported no leaks; `git diff --check` passed. The full suite was run once after focused identity tests passed (15/15). Existing clean provisioning and forward upgrade/idempotency coverage reached `0014_identity_v2`; no new migration was necessary.
 
 Focused security review found no regression in tenant/session isolation, strict host/origin checks, TXT proof ownership, primary switching, encrypted SMS configuration, generic OTP logging, or scoped profile/sensitive-field authorization. No application architecture, production configuration, CI workflow or deployment changes are included. GitHub Quality Gates and CodeQL must pass on the pushed B3 commit before the release gate is approved.
+
+## C1.1 — optional production email
+
+Production may explicitly select `MAIL_TRANSPORT=disabled` with empty SMTP values. Focused coverage proves SMS registration, username and platform password login work; email OTP, registration/login, reset, verification and invitations safely reject without creating delivery state; tenant email methods and unusable login configurations cannot be enabled. SMTP requires credentials, TLS and sender; production test transport is always rejected. Test mail captures both invitation and recovery messages. The E2E preload covers both Nodemailer ESM and CommonJS exports and exists only in test infrastructure.
+
+Focused validation: 36/36 unit tests across config, mailer, Identity V2, E2E mail capture and email login UI; 16/16 real PostgreSQL Identity V2 integration tests; 10/10 Windows deployment artifact tests. Full application/Playwright suites were not rerun for this scoped change.
+
+Final C1.1 gate: `pnpm check` passed (94 lint warnings and 3 informational diagnostics); production build succeeded with `MAIL_TRANSPORT=disabled`, empty SMTP values and standard `NODE_ENV=production`; `git diff --check` passed. No deployment or full Playwright regression was performed.
+
+C1.1 changed-file manifest:
+
+- `.env.example`
+- `deployment/windows-iis/.env.production.example`
+- `deployment/windows-iis/README.md`
+- `deployment/windows-iis/compose.production.yaml`
+- `deployment/windows-iis/validate.test.mjs`
+- `docs/SECURITY.md`
+- `docs/TESTING.md`
+- `playwright.config.ts`
+- `scripts/build.mjs`
+- `scripts/e2e-server-pid.mjs`
+- `scripts/windows-iis-preflight.mjs`
+- `src/app/_components/identity-settings-editor.tsx`
+- `src/app/_components/tenant-sign-in-form.tsx`
+- `src/app/api/auth/[...all]/route.ts`
+- `src/app/api/tenant-auth/[...all]/route.ts`
+- `src/app/login/page.tsx`
+- `src/app/sign-in/page.tsx`
+- `src/infrastructure/auth/mailer.ts`
+- `src/modules/tenant-identity/identity-v2-repository.ts`
+- `src/modules/tenant-identity/repository.ts`
+- `src/shared/config/env.ts`
+- `tests/integration/identity-v2.test.ts`
+- `tests/unit/config.test.ts`
+- `tests/unit/mailer.test.ts`
+- `tests/e2e/mail-transport.mjs`
+- `tests/unit/e2e-mail.test.ts`
+- `tests/unit/email-login-ui.test.ts`

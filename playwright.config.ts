@@ -65,8 +65,9 @@ export default defineConfig({
     env: {
       ...process.env,
       NODE_ENV: "production",
-      MAIL_TRANSPORT: "test",
-      SMTP_URL: process.env.SMTP_URL || "smtps://localhost:465",
+      MAIL_TRANSPORT: "smtp",
+      SMTP_URL: "smtps://e2e:e2e@localhost:465",
+      SMTP_FROM: "EventOS E2E <test@example.test>",
       PORT: String(e2ePort),
       EVENTOS_E2E_SERVER_PID_FILE: "tests/.e2e-server.json",
     },
