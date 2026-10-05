@@ -4,7 +4,7 @@ import { open } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import nodemailer from "nodemailer";
-import { getServerConfig } from "@/shared/config/env";
+import { getServerConfig, isE2eTestServer } from "@/shared/config/env";
 import { DomainError } from "@/shared/errors/domain-error";
 
 export function emailServiceAvailable(): boolean {
@@ -86,7 +86,7 @@ class SmtpInvitationProvider implements InvitationEmailProvider {
 function invitationProvider(): InvitationEmailProvider {
   assertEmailServiceAvailable();
   const config = getServerConfig();
-  if (config.MAIL_TRANSPORT === "test") {
+  if (config.MAIL_TRANSPORT === "test" || isE2eTestServer()) {
     return new TestOutboxInvitationProvider();
   }
   if (!config.SMTP_URL) {

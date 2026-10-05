@@ -282,6 +282,7 @@ function startWorker(fail = false): Promise<ChildProcess> {
       env: {
         ...process.env,
         NODE_ENV: "test",
+        MAIL_TRANSPORT: "test",
         LOG_LEVEL: "warn",
         ...(fail ? { EVENTOS_TEST_FAIL_PHASE: "MIGRATING" } : {}),
       },

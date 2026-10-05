@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { readFile, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import nodemailer from "nodemailer";
 import {
   sendTenantInvitationEmail,
   sendTenantEmailOtp,
@@ -26,6 +27,8 @@ const keys = [
   "TENANT_BOOTSTRAP_ENCRYPTION_KEY",
   "PLATFORM_BASE_DOMAIN",
   "SMTP_URL",
+  "SMTP_FROM",
+  "EVENTOS_E2E_SERVER_PID_FILE",
   "MAIL_TRANSPORT",
   "EVENTOS_TEST_MAIL_OUTBOX",
 ] as const;
@@ -35,8 +38,14 @@ const outboxPath = path.join(
   `eventos-mailer-unit-${randomUUID()}.jsonl`,
 );
 const mutableEnv = process.env as Record<string, string | undefined>;
+const marker = Symbol.for("eventos.e2e.mail.outbox");
+const globals = globalThis as Record<symbol, unknown>;
+const originalMarker = globals[marker];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  if (originalMarker === undefined) delete globals[marker];
+  else globals[marker] = originalMarker;
   for (const key of keys) {
     const value = original[key];
     if (value === undefined) delete mutableEnv[key];
@@ -72,6 +81,104 @@ function configureMailTest(
 }
 
 describe("tenant invitation mail providers", () => {
+  const invitation = {
+    email: "recipient@example.test",
+    tenantName: "Test Organization",
+    inviteUrl: "https://tenant.example.test/accept-invitation?token=test-token",
+  };
+  function productionSmtp(): void {
+    configureMailTest("production", "smtp");
+    process.env.SMTP_URL = "smtps://e2e:e2e@localhost:465";
+    process.env.SMTP_FROM = "EventOS <test@example.test>";
+    delete globals[marker];
+    delete process.env.EVENTOS_E2E_SERVER_PID_FILE;
+    resetServerConfigForTests();
+  }
+  it("ordinary production SMTP selects Nodemailer and does not write an outbox", async () => {
+    productionSmtp();
+    const sendMail = vi.fn().mockResolvedValue({});
+    const close = vi.fn();
+    const createTransport = vi
+      .spyOn(nodemailer, "createTransport")
+      .mockReturnValue({ sendMail, close } as unknown as ReturnType<
+        typeof nodemailer.createTransport
+      >);
+    await sendTenantInvitationEmail(invitation);
+    expect(createTransport).toHaveBeenCalledWith(process.env.SMTP_URL);
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: invitation.email,
+        text: expect.stringContaining(invitation.inviteUrl),
+      }),
+    );
+    expect(close).toHaveBeenCalledOnce();
+    await expect(readFile(outboxPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+  it("isolated production E2E writes the activation URL without creating any SMTP transport", async () => {
+    productionSmtp();
+    globals[marker] = true;
+    process.env.EVENTOS_E2E_SERVER_PID_FILE = "tests/.e2e-server.json";
+    const createTransport = vi
+      .spyOn(nodemailer, "createTransport")
+      .mockImplementation(() => {
+        throw new Error("Unexpected SMTP connection");
+      });
+    await sendTenantInvitationEmail(invitation);
+    expect(createTransport).not.toHaveBeenCalled();
+    expect(JSON.parse(await readFile(outboxPath, "utf8"))).toMatchObject({
+      ...invitation,
+      text: expect.stringContaining(invitation.inviteUrl),
+    });
+  });
+  it.each(["marker only", "PID path only", "wrong PID path"])(
+    "does not bypass SMTP with %s",
+    async (mode) => {
+      productionSmtp();
+      if (mode !== "PID path only") globals[marker] = true;
+      if (mode !== "marker only")
+        process.env.EVENTOS_E2E_SERVER_PID_FILE =
+          mode === "wrong PID path"
+            ? "tests/other.json"
+            : "tests/.e2e-server.json";
+      const createTransport = vi
+        .spyOn(nodemailer, "createTransport")
+        .mockImplementation(() => {
+          throw new Error("SMTP provider selected");
+        });
+      await expect(sendTenantInvitationEmail(invitation)).rejects.toThrow(
+        "SMTP provider selected",
+      );
+      expect(createTransport).toHaveBeenCalledOnce();
+    },
+  );
+  it("isolated E2E still rejects disabled mail and production test transport", async () => {
+    productionSmtp();
+    globals[marker] = true;
+    process.env.EVENTOS_E2E_SERVER_PID_FILE = "tests/.e2e-server.json";
+    process.env.MAIL_TRANSPORT = "disabled";
+    resetServerConfigForTests();
+    await expect(sendTenantInvitationEmail(invitation)).rejects.toThrow(
+      "سرویس ایمیل در دسترس نیست",
+    );
+    process.env.MAIL_TRANSPORT = "test";
+    resetServerConfigForTests();
+    await expect(sendTenantInvitationEmail(invitation)).rejects.toThrow(
+      "Test mail transport is unavailable in production",
+    );
+  });
+  it("isolated E2E rejects outboxes outside OS temp", async () => {
+    productionSmtp();
+    globals[marker] = true;
+    process.env.EVENTOS_E2E_SERVER_PID_FILE = "tests/.e2e-server.json";
+    process.env.EVENTOS_TEST_MAIL_OUTBOX = path.resolve(
+      "tests/unsafe-outbox.jsonl",
+    );
+    await expect(sendTenantInvitationEmail(invitation)).rejects.toThrow(
+      "test invitation outbox is unavailable",
+    );
+  });
   it("uses the explicit test provider for tenant and platform password recovery", async () => {
     configureMailTest("test", "test");
     await sendPasswordResetEmail({
