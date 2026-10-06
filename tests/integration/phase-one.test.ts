@@ -2252,7 +2252,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       expect(history.rows[0]).toEqual({
         phase1_rows: 1,
         identity_rows: 2,
-        prisma_rows: 15,
+        prisma_rows: 16,
       });
     } finally {
       await upgraded.end();
