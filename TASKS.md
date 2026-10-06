@@ -304,5 +304,5 @@ Clean provisioning and the existing forward upgrade/idempotency tests passed thr
 - [x] Windows local-driver env/preflight, app-only `eventos-production_media` volume, node-owned private image directory and physical host disk thresholds.
 - [x] Scoped media backup with checksum/size/failure propagation and mocked lifecycle tests.
 - [x] Dry-run default, conditional/idempotent/resumable local-to-S3 migration with checksum verification; no migration/deployment executed.
-- [x] Focused units 34/34, local-driver PostgreSQL journey 1/1, Windows artifacts 15/15 and mocked backup 1/1; check and local-driver production build.
+- [x] Focused units 35/35, PostgreSQL media journey 2/2 (one local, one S3), Windows artifacts 15/15 and mocked backup 1/1; check and local-driver production build.
 - [ ] Publish only C1.3 and confirm current-commit GitHub Quality Gates and CodeQL.

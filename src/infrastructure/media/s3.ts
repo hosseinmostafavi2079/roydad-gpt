@@ -42,6 +42,9 @@ function storage() {
     endpoint: endpoint.toString(),
     region: config.MEDIA_S3_REGION,
     forcePathStyle: true,
+    // Request full-object checksum verification explicitly below. A full-object
+    // checksum cannot validate a partial Range response from compatible providers.
+    responseChecksumValidation: "WHEN_REQUIRED",
     credentials: {
       accessKeyId: config.MEDIA_S3_ACCESS_KEY_ID,
       secretAccessKey: config.MEDIA_S3_SECRET_ACCESS_KEY,
@@ -81,7 +84,12 @@ export async function getMediaObject(
 ): Promise<Uint8Array> {
   const { client, bucket } = storage();
   const response = await client.send(
-    new GetObjectCommand({ Bucket: bucket, Key: key, Range: range }),
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Range: range,
+      ...(range ? {} : { ChecksumMode: "ENABLED" }),
+    }),
   );
   if (!response.Body) throw new DomainError("NOT_FOUND", "رسانه یافت نشد.");
   return response.Body.transformToByteArray();
