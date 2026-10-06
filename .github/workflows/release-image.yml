@@ -1,0 +1,65 @@
+name: Prepare immutable EventOS release image
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Full approved commit SHA reachable from main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  packages: write
+
+concurrency:
+  group: eventos-release-${{ inputs.commit_sha }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      COMMIT: ${{ inputs.commit_sha }}
+      IMAGE: ghcr.io/hosseinmostafavi2079/eventos
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate full commit input
+        run: '[[ "$COMMIT" =~ ^[a-f0-9]{40}$ ]]'
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require exact-commit successful gates and main ancestry
+        run: node scripts/release-gates.mjs "$COMMIT"
+      - name: Build without publishing
+        run: docker build --platform linux/amd64 --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$COMMIT" -t "eventos-release-validation:$COMMIT" .
+      - name: Validate release image before publishing
+        run: node scripts/validate-release-image.mjs "eventos-release-validation:$COMMIT"
+      - name: Recheck release gates before publishing
+        run: node scripts/release-gates.mjs "$COMMIT"
+      - name: Publish discovery tag and capture immutable digest
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          docker tag "eventos-release-validation:$COMMIT" "$IMAGE:sha-$COMMIT"
+          docker push "$IMAGE:sha-$COMMIT"
+          docker image inspect "$IMAGE:sha-$COMMIT" --format '{{json .RepoDigests}}' > release-digests.json
+          node --input-type=module <<'NODE'
+          import {readFileSync, writeFileSync} from 'node:fs';
+          const {COMMIT: commit, IMAGE: image} = process.env;
+          const immutableRef = JSON.parse(readFileSync('release-digests.json','utf8')).find(value => value.startsWith(image+'@'));
+          if (!immutableRef || !/@sha256:[a-f0-9]{64}$/.test(immutableRef)) throw Error('Registry digest missing');
+          writeFileSync('eventos-release.json',JSON.stringify({commit,image,tag:`sha-${commit}`,digest:immutableRef.split('@')[1],immutableRef,platform:'linux/amd64'},null,2)+'\n');
+          NODE
+      - uses: actions/upload-artifact@v7
+        with:
+          name: eventos-release-${{ inputs.commit_sha }}
+          path: eventos-release.json
+          if-no-files-found: error

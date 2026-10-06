@@ -28,9 +28,10 @@ services:
 
   storage:
     image: adobe/s3mock:5.1.0
+    profiles: ["s3"]
     restart: unless-stopped
     environment:
-      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: ${MEDIA_S3_BUCKET:?Set local media bucket}
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: ${MEDIA_S3_BUCKET:-eventos-local-media}
       COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /s3mockroot
       COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT: "true"
     ports:
@@ -54,10 +55,11 @@ services:
       - .env.local-runtime
     environment:
       NODE_ENV: production
-      MAIL_TRANSPORT: smtp
       PLATFORM_REQUIRE_MFA: ${PLATFORM_REQUIRE_MFA:-false}
       HOSTNAME: 0.0.0.0
       PORT: "3000"
+    volumes:
+      - local-media:/app/data/media
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -81,7 +83,6 @@ services:
       - .env.local-runtime
     environment:
       NODE_ENV: production
-      MAIL_TRANSPORT: smtp
       PLATFORM_REQUIRE_MFA: ${PLATFORM_REQUIRE_MFA:-false}
     depends_on:
       postgres:
@@ -98,7 +99,6 @@ services:
       - .env.local-runtime
     environment:
       NODE_ENV: production
-      MAIL_TRANSPORT: smtp
     depends_on:
       postgres:
         condition: service_healthy
@@ -108,3 +108,5 @@ services:
 volumes:
   eventos-postgres:
   eventos-s3mock:
+  local-media:
+    name: roydad_eventos-local-media

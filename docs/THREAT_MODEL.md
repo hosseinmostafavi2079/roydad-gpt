@@ -79,3 +79,7 @@ C1.2 initial owner activation threats: stolen/guessed code, cross-tenant replay,
 
 
 C1.3 local media risks: traversal/link substitution is blocked by key validation, directory/link checks and Linux directory descriptors; untrusted principals must not write the private mount. Container recreation preserves the named volume; backups verify its exact identity and fail closed. Disk exhaustion remains an operator risk: host C: thresholds and monitoring are required, with no automatic cleanup. Migration rejects destination conflicts/overwrite races and preserves local files; the final pass requires quiesced writes before an explicit driver switch.
+
+### Development persistence boundary
+
+Stale generated endpoints and implicit backend switches can hide recoverable media. Explicit driver/root generation and metadata/byte reconciliation prevent silent loss. Separate host/Docker development stores and production volume names prevent accidental mixing. Conflicting transfers fail instead of overwriting; missing sources retain metadata. Development secrets/media are excluded from build contexts and logs. Residual risk: switching stores without a verified transfer, untrusted local filesystem principals, concurrent mutations during transfer, and unavailable historical volumes/backups.

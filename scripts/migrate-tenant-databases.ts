@@ -81,6 +81,7 @@ for (const tenant of tenants.rows) {
       tenant.migration_version !== "0011_phase6_payment_lifecycle" &&
       tenant.migration_version !== "0012_pilot_public_site" &&
       tenant.migration_version !== "0013_pilot_public_seo" &&
+      tenant.migration_version !== "0014_identity_v2" &&
       tenant.migration_version !== tenantCurrentMigrationVersion
     ) {
       throw new Error("Tenant migration version requires review.");

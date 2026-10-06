@@ -49,3 +49,4 @@ next-env.d.ts
 .pnpm-store/
 .phase2-prechange-e2e.log
 .demo-credentials.local
+/.local/

@@ -2,9 +2,18 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { parseEnv } from "node:util";
+import {
+  localMediaEnvironment,
+  prepareDevelopmentMediaRoot,
+} from "./local-media-env.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 process.chdir(root);
+if (process.env.NODE_ENV === "production" || process.env.CI)
+  throw new Error("Local setup is disabled in production and CI.");
+if (process.argv.slice(2).some((arg) => arg !== "--env-only"))
+  throw new Error("Only --env-only is accepted.");
 const secret = () => randomBytes(32).toString("base64url");
 const envPath = path.join(root, ".env");
 
@@ -70,6 +79,8 @@ function createEnv() {
   };
   const values = {
     ...passwords,
+    ...localMediaEnvironment(root),
+    MAIL_TRANSPORT: "disabled",
     BETTER_AUTH_SECRET: secret(),
     TENANT_BOOTSTRAP_ENCRYPTION_KEY: secret(),
     PLATFORM_BOOTSTRAP_ADMIN_PASSWORD: secret(),
@@ -81,38 +92,49 @@ function createEnv() {
   const body = template.replace(/^([A-Z_]+)=.*$/gm, (line, key) =>
     key in values ? `${key}=${values[key]}` : line,
   );
-  writeFileSync(envPath, body, { flag: "wx", mode: 0o600 });
+  writeFileSync(
+    envPath,
+    `# DEVELOPMENT ONLY — generated local credentials; never copy to production.\n${body}`,
+    { flag: "wx", mode: 0o600 },
+  );
   console.log("Created ignored .env with random local secrets.");
 }
 
 function createContainerEnv() {
   let existingEnv = readFileSync(envPath, "utf8");
-  for (const [name, fallback] of Object.entries({
-    MEDIA_S3_ENDPOINT: "http://127.0.0.1:59000",
-    MEDIA_S3_REGION: "us-east-1",
-    MEDIA_S3_BUCKET: "eventos-local-media",
-    MEDIA_S3_ACCESS_KEY_ID: secret(),
-    MEDIA_S3_SECRET_ACCESS_KEY: secret(),
-    MEDIA_S3_ALLOW_HTTP_LOCAL: "true",
-  })) {
-    const pattern = new RegExp(`^${name}=.*$`, "m");
-    const current =
-      existingEnv.match(pattern)?.[0]?.slice(name.length + 1) ?? "";
-    if (!current)
-      existingEnv = pattern.test(existingEnv)
-        ? existingEnv.replace(pattern, `${name}=${fallback}`)
-        : `${existingEnv.trimEnd()}\n${name}=${fallback}\n`;
+  const fileConfig = parseEnv(existingEnv);
+  if (
+    fileConfig.NODE_ENV === "production" ||
+    fileConfig.PLATFORM_BASE_DOMAIN !== "localhost"
+  )
+    throw new Error(
+      "Existing .env is not an EventOS development configuration.",
+    );
+  for (const key of [
+    "CONTROL_DATABASE_URL",
+    "CONTROL_MIGRATION_DATABASE_URL",
+    "CONTROL_QUEUE_DATABASE_URL",
+    "TENANT_PROVISIONING_DATABASE_URL",
+    "TENANT_RUNTIME_DATABASE_URL",
+    "TENANT_MIGRATION_DATABASE_URL",
+  ])
+    if (
+      !["127.0.0.1", "localhost", "[::1]"].includes(
+        new URL(fileConfig[key] ?? "").hostname,
+      )
+    )
+      throw new Error("Local setup requires loopback database configuration.");
+  process.loadEnvFile(envPath);
+  const driver = process.env.MEDIA_STORAGE_DRIVER || "local";
+  const media = localMediaEnvironment(root, driver);
+  if (driver === "local") prepareDevelopmentMediaRoot(root);
+  for (const [key, value] of Object.entries(media)) {
+    const pattern = new RegExp(`^${key}=.*$`, "m");
+    if (!pattern.test(existingEnv))
+      existingEnv += `\n${key}=${JSON.stringify(value)}\n`;
   }
-  writeFileSync(envPath, existingEnv, { mode: 0o600 });
-  const requireMfa = process.env.PLATFORM_REQUIRE_MFA === "true";
-  const mfaLine = `PLATFORM_REQUIRE_MFA=${requireMfa}`;
-  const updatedEnv = /^PLATFORM_REQUIRE_MFA=.*$/m.test(existingEnv)
-    ? existingEnv.replace(/^PLATFORM_REQUIRE_MFA=.*$/m, mfaLine)
-    : `${existingEnv.trimEnd()}\n${mfaLine}\n`;
-  if (updatedEnv !== existingEnv) {
-    writeFileSync(envPath, updatedEnv, { mode: 0o600 });
-    existingEnv = updatedEnv;
-  }
+  if (readFileSync(envPath, "utf8") !== existingEnv)
+    writeFileSync(envPath, existingEnv, { mode: 0o600 });
   if (!/^TENANT_BOOTSTRAP_ENCRYPTION_KEY=/m.test(existingEnv)) {
     writeFileSync(
       envPath,
@@ -173,12 +195,16 @@ function createContainerEnv() {
       throw new Error(
         `${key} must be a unique local secret of at least 32 characters.`,
       );
-  values.SMTP_URL = process.env.SMTP_URL || "smtps://localhost:465";
+  values.SMTP_URL = process.env.SMTP_URL || "";
   values.NODE_ENV = "production";
-  values.MAIL_TRANSPORT = "smtp";
+  values.MAIL_TRANSPORT =
+    process.env.MAIL_TRANSPORT || (values.SMTP_URL ? "smtp" : "disabled");
+  if (values.MAIL_TRANSPORT === "test")
+    throw new Error("Docker local runtime cannot use test mail transport.");
+  Object.assign(values, localMediaEnvironment(root, driver, true));
   values.PLATFORM_REQUIRE_MFA =
     process.env.PLATFORM_REQUIRE_MFA === "true" ? "true" : "false";
-  values.MEDIA_S3_ENDPOINT = "http://storage:9090";
+  values.MEDIA_S3_ENDPOINT = driver === "s3" ? "http://storage:9090" : "";
   for (const key of [
     "MEDIA_S3_REGION",
     "MEDIA_S3_BUCKET",
@@ -193,18 +219,27 @@ function createContainerEnv() {
   writeFileSync(path.join(root, ".env.local-runtime"), output, { mode: 0o600 });
   if (!process.env.SMTP_URL)
     console.log(
-      "SMTP is not configured; new invitation delivery will fail safely until SMTP_URL is set.",
+      "Email delivery is unavailable until an explicit SMTP provider is configured.",
     );
 }
 
 createEnv();
 createContainerEnv();
+if (process.argv.includes("--env-only")) process.exit(0);
 run("docker", ["info", "--format", "{{.ServerVersion}}"]);
-run("docker", ["compose", "up", "-d", "--wait", "postgres", "storage"]);
+run("docker", [
+  "compose",
+  "up",
+  "-d",
+  "--wait",
+  "postgres",
+  ...(process.env.MEDIA_STORAGE_DRIVER === "s3" ? ["storage"] : []),
+]);
 const scriptEnv = {
   ...process.env,
   NODE_ENV: "development",
-  MAIL_TRANSPORT: "smtp",
+  MAIL_TRANSPORT:
+    process.env.MAIL_TRANSPORT || (process.env.SMTP_URL ? "smtp" : "disabled"),
 };
 for (const script of [
   "db-migrate.ts",
@@ -218,6 +253,19 @@ for (const script of [
   );
 run("docker", ["compose", "build", "app", "worker"]);
 run("docker", ["compose", "up", "-d", "--wait", "app", "worker"]);
+if (process.env.MEDIA_STORAGE_DRIVER === "local") {
+  for (const args of [[], ["--apply"]])
+    run(
+      process.execPath,
+      [
+        "--conditions=react-server",
+        "--import=tsx",
+        "scripts/sync-development-media.ts",
+        ...args,
+      ],
+      scriptEnv,
+    );
+}
 console.log("EventOS is running in the background.");
 console.log("Platform: http://localhost:3000/sign-in");
 console.log("Tenant: http://demo.localhost:3000/login");

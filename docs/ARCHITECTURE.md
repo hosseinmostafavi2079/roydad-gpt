@@ -66,3 +66,7 @@ C1.2 initial-owner setup lives in the tenant-identity bootstrap use case. Platfo
 
 
 C1.3 media storage: `infrastructure/media/storage.ts` provides put/get/delete selection by explicit `MEDIA_STORAGE_DRIVER=local|s3` (general default s3, Windows profile default local). Business repositories and authorized delivery routes retain object keys and metadata independently of the driver. The filesystem adapter is shared by the read-only tree validation, backup and opt-in S3 migration tools. No database migration is required.
+
+### Development media persistence
+
+Development setup explicitly defaults to local storage, with an absolute ignored workspace root for hot reload and a distinct app-only `roydad_eventos-local-media` named volume for Docker. Production's media volume is never mounted in development. S3Mock remains an explicit compatibility profile. A development-only CLI reconciles existing S3Mock metadata/bytes into the workspace root, without rewriting metadata or deleting source objects. A separate checksum-verified import moves workspace objects to the Docker development volume, rejecting conflicts. These are operator workflows, not HTTP endpoints or implicit backend detection.

@@ -41,12 +41,18 @@ const credentialSchema = z.strictObject({
       backupCodes: z.array(z.string()).length(10),
     })
     .optional(),
-  owner: z.strictObject({ email: z.email(), password: z.string().min(24) }),
+  owner: z.strictObject({
+    email: z.email(),
+    password: z.string().min(24),
+    username: z.string().optional(),
+  }),
   instructor: z.strictObject({
+    username: z.string().optional(),
     email: z.email(),
     password: z.string().min(24),
   }),
   participant: z.strictObject({
+    username: z.string().optional(),
     email: z.email(),
     password: z.string().min(24),
   }),
@@ -69,7 +75,9 @@ const existingCredentials = existsSync(credentialPath)
         password: randomPassword(),
       },
     });
-const { platformMfa: _previousMfa, ...credentials } = existingCredentials;
+const credentials = existingCredentials;
+for (const identity of ["owner", "instructor", "participant"] as const)
+  credentials[identity].username ??= `demo_${identity}`;
 const config = getServerConfig();
 for (const key of [
   "CONTROL_DATABASE_URL",
@@ -136,26 +144,16 @@ async function ensurePlatformAdmin() {
     }
     const admin = existing.rows[0];
     if (!admin) throw new Error("Demo platform administrator was not created.");
-    await client.query(
-      `DELETE FROM platform_auth_accounts WHERE "userId"=$1 AND "providerId"='credential'`,
+    const account = await client.query(
+      `SELECT id FROM platform_auth_accounts WHERE "userId"=$1 AND "providerId"='credential'`,
       [admin.auth_user_id],
     );
-    await client.query(
-      `INSERT INTO platform_auth_accounts (id,"accountId","providerId","userId",password,"createdAt","updatedAt")
-       VALUES ($1,$2,'credential',$2,$3,now(),now())`,
-      [randomUUID(), admin.auth_user_id, hash],
-    );
-    await client.query(`DELETE FROM platform_auth_sessions WHERE "userId"=$1`, [
-      admin.auth_user_id,
-    ]);
-    await client.query(
-      `DELETE FROM platform_admin_two_factors WHERE "userId"=$1`,
-      [admin.auth_user_id],
-    );
-    await client.query(
-      `UPDATE platform_auth_users SET "twoFactorEnabled"=false,"updatedAt"=now() WHERE id=$1`,
-      [admin.auth_user_id],
-    );
+    if (!account.rows[0])
+      await client.query(
+        `INSERT INTO platform_auth_accounts (id,"accountId","providerId","userId",password,"createdAt","updatedAt")
+         VALUES ($1,$2,'credential',$2,$3,now(),now())`,
+        [randomUUID(), admin.auth_user_id, hash],
+      );
     await client.query("COMMIT");
     return admin.id;
   } catch (error) {
@@ -285,6 +283,7 @@ async function ensureDemoTenant(adminId: string) {
   } else if (existing.rows[0]?.status === "FAILED")
     await retryProvisioning(tenantId, actor, randomUUID());
   const databaseName = await waitForTenant(tenantId);
+  if (existing.rows[0]) return { tenantId, databaseName };
   const control = getControlPool();
   await control.query(
     `INSERT INTO tenant_features (tenant_id,feature_key,enabled,updated_by)
@@ -329,14 +328,14 @@ async function ensureTenantUser(
           profile.email,
         ],
       );
-    else
+    if ("username" in profile)
       await client.query(
-        `UPDATE tenant_users SET status='ACTIVE',"emailVerified"=true,"updatedAt"=now() WHERE "tenantId"=$1 AND id=$2`,
-        [tenantId, id],
+        `UPDATE tenant_users SET username=$3 WHERE "tenantId"=$1 AND id=$2 AND username IS NULL`,
+        [tenantId, id, profile.username],
       );
     await client.query(
       `INSERT INTO tenant_auth_accounts (id,"accountId","providerId","userId",password,"createdAt","updatedAt")
-      VALUES ($1,$2,'credential',$2,$3,now(),now()) ON CONFLICT ("providerId","accountId") DO UPDATE SET password=EXCLUDED.password,"updatedAt"=now()`,
+      VALUES ($1,$2,'credential',$2,$3,now(),now()) ON CONFLICT ("providerId","accountId") DO NOTHING`,
       [randomUUID(), id, await hashPlatformPassword(profile.password)],
     );
     await client.query(
@@ -354,14 +353,6 @@ async function ensureTenantUser(
         `INSERT INTO tenant_participant_profiles (tenant_id,user_id,display_name) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
         [tenantId, id, "شرکت‌کننده آزمایشی"],
       );
-    await client.query(
-      `UPDATE tenant_invitations SET revoked_at=now() WHERE tenant_id=$1 AND user_id=$2 AND consumed_at IS NULL AND revoked_at IS NULL`,
-      [tenantId, id],
-    );
-    await client.query(
-      `DELETE FROM tenant_auth_sessions WHERE "tenantId"=$1 AND "userId"=$2`,
-      [tenantId, id],
-    );
     await client.query("COMMIT");
     return id;
   } catch (error) {
@@ -401,6 +392,14 @@ async function seedContent(
   };
   const scope = { tenant, actor, requestId: randomUUID() };
   const pool = getTenantPool(tenant);
+  if (
+    (
+      await pool.query("SELECT 1 FROM programs WHERE tenant_id=$1 LIMIT 1", [
+        tenantId,
+      ])
+    ).rows[0]
+  )
+    return;
   await pool.query(
     `UPDATE tenant_website_profiles SET display_name=$2,short_description=$3,about=$4,
       phone=$5,email=$6,address=$7,contact_hours=$8,footer_description=$9,updated_at=now()
@@ -603,7 +602,7 @@ try {
     participantId,
   );
   console.log(
-    `EventOS local demo is ready\n\nPlatform Admin:\nURL: http://localhost:3000/sign-in\nEmail: ${credentials.platform.email}\nPassword: ${credentials.platform.password}\n\nTenant Owner:\nURL: http://demo.localhost:3000/login\nEmail: ${credentials.owner.email}\nPassword: ${credentials.owner.password}\n\nInstructor:\nURL: http://demo.localhost:3000/login\nEmail: ${credentials.instructor.email}\nPassword: ${credentials.instructor.password}\n\nParticipant:\nURL: http://demo.localhost:3000/login\nEmail: ${credentials.participant.email}\nPassword: ${credentials.participant.password}\n\nCredentials are also in ignored .demo-credentials.local.`,
+    "EventOS local demo is ready. Private credentials: .demo-credentials.local (ignored; development only).",
   );
 } finally {
   if (worker) await stopWorker(worker).catch(() => undefined);

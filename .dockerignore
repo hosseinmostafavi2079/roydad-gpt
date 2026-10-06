@@ -2,8 +2,8 @@ node_modules
 .next
 .git
 .env*
-!.env.example
 .demo-credentials.local
+.local
 test-results
 playwright-report
 coverage

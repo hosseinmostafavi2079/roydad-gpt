@@ -306,3 +306,14 @@ Clean provisioning and the existing forward upgrade/idempotency tests passed thr
 - [x] Dry-run default, conditional/idempotent/resumable local-to-S3 migration with checksum verification; no migration/deployment executed.
 - [x] Focused units 35/35, PostgreSQL media journey 2/2 (one local, one S3), Windows artifacts 15/15 and mocked backup 1/1; check and local-driver production build.
 - [ ] Publish only C1.3 and confirm current-commit GitHub Quality Gates and CodeQL.
+
+## Pre-release stabilization — local acceptance before release preparation
+
+- [x] Reproduce current program cover upload: 409 INVALID_STATE_TRANSITION from stale minio endpoint.
+- [x] Read-only audit: five media rows, two matching source objects, three missing from active S3Mock; retain metadata.
+- [x] Development-only reconciliation dry-run/apply, source preservation, byte-size/SHA-256 verification and idempotency.
+- [x] Private generated host root and separate persistent Docker local volume configuration; repeated env generation preserves existing credentials.
+- [x] Docker recreation/rebuild persistence passed with S3Mock stopped; hot-reload lifecycle/restart passed. Read-only historical MinIO inspection recovered all three previously missing objects, with unchanged metadata/URLs and browser confirmation.
+- [x] Final local check; focused media/release units 39/39, media lifecycle/restart browser validation passed, production build passed, full Playwright once 11/11. Six PostgreSQL suite tests passed; isolated rerun of the response-locking journey passed. Docker staged upload/recreate/rebuild and final replacement/deletion acceptance passed.
+- [x] After local acceptance: prepared immutable manual release workflow, exact-commit gate checks, image validation and context exclusions; workflow not triggered.
+- [ ] Commit/push and verify normal GitHub gates and CodeQL; never run production release or deploy.
