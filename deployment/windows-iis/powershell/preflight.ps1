@@ -47,11 +47,18 @@ Check-ReadOnly 'Docker Engine and Compose (no container inspection/secrets)' {
     Invoke-EventosWsl @('docker','compose','version','--short')
     Invoke-EventosWsl @('docker','ps','--format','{{.Names}} | {{.Status}} | {{.Ports}}')
 }
-Check-ReadOnly 'Production env (Node 22+ required on operator Windows)' {
+Check-ReadOnly 'Production env Node validation (Node 22+ required on operator Windows)' {
     & node "$PSScriptRoot/../../../scripts/windows-iis-preflight.mjs" --env-file $WindowsEnvFile
     if ($LASTEXITCODE -ne 0) { throw 'Production prerequisites missing' }
-    $wslPath = (Invoke-EventosWsl @('wslpath','-u',(Resolve-Path -LiteralPath $WindowsEnvFile).Path)) -join ''
-    if ($wslPath -ne $script:EventosEnv) { throw 'Windows/WSL env file paths must identify the same file.' }
+}
+Check-ReadOnly 'Production env Windows/WSL path identity' {
+    $resolvedWindowsEnv = (Resolve-Path -LiteralPath $WindowsEnvFile).Path
+    $expectedWindowsEnv = ((Invoke-EventosWsl @('wslpath','-w',$script:EventosEnv)) -join '').Trim()
+    if (![string]::Equals(
+        [IO.Path]::GetFullPath($resolvedWindowsEnv),
+        [IO.Path]::GetFullPath($expectedWindowsEnv),
+        [StringComparison]::OrdinalIgnoreCase
+    )) { throw 'Windows/WSL env file paths must identify the same file.' }
 }
 Check-ReadOnly 'Compose isolation' { Assert-EventosCompose }
 if ($problems.Count) { throw "Preflight FAILED: $($problems -join ', '). Nothing modified." }
