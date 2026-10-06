@@ -11,7 +11,14 @@ import { getServerConfig } from "@/shared/config/env";
 
 const ownerBootstrapSchema = z.strictObject({
   name: z.string().min(2).max(120),
-  email: z.string().email().max(320),
+  email: z.string().email().max(320).optional(),
+  username: z.string().max(30).optional(),
+  mobile: z.string().max(16).optional(),
+  activationCode: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{43}$/)
+    .optional(),
+  expiresAt: z.iso.datetime().optional(),
 });
 
 function bootstrapKey(): Buffer {
@@ -26,7 +33,7 @@ function bootstrapKey(): Buffer {
 
 export function encryptTenantOwnerBootstrap(
   tenantId: string,
-  input: { name: string; email: string },
+  input: z.input<typeof ownerBootstrapSchema>,
 ): Buffer {
   const owner = ownerBootstrapSchema.parse(input);
   const nonce = randomBytes(12);
@@ -42,10 +49,7 @@ export function encryptTenantOwnerBootstrap(
 export function decryptTenantOwnerBootstrap(
   tenantId: string,
   value: Buffer,
-): {
-  name: string;
-  email: string;
-} {
+): z.output<typeof ownerBootstrapSchema> {
   if (!Buffer.isBuffer(value) || value.length < 29 || value.length > 2048) {
     throw new Error("Tenant owner bootstrap data is invalid.");
   }

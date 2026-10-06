@@ -10,6 +10,9 @@ import { DomainError } from "@/shared/errors/domain-error";
 import { TenantQuickActions } from "@/app/_components/tenant-quick-actions";
 import { getServerConfig } from "@/shared/config/env";
 
+import { OwnerBootstrapAccess } from "@/app/_components/owner-bootstrap-access";
+import { ownerAccessAvailable } from "@/modules/tenant-identity/owner-bootstrap";
+
 export const metadata = { title: "تنظیمات سازمان" };
 
 export default async function TenantDetailsPage({
@@ -108,6 +111,11 @@ export default async function TenantDetailsPage({
           />
         )}
       </section>
+      <OwnerBootstrapAccess
+        tenantId={tenantId.data}
+        siteUrl={siteUrl}
+        available={await ownerAccessAvailable(tenantId.data)}
+      />
       <div id="tenant-settings">
         <TenantSettings initial={initial} plans={plans} />
       </div>

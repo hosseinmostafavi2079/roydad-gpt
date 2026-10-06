@@ -1236,6 +1236,120 @@ async function* tenantJourney({
     if (!phase5ParticipantSession)
       throw new Error("Participant session fixture was incomplete.");
 
+    // Initial owner setup without email, within the existing eleven-test journey.
+    const bootstrapSlug = `e2e-${randomUUID().slice(0, 8)}`;
+    const bootstrapAdminPage = await page.context().newPage();
+    const bootstrapOwnerContext = await browser.newContext();
+    try {
+      await bootstrapAdminPage.goto(
+        `http://localhost:${e2ePort}/platform/tenants/new`,
+      );
+      await bootstrapAdminPage
+        .getByLabel("نام مجموعه")
+        .fill("Email Free Initial Owner");
+      await bootstrapAdminPage
+        .getByLabel("شناسه / زیردامنه")
+        .fill(bootstrapSlug);
+      await bootstrapAdminPage
+        .getByLabel("نام مدیر اصلی", { exact: true })
+        .fill("Email Free Owner");
+      await bootstrapAdminPage
+        .getByLabel("نام کاربری مدیر اصلی")
+        .fill("bootstrap_owner");
+      await bootstrapAdminPage
+        .getByLabel("موبایل مدیر اصلی")
+        .fill("۰۹۱۲۱۲۳۴۵۹۱");
+      await expect(
+        bootstrapAdminPage.getByText("این آدرس آزاد است ✓"),
+      ).toBeVisible();
+      for (let step = 0; step < 3; step++)
+        await bootstrapAdminPage
+          .getByRole("button", { name: "ادامه", exact: true })
+          .click();
+      await bootstrapAdminPage
+        .getByRole("button", { name: "ایجاد مجموعه", exact: true })
+        .click();
+      await bootstrapAdminPage.waitForURL(
+        /\/platform\/tenants\/[0-9a-f-]{36}$/,
+      );
+      const bootstrapId = bootstrapAdminPage.url().split("/").at(-1)!;
+      saveTenantState(bootstrapId, bootstrapSlug);
+      await expect(
+        bootstrapAdminPage
+          .getByRole("region", { name: "وضعیت راه‌اندازی" })
+          .locator(".badge"),
+      ).toHaveText("آماده استفاده", { timeout: 45000 });
+      await bootstrapAdminPage.reload();
+      const setupSection = bootstrapAdminPage.getByRole("region", {
+        name: "راه‌اندازی مدیر اصلی",
+      });
+      await expect(
+        setupSection.getByRole("heading", { name: "مدیر اصلی ایجاد شد" }),
+      ).toBeVisible();
+      bootstrapAdminPage.once("dialog", (dialog) => dialog.accept());
+      await setupSection
+        .getByRole("button", { name: "دریافت یک‌باره کد راه‌اندازی" })
+        .click();
+      const codeField = setupSection.getByLabel("کد راه‌اندازی", {
+        exact: true,
+      });
+      await expect(codeField).toHaveValue(/^[A-Za-z0-9_-]{43}$/);
+      const activationCode = await codeField.inputValue();
+      const ownerSetupPage = await bootstrapOwnerContext.newPage();
+      await ownerSetupPage.setViewportSize({ width: 390, height: 844 });
+      await ownerSetupPage.goto(
+        `http://${bootstrapSlug}.localhost:${e2ePort}/owner-setup`,
+      );
+      expect(
+        await ownerSetupPage.evaluate(
+          () =>
+            document.documentElement.scrollWidth <=
+            document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+      await ownerSetupPage
+        .getByLabel("نام کاربری", { exact: true })
+        .fill("bootstrap_owner");
+      await ownerSetupPage
+        .getByLabel("کد راه‌اندازی", { exact: true })
+        .fill(activationCode);
+      await ownerSetupPage
+        .getByLabel("گذرواژه جدید", { exact: true })
+        .fill("Strong initial owner password 2026");
+      await ownerSetupPage
+        .getByLabel("تکرار گذرواژه", { exact: true })
+        .fill("Strong initial owner password 2026");
+      await ownerSetupPage
+        .getByRole("button", { name: "فعال‌سازی مدیر اصلی" })
+        .click();
+      await expect(ownerSetupPage.getByRole("status")).toContainText(
+        "حساب فعال شد",
+      );
+      await ownerSetupPage
+        .getByRole("link", { name: "ورود با نام کاربری" })
+        .click();
+      await ownerSetupPage
+        .getByRole("button", { name: "نام کاربری و رمز عبور", exact: true })
+        .click();
+      await ownerSetupPage
+        .getByLabel("نام کاربری", { exact: true })
+        .fill("bootstrap_owner");
+      await ownerSetupPage
+        .locator("#login-password")
+        .fill("Strong initial owner password 2026");
+      await ownerSetupPage
+        .locator('form[aria-label="ورود هویت جدید"] button[type="submit"]')
+        .click();
+      await ownerSetupPage.waitForURL(/\/dashboard$/);
+      await bootstrapAdminPage.reload();
+      await expect(
+        bootstrapAdminPage.getByRole("region", { name: "راه‌اندازی مدیر اصلی" }),
+      ).toHaveCount(0);
+    } finally {
+      await bootstrapOwnerContext.close();
+      await bootstrapAdminPage.close();
+    }
+
     yield "tenant RBAC and invited identities";
 
     const phase3ProgramTitle = `کارگاه آزمایشی ${randomUUID().slice(0, 8)}`;

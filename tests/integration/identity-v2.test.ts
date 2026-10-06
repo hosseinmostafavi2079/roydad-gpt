@@ -253,7 +253,7 @@ describe("Identity V2 real PostgreSQL", () => {
         [tenant.tenantId, tenant === a],
       );
       await getControlPool().query(
-        "INSERT INTO tenant_database_registry(tenant_id,database_name,migration_version,last_health_state) VALUES($1,$2,'0014_identity_v2','HEALTHY')",
+        "INSERT INTO tenant_database_registry(tenant_id,database_name,migration_version,last_health_state) VALUES($1,$2,'0015_owner_password_setup','HEALTHY')",
         [tenant.tenantId, tenant.databaseName],
       );
       await getControlPool().query(

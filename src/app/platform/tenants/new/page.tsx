@@ -3,6 +3,8 @@ import { listPlans } from "@/modules/platform/plans/service";
 import { TenantCreateForm } from "@/app/_components/tenant-create-form";
 import { getServerConfig } from "@/shared/config/env";
 
+import { emailServiceAvailable } from "@/infrastructure/auth/mailer";
+
 export const metadata = { title: "ایجاد سازمان" };
 
 export default async function NewTenantPage() {
@@ -25,6 +27,7 @@ export default async function NewTenantPage() {
       </div>
       <section className="card card-pad" style={{ maxWidth: 850 }}>
         <TenantCreateForm
+          mailAvailable={emailServiceAvailable()}
           plans={plans}
           platformDomain={getServerConfig().PLATFORM_BASE_DOMAIN}
         />

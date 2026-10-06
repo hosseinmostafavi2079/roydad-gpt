@@ -113,6 +113,7 @@ model TenantUser {
   failedLoginCount Int       @default(0)
   lockedUntil      DateTime? @db.Timestamptz(6)
   phoneNumber      String?   @db.VarChar(16)
+  ownerPasswordSetupAt DateTime? @db.Timestamptz(6)
   phoneNumberVerified Boolean @default(false)
   username         String?   @db.VarChar(30)
 

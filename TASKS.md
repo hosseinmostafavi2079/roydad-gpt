@@ -284,3 +284,14 @@ B2 final local result: pnpm check passed with 94 warnings and 3 informational di
 - [x] Run the full local gate once: check; 114 unit tests; 43 PostgreSQL integration tests; production build; 11 Playwright tests; Prisma validation; production dependency audit; Gitleaks; diff check.
 
 Clean provisioning and the existing forward upgrade/idempotency tests passed through `0014_identity_v2`. No migrations, reset, deployment or feature changes. The starting commit had successful GitHub Quality Gates and CodeQL runs; the B3 commit must independently pass both before release approval.
+
+## C1.2 — email-free initial owner bootstrap
+
+- [x] Support owner name, validated username, canonical Iranian mobile and optional email; retain SMTP owner invitation compatibility.
+- [x] Encrypt a random 256-bit, tenant-bound activation code; provision exactly one pending owner with its role and unusable credential until password setup.
+- [x] One-time authenticated, same-origin platform retrieval; 24-hour expiry; no secret in GET/RSC, URLs, logs or audit.
+- [x] Atomic password setup and replay rejection; mobile/email remain unverified; only a setup-complete owner may use username credentials without contact verification.
+- [x] Forward-only control result migration and tenant password-setup marker; refresh current-version fixtures.
+- [x] Focused disabled-mail production-worker and SMTP-path integration; focused unit tests.
+- [x] Final focused browser/security tests (2/2), one full Playwright run (11/11), check/build/diff gate.
+- [ ] Publish the C1.2 patch and confirm current-commit GitHub Quality Gates and CodeQL.

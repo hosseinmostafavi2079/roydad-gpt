@@ -6,6 +6,27 @@ import {
   limitOverrideSchema,
 } from "@/modules/platform/plans/schema";
 
+import {
+  normalizeUsername,
+  normalizeIranianPhone,
+} from "@/modules/tenant-identity/identity-v2-schema";
+
+const normalizedOwnerField = (normalizer: (value: string) => string) =>
+  z
+    .string()
+    .max(40)
+    .transform((value, ctx) => {
+      try {
+        return normalizer(value);
+      } catch {
+        ctx.addIssue({
+          code: "custom",
+          message: "نام کاربری یا شماره موبایل معتبر نیست.",
+        });
+        return z.NEVER;
+      }
+    });
+
 export const createTenantSchema = z.strictObject({
   slug: z
     .string()
@@ -22,7 +43,9 @@ export const createTenantSchema = z.strictObject({
     .toLowerCase()
     .regex(/^[a-z][a-z0-9_]{1,47}$/),
   ownerName: z.string().trim().min(2).max(120),
-  ownerEmail: z.string().trim().toLowerCase().email().max(320),
+  ownerEmail: z.string().trim().toLowerCase().email().max(320).optional(),
+  ownerUsername: normalizedOwnerField(normalizeUsername).optional(),
+  ownerMobile: normalizedOwnerField(normalizeIranianPhone).optional(),
   creationKey: z.uuid().optional(),
   primaryColor: z
     .string()

@@ -7,11 +7,15 @@ import {
   applyTenantPrismaMigrations,
   tenantCurrentMigrationVersion,
 } from "../src/infrastructure/db/tenant/prisma-migrations";
-import { decryptTenantOwnerBootstrap } from "../src/infrastructure/auth/tenant-bootstrap";
+import {
+  decryptTenantOwnerBootstrap,
+  encryptTenantOwnerBootstrap,
+} from "../src/infrastructure/auth/tenant-bootstrap";
 import {
   clearOwnerBootstrap,
   issueInitialTenantOwnerInvitation,
 } from "../src/modules/tenant-identity/repository";
+import { provisionEmailFreeOwner } from "../src/modules/tenant-identity/owner-bootstrap";
 import { getTenantPool } from "../src/infrastructure/db/tenant/pool";
 import {
   getProvisioningBoss,
@@ -296,11 +300,11 @@ async function verifyTenantDatabase(
       invitation: boolean;
     }>(
       `SELECT EXISTS (SELECT 1 FROM tenant_website_profiles WHERE tenant_id = $1) AS website,
-              EXISTS (SELECT 1 FROM tenant_users AS account JOIN tenant_user_roles AS grant_role
+              (SELECT count(*)=1 AND bool_and(account.status IN ('ACTIVE','INVITED')) FROM tenant_users AS account JOIN tenant_user_roles AS grant_role
                 ON grant_role.tenant_id = account."tenantId" AND grant_role.user_id = account.id
                 JOIN tenant_roles AS role ON role.tenant_id = grant_role.tenant_id AND role.id = grant_role.role_id
                 WHERE account."tenantId" = $1 AND role.code = 'organization_owner') AS owner,
-              EXISTS (SELECT 1 FROM tenant_invitations WHERE tenant_id = $1) AS invitation`,
+              (EXISTS (SELECT 1 FROM tenant_invitations invitation JOIN tenant_user_roles grant_role ON grant_role.tenant_id=invitation.tenant_id AND grant_role.user_id=invitation.user_id JOIN tenant_roles role ON role.tenant_id=grant_role.tenant_id AND role.id=grant_role.role_id WHERE invitation.tenant_id=$1 AND role.code='organization_owner') OR EXISTS (SELECT 1 FROM tenant_auth_verifications setup JOIN tenant_users account ON setup.identifier='owner-bootstrap:'||account."tenantId"::text||':'||account.id WHERE account."tenantId"=$1 AND account.status='INVITED' AND setup.id='owner-bootstrap-'||$1::uuid::text AND setup."expiresAt">now()) OR EXISTS (SELECT 1 FROM tenant_users WHERE "tenantId"=$1 AND status='ACTIVE' AND "ownerPasswordSetupAt" IS NOT NULL)) AS invitation`,
       [tenantId],
     );
     const control = await getControlPool().query<{ ready: boolean }>(
@@ -520,32 +524,50 @@ async function provision(jobId: string, tenantId: string) {
         tenantId,
         record.owner_bootstrap_ciphertext,
       );
-      await issueInitialTenantOwnerInvitation(
-        {
-          tenantId,
-          databaseName: record.database_name,
-          hostname: `${record.slug}.${config.PLATFORM_BASE_DOMAIN}`,
-          branding: {
-            brandName: record.slug,
-            primaryColor: "#145D58",
-            accentColor: "#C99047",
-          },
+      const ownerContext = {
+        tenantId,
+        databaseName: record.database_name,
+        hostname: `${record.slug}.${config.PLATFORM_BASE_DOMAIN}`,
+        branding: {
+          brandName: record.slug,
+          primaryColor: "#145D58",
+          accentColor: "#C99047",
         },
-        owner,
-        requestId,
-        tenantOrigin(`${record.slug}.${config.PLATFORM_BASE_DOMAIN}`),
-        true,
-      );
+      };
+      if (owner.activationCode) {
+        await provisionEmailFreeOwner(ownerContext, owner, requestId);
+        await getControlPool().query(
+          `UPDATE provisioning_jobs SET owner_access_ciphertext=COALESCE(owner_access_ciphertext,$2),owner_access_expires_at=COALESCE(owner_access_expires_at,$3) WHERE id=$1`,
+          [
+            jobId,
+            encryptTenantOwnerBootstrap(tenantId, owner),
+            owner.expiresAt,
+          ],
+        );
+      } else {
+        if (!owner.email) throw new Error("Initial owner contact is missing.");
+        await issueInitialTenantOwnerInvitation(
+          ownerContext,
+          { name: owner.name, email: owner.email },
+          requestId,
+          tenantOrigin(`${record.slug}.${config.PLATFORM_BASE_DOMAIN}`),
+          true,
+        );
+      }
       const audit = await getControlPool().connect();
       try {
         await appendAuditRecord(audit, {
           actorType: "SYSTEM",
           actorId: null,
-          action: "tenant.owner_invited",
+          action: owner.activationCode
+            ? "tenant.owner_bootstrap_prepared"
+            : "tenant.owner_invited",
           targetType: "TENANT",
           targetId: tenantId,
           requestId,
-          afterState: { invitationPrepared: true },
+          afterState: owner.activationCode
+            ? { activationPrepared: true }
+            : { invitationPrepared: true },
         });
       } finally {
         audit.release();

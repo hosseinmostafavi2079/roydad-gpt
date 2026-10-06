@@ -11,7 +11,7 @@ const tenantIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const baselineMigration = "0000_phase1_baseline";
 export const tenantIdentityMigrationVersion = "0002_tenant_identity_rbac";
-export const tenantCurrentMigrationVersion = "0014_identity_v2";
+export const tenantCurrentMigrationVersion = "0015_owner_password_setup";
 
 function migrationUrl(databaseName: string): string {
   if (!databaseNamePattern.test(databaseName)) {
@@ -99,6 +99,7 @@ export async function applyTenantPrismaMigrations(
         current.schema_version !== "0011_phase6_payment_lifecycle" &&
         current.schema_version !== "0012_pilot_public_site" &&
         current.schema_version !== "0013_pilot_public_seo" &&
+        current.schema_version !== "0014_identity_v2" &&
         current.schema_version !== tenantCurrentMigrationVersion) ||
       !current.has_foundation_migration
     ) {

@@ -36,9 +36,11 @@ const limits: Record<string, string> = {
 export function TenantCreateForm({
   plans,
   platformDomain,
+  mailAvailable = true,
 }: {
   plans: Plan[];
   platformDomain: string;
+  mailAvailable?: boolean;
 }) {
   const router = useRouter();
   const activePlans = plans.filter((plan) => plan.isActive);
@@ -55,6 +57,8 @@ export function TenantCreateForm({
   const [legalName, setLegalName] = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
+  const [ownerUsername, setOwnerUsername] = useState("");
+  const [ownerMobile, setOwnerMobile] = useState("");
   const [primaryColor, setPrimaryColor] = useState("#145D58");
   const [logo, setLogo] = useState<File | null>(null);
   const [createdId, setCreatedId] = useState("");
@@ -191,7 +195,9 @@ export function TenantCreateForm({
             slug,
             legalName: legalName || undefined,
             ownerName,
-            ownerEmail,
+            ownerEmail: ownerEmail || undefined,
+            ownerUsername: ownerUsername || undefined,
+            ownerMobile: ownerMobile || undefined,
             primaryColor,
             preset,
             planCode,
@@ -339,6 +345,42 @@ export function TenantCreateForm({
                   />
                 </div>
                 <div className="field">
+                  <label className="label" htmlFor="tenant-owner-username">
+                    نام کاربری مدیر اصلی
+                  </label>
+                  <input
+                    className="input"
+                    id="tenant-owner-username"
+                    dir="ltr"
+                    minLength={3}
+                    maxLength={30}
+                    required={!mailAvailable || !ownerEmail}
+                    autoComplete="off"
+                    value={ownerUsername}
+                    onChange={(event) => setOwnerUsername(event.target.value)}
+                  />
+                </div>
+                <div className="field">
+                  <label className="label" htmlFor="tenant-owner-mobile">
+                    موبایل مدیر اصلی
+                  </label>
+                  <input
+                    className="input"
+                    id="tenant-owner-mobile"
+                    dir="ltr"
+                    inputMode="tel"
+                    maxLength={40}
+                    required={!mailAvailable || !ownerEmail}
+                    autoComplete="tel"
+                    value={ownerMobile}
+                    onChange={(event) => setOwnerMobile(event.target.value)}
+                  />
+                  <p className="hint">
+                    ورود با نام کاربری پیش از تأیید موبایل ممکن است. موبایل با
+                    کد پیامکی تأیید می‌شود.
+                  </p>
+                </div>
+                <div className="field">
                   <label className="label" htmlFor="tenant-owner-email">
                     ایمیل مدیر اصلی
                   </label>
@@ -347,7 +389,6 @@ export function TenantCreateForm({
                     id="tenant-owner-email"
                     type="email"
                     dir="ltr"
-                    required
                     maxLength={320}
                     autoComplete="email"
                     value={ownerEmail}
@@ -615,7 +656,7 @@ export function TenantCreateForm({
                 <div>
                   <dt>مدیر</dt>
                   <dd>
-                    {ownerName} · {ownerEmail}
+                    {ownerName} · {ownerUsername || ownerEmail}
                   </dd>
                 </div>
                 <div>

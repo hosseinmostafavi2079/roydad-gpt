@@ -89,6 +89,14 @@ import {
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 
+import {
+  claimInitialOwnerAccess,
+  activateInitialOwner,
+} from "@/modules/tenant-identity/owner-bootstrap";
+import { resetServerConfigForTests } from "@/shared/config/env";
+
+import { POST as claimOwnerAccessRoute } from "@/app/api/platform/tenants/[tenantId]/owner-bootstrap/route";
+
 const migrations = path.join(
   process.cwd(),
   "src",
@@ -108,7 +116,10 @@ const workerOutput = new WeakMap<ChildProcess, string>();
 let adminId = "";
 let adminEmail = "";
 
-function startWorker(failurePhase?: string): Promise<ChildProcess> {
+function startWorker(
+  failurePhase?: string,
+  workerEnv: Record<string, string> = {},
+): Promise<ChildProcess> {
   const child = spawn(
     process.execPath,
     [
@@ -121,6 +132,7 @@ function startWorker(failurePhase?: string): Promise<ChildProcess> {
       env: {
         ...process.env,
         NODE_ENV: "test",
+        ...workerEnv,
         LOG_LEVEL: "warn",
         EVENTOS_TEST_PUBLIC_PROBE_ORIGIN: "http://127.0.0.1:1",
         ...(failurePhase ? { EVENTOS_TEST_FAIL_PHASE: failurePhase } : {}),
@@ -492,6 +504,263 @@ describe("Phase 1 real PostgreSQL gates", () => {
     }
   });
 
+  it("provisions an email-free initial owner with one-time setup and isolated username access", async () => {
+    vi.stubEnv("MAIL_TRANSPORT", "disabled");
+    vi.stubEnv("TENANT_BOOTSTRAP_ENCRYPTION_KEY", "c".repeat(48));
+    resetServerConfigForTests();
+    const actor = {
+      adminId,
+      userId: "integration-test",
+      email: adminEmail,
+      name: "Integration Test",
+      twoFactorEnabled: true,
+    };
+    let worker: ChildProcess | undefined;
+    try {
+      const outboxBefore = existsSync(testMailOutbox)
+        ? await readFile(testMailOutbox, "utf8")
+        : "";
+      worker = await startWorker(undefined, {
+        NODE_ENV: "production",
+        MAIL_TRANSPORT: "disabled",
+      });
+      const created = await createTenant(
+        {
+          slug: `test-${randomUUID().slice(0, 8)}`,
+          displayName: "Email Free Owner",
+          planCode: "foundation",
+          ownerName: "Initial Owner",
+          ownerUsername: "initial_owner",
+          ownerMobile: "۰۹۱۲۱۲۳۴۵۹۱",
+        },
+        actor,
+        randomUUID(),
+      );
+      cleanupTenantIds.push(created.tenant.id);
+      await waitForState(created.tenant.id, "ACTIVE");
+      const details = await getTenantDetails(created.tenant.id);
+      const tenant = await resolveTenantContext(details.domains[0]!.hostname);
+      const pool = getTenantPool(tenant);
+      const before = await pool.query(
+        `SELECT id,username,mobile,"phoneNumber","phoneNumberVerified","emailVerified",status,"ownerPasswordSetupAt" FROM tenant_users WHERE "tenantId"=$1`,
+        [tenant.tenantId],
+      );
+      expect(before.rows).toHaveLength(1);
+      expect(before.rows[0]).toMatchObject({
+        username: "initial_owner",
+        mobile: "+989121234591",
+        phoneNumber: "+989121234591",
+        phoneNumberVerified: false,
+        emailVerified: false,
+        status: "INVITED",
+        ownerPasswordSetupAt: null,
+      });
+      expect(
+        (await pool.query("SELECT count(*)::int count FROM tenant_invitations"))
+          .rows[0].count,
+      ).toBe(0);
+      expect(
+        (
+          await pool.query(
+            `SELECT role.code FROM tenant_user_roles grant_role JOIN tenant_roles role ON role.tenant_id=grant_role.tenant_id AND role.id=grant_role.role_id WHERE grant_role.user_id=$1`,
+            [before.rows[0].id],
+          )
+        ).rows,
+      ).toEqual([{ code: "organization_owner" }]);
+      const inputSecret = (
+        await getControlPool().query(
+          "SELECT owner_bootstrap_ciphertext FROM provisioning_jobs WHERE tenant_id=$1",
+          [tenant.tenantId],
+        )
+      ).rows[0];
+      expect(inputSecret.owner_bootstrap_ciphertext).toBeNull();
+      const claimUrl = `http://localhost:3000/api/platform/tenants/${tenant.tenantId}/owner-bootstrap`;
+      const routeContext = {
+        params: Promise.resolve({ tenantId: tenant.tenantId }),
+      };
+      expect(
+        (
+          await claimOwnerAccessRoute(
+            new Request(claimUrl, {
+              method: "POST",
+              headers: {
+                host: "localhost:3000",
+                origin: "http://localhost:3000",
+              },
+            }),
+            routeContext,
+          )
+        ).status,
+      ).toBe(401);
+      expect(
+        (
+          await claimOwnerAccessRoute(
+            new Request(claimUrl, {
+              method: "POST",
+              headers: {
+                host: "localhost:3000",
+                origin: "https://attacker.example",
+              },
+            }),
+            routeContext,
+          )
+        ).status,
+      ).toBe(403);
+      const claims = await Promise.allSettled([
+        claimInitialOwnerAccess(tenant.tenantId, actor, randomUUID()),
+        claimInitialOwnerAccess(tenant.tenantId, actor, randomUUID()),
+      ]);
+      expect(
+        claims.filter((result) => result.status === "fulfilled"),
+      ).toHaveLength(1);
+      const successful = claims.find((result) => result.status === "fulfilled");
+      if (!successful || successful.status !== "fulfilled")
+        throw new Error("Initial owner access was not returned");
+      const access = successful.value;
+      expect(access.username).toBe("initial_owner");
+      expect(access.activationCode).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      const code = access.activationCode!;
+      await expect(
+        claimInitialOwnerAccess(tenant.tenantId, actor, randomUUID()),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      const second = await createTenant(
+        {
+          slug: `test-${randomUUID().slice(0, 8)}`,
+          displayName: "Isolated Owner",
+          planCode: "foundation",
+          ownerName: "Second Owner",
+          ownerUsername: "initial_owner",
+          ownerMobile: "09121234591",
+        },
+        actor,
+        randomUUID(),
+      );
+      cleanupTenantIds.push(second.tenant.id);
+      await waitForState(second.tenant.id, "ACTIVE");
+      const other = await resolveTenantContext(
+        (await getTenantDetails(second.tenant.id)).domains[0]!.hostname,
+      );
+      await expect(
+        activateInitialOwner(
+          other,
+          "initial_owner",
+          code,
+          "Strong personal password 2026",
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+      const otherAccess = await claimInitialOwnerAccess(
+        other.tenantId,
+        actor,
+        randomUUID(),
+      );
+      const otherPool = getTenantPool(other);
+      await otherPool.query(
+        `UPDATE tenant_auth_verifications SET "expiresAt"=now()-interval '1 minute' WHERE id=$1`,
+        [`owner-bootstrap-${other.tenantId}`],
+      );
+      await expect(
+        activateInitialOwner(
+          other,
+          "initial_owner",
+          otherAccess.activationCode ?? "",
+          "Strong personal password 2026",
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+      const origin = `http://${tenant.hostname}:3000`;
+      const login = () =>
+        tenantAuthPost(
+          new Request(`${origin}/api/tenant-auth/sign-in/username`, {
+            method: "POST",
+            headers: {
+              host: `${tenant.hostname}:3000`,
+              origin,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              username: "initial_owner",
+              password: "Strong personal password 2026",
+            }),
+          }),
+        );
+      expect((await login()).status).not.toBe(200);
+      await activateInitialOwner(
+        tenant,
+        "initial_owner",
+        code,
+        "Strong personal password 2026",
+        randomUUID(),
+      );
+      await expect(
+        activateInitialOwner(
+          tenant,
+          "initial_owner",
+          code,
+          "Different personal password 2026",
+          randomUUID(),
+        ),
+      ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+      const response = await login();
+      expect(response.status).toBe(200);
+      const cookie = response.headers.get("set-cookie")?.split(";")[0] ?? "";
+      await expect(
+        requireTenantActor(
+          other,
+          `http://${other.hostname}:3000`,
+          new Headers({ host: `${other.hostname}:3000`, cookie }),
+        ),
+      ).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+      const after = (
+        await pool.query(
+          `SELECT status,"phoneNumberVerified","emailVerified","ownerPasswordSetupAt" FROM tenant_users WHERE id=$1`,
+          [before.rows[0].id],
+        )
+      ).rows[0];
+      expect(after).toMatchObject({
+        status: "ACTIVE",
+        phoneNumberVerified: false,
+        emailVerified: false,
+      });
+      expect(after.ownerPasswordSetupAt).toBeInstanceOf(Date);
+      expect(
+        (
+          await pool.query(
+            `SELECT password FROM tenant_auth_accounts WHERE "userId"=$1`,
+            [before.rows[0].id],
+          )
+        ).rows[0].password,
+      ).toMatch(/^\$argon2id\$/);
+      expect(
+        existsSync(testMailOutbox)
+          ? await readFile(testMailOutbox, "utf8")
+          : "",
+      ).toBe(outboxBefore);
+      const audit = JSON.stringify(
+        (
+          await pool.query(
+            "SELECT action,before_state,after_state FROM tenant_audit_logs",
+          )
+        ).rows,
+      );
+      expect(audit.includes(code)).toBe(false);
+      expect((workerOutput.get(worker) ?? "").includes(code)).toBe(false);
+      expect(audit.includes("Strong personal password 2026")).toBe(false);
+      expect(
+        (
+          await getControlPool().query(
+            "SELECT owner_access_ciphertext FROM provisioning_jobs WHERE tenant_id=$1",
+            [tenant.tenantId],
+          )
+        ).rows[0].owner_access_ciphertext,
+      ).toBeNull();
+    } finally {
+      if (worker) await stopWorker(worker);
+      vi.unstubAllEnvs();
+      resetServerConfigForTests();
+    }
+  }, 180_000);
+
   it("provisions, verifies, resolves, isolates, fails safely, retries, and invalidates tenant context", async () => {
     const actor = {
       adminId,
@@ -725,9 +994,9 @@ describe("Phase 1 real PostgreSQL gates", () => {
         "SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL",
       );
       const appRows = await migrationCheck.query<{ count: number }>(
-        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0014_identity_v2'",
+        "SELECT count(*)::int AS count FROM tenant_schema_migrations WHERE version = '0015_owner_password_setup'",
       );
-      expect(prismaRows.rows[0]?.count).toBe(15);
+      expect(prismaRows.rows[0]?.count).toBe(16);
       expect(appRows.rows[0]?.count).toBe(1);
     } finally {
       await migrationCheck.end();
@@ -1931,7 +2200,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
       [created.tenant.id, created.tenant.id],
     );
     expect(firstUpgrade.rows[0]).toEqual({
-      migration_version: "0014_identity_v2",
+      migration_version: "0015_owner_password_setup",
       audit_count: 1,
     });
 
@@ -1972,7 +2241,9 @@ describe("Phase 1 real PostgreSQL gates", () => {
            (SELECT count(*)::int FROM tenant_schema_migrations) AS identity_rows,
            (SELECT count(*)::int FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL) AS prisma_rows`,
       );
-      expect(metadata.rows[0]?.schema_version).toBe("0014_identity_v2");
+      expect(metadata.rows[0]?.schema_version).toBe(
+        "0015_owner_password_setup",
+      );
       expect(identity.rows[0]).toEqual({
         roles: 11,
         permissions: 50,

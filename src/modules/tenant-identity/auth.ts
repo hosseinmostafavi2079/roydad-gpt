@@ -429,8 +429,10 @@ export function getTenantAuth(
               locked_until: Date | null;
               phoneNumberVerified: boolean;
               emailVerified: boolean;
+              owner_setup_complete: boolean;
             }>(
-              `SELECT status, "lockedUntil" AS locked_until, "phoneNumberVerified", "emailVerified"
+              `SELECT status, "lockedUntil" AS locked_until, "phoneNumberVerified", "emailVerified",
+                 ("ownerPasswordSetupAt" IS NOT NULL AND EXISTS (SELECT 1 FROM tenant_user_roles grant_role JOIN tenant_roles role ON role.tenant_id=grant_role.tenant_id AND role.id=grant_role.role_id WHERE grant_role.tenant_id=$2 AND grant_role.user_id=tenant_users.id AND role.code='organization_owner')) AS owner_setup_complete
                FROM tenant_users WHERE id = $1 AND "tenantId" = $2`,
               [session.userId, context.tenantId],
             );
@@ -439,7 +441,8 @@ export function getTenantAuth(
               !row ||
               (usernameCredential &&
                 !row.phoneNumberVerified &&
-                !row.emailVerified) ||
+                !row.emailVerified &&
+                !row.owner_setup_complete) ||
               !canAuthenticateTenantUser(
                 row.status as "ACTIVE" | "INVITED" | "SUSPENDED" | "DISABLED",
                 row.locked_until,

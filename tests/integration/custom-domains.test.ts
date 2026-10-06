@@ -65,7 +65,7 @@ async function fixture() {
   );
   // Control-only resolver fixture: no operational tenant DB or provisioning job is required.
   await pool().query(
-    "INSERT INTO tenant_database_registry(tenant_id,database_name,migration_version,last_health_state) VALUES($1,$2,'0014_identity_v2','HEALTHY')",
+    "INSERT INTO tenant_database_registry(tenant_id,database_name,migration_version,last_health_state) VALUES($1,$2,'0015_owner_password_setup','HEALTHY')",
     [id, `eventos_t_${id.replaceAll("-", "")}`],
   );
   await pool().query(

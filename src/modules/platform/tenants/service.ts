@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, randomBytes } from "node:crypto";
 import { DomainError } from "@/shared/errors/domain-error";
 import { appendAuditRecord } from "@/modules/platform/audit/repository";
 import { getControlPool } from "@/infrastructure/db/control/pool";
@@ -151,12 +151,34 @@ async function currentTenantOverrides(
   };
 }
 
+import { emailServiceAvailable } from "@/infrastructure/auth/mailer";
+import {
+  normalizeUsername,
+  normalizeIranianPhone,
+} from "@/modules/tenant-identity/identity-v2-schema";
+
 export async function createTenant(
   input: CreateTenantInput,
   actor: PlatformActor,
   requestId: string,
 ) {
   const config = getServerConfig();
+  const emailFree = !emailServiceAvailable() || !input.ownerEmail;
+  if (emailFree && (!input.ownerUsername || !input.ownerMobile))
+    throw new DomainError(
+      "VALIDATION_FAILED",
+      "نام کاربری و موبایل مدیر اصلی لازم است.",
+    );
+  const bootstrapOwner = emailFree
+    ? {
+        name: input.ownerName,
+        email: input.ownerEmail,
+        username: normalizeUsername(input.ownerUsername!),
+        mobile: normalizeIranianPhone(input.ownerMobile!),
+        activationCode: randomBytes(32).toString("base64url"),
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+      }
+    : { name: input.ownerName, email: input.ownerEmail };
   const tenantId = randomUUID();
   const databaseName = `eventos_t_${tenantId.replaceAll("-", "")}`;
   const hostname = `${input.slug}.${config.PLATFORM_BASE_DOMAIN}`;
@@ -179,6 +201,8 @@ export async function createTenant(
             planCode: input.planCode,
             ownerName: input.ownerName,
             ownerEmail: input.ownerEmail,
+            ownerUsername: input.ownerUsername,
+            ownerMobile: input.ownerMobile,
             primaryColor,
             preset,
             featureOverrides: input.featureOverrides ?? [],
@@ -249,14 +273,27 @@ export async function createTenant(
         id: string;
         code: string;
         name: string;
+        features: Record<string, boolean>;
       }>(
-        "SELECT id, code, name FROM plans WHERE code = $1 AND is_active FOR SHARE",
+        "SELECT id, code, name, features FROM plans WHERE code = $1 AND is_active FOR SHARE",
         [input.planCode],
       );
       const plan = planResult.rows[0];
       if (!plan) {
         throw new DomainError("VALIDATION_FAILED", "Choose an active plan.");
       }
+
+      if (
+        emailFree &&
+        !(
+          input.featureOverrides?.find((item) => item.key === "password_login")
+            ?.enabled ?? featureSetSchema.parse(plan.features).password_login
+        )
+      )
+        throw new DomainError(
+          "VALIDATION_FAILED",
+          "ورود با نام کاربری باید برای مدیر اصلی فعال باشد.",
+        );
 
       const tenantResult = await client.query(
         `INSERT INTO tenants (id, slug, legal_name, display_name, plan_id, created_by,
@@ -332,10 +369,7 @@ export async function createTenant(
           `tenant-provision:${tenantId}`,
           actor.adminId,
           requestId,
-          encryptTenantOwnerBootstrap(tenantId, {
-            name: input.ownerName,
-            email: input.ownerEmail,
-          }),
+          encryptTenantOwnerBootstrap(tenantId, bootstrapOwner),
         ],
       );
       const job = jobResult.rows[0];
