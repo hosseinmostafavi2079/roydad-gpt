@@ -19,7 +19,6 @@ export function validateWindowsIisEnvironment(env, runtimeOnly = false) {
   for (const [key, expected] of Object.entries({
     NODE_ENV: "production",
     SMS_TRANSPORT: "provider",
-    MEDIA_S3_ALLOW_HTTP_LOCAL: "false",
   }))
     if (value(key) !== expected) errors.push(`${key}: must be ${expected}`);
   if (!["disabled", "smtp"].includes(value("MAIL_TRANSPORT")))
@@ -123,23 +122,33 @@ export function validateWindowsIisEnvironment(env, runtimeOnly = false) {
     )
       errors.push("SMTP_FROM: real sender required");
   }
-  try {
-    const url = new URL(requireValue("MEDIA_S3_ENDPOINT"));
-    if (
-      url.protocol !== "https:" ||
-      url.username ||
-      url.password ||
-      url.pathname !== "/" ||
-      ["localhost", "127.0.0.1", "postgres"].includes(url.hostname)
-    )
-      throw new Error();
-  } catch {
-    errors.push("MEDIA_S3_ENDPOINT: external HTTPS S3 endpoint required");
-  }
-  requireValue("MEDIA_S3_REGION");
-  requireValue("MEDIA_S3_BUCKET");
-  requireValue("MEDIA_S3_ACCESS_KEY_ID", 12);
-  requireValue("MEDIA_S3_SECRET_ACCESS_KEY", 32);
+  const driver = value("MEDIA_STORAGE_DRIVER");
+  if (driver === "local") {
+    if (value("MEDIA_LOCAL_ROOT") !== "/app/data/media")
+      errors.push(
+        "MEDIA_LOCAL_ROOT: must be /app/data/media for the persistent EventOS volume",
+      );
+  } else if (driver === "s3") {
+    if (value("MEDIA_S3_ALLOW_HTTP_LOCAL") !== "false")
+      errors.push("MEDIA_S3_ALLOW_HTTP_LOCAL: must be false for s3");
+    try {
+      const url = new URL(requireValue("MEDIA_S3_ENDPOINT"));
+      if (
+        url.protocol !== "https:" ||
+        url.username ||
+        url.password ||
+        url.pathname !== "/" ||
+        ["localhost", "127.0.0.1", "postgres"].includes(url.hostname)
+      )
+        throw new Error();
+    } catch {
+      errors.push("MEDIA_S3_ENDPOINT: external HTTPS S3 endpoint required");
+    }
+    requireValue("MEDIA_S3_REGION");
+    requireValue("MEDIA_S3_BUCKET");
+    requireValue("MEDIA_S3_ACCESS_KEY_ID", 12);
+    requireValue("MEDIA_S3_SECRET_ACCESS_KEY", 32);
+  } else errors.push("MEDIA_STORAGE_DRIVER: local or s3 required");
   const google = [
     "GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_SECRET",

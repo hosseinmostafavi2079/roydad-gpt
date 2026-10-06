@@ -295,3 +295,14 @@ Clean provisioning and the existing forward upgrade/idempotency tests passed thr
 - [x] Focused disabled-mail production-worker and SMTP-path integration; focused unit tests.
 - [x] Final focused browser/security tests (2/2), one full Playwright run (11/11), check/build/diff gate.
 - [ ] Publish the C1.2 patch and confirm current-commit GitHub Quality Gates and CodeQL.
+
+
+## C1.3 — local persistent media storage
+
+- [x] Provider-neutral storage interface; retain S3, tenant object keys, authorized media/certificate routes and quota enforcement.
+- [x] Local atomic private writes, range reads, exact deletion and traversal/link protections.
+- [x] Windows local-driver env/preflight, app-only `eventos-production_media` volume, node-owned private image directory and physical host disk thresholds.
+- [x] Scoped media backup with checksum/size/failure propagation and mocked lifecycle tests.
+- [x] Dry-run default, conditional/idempotent/resumable local-to-S3 migration with checksum verification; no migration/deployment executed.
+- [x] Focused units 34/34, local-driver PostgreSQL journey 1/1, Windows artifacts 15/15 and mocked backup 1/1; check and local-driver production build.
+- [ ] Publish only C1.3 and confirm current-commit GitHub Quality Gates and CodeQL.

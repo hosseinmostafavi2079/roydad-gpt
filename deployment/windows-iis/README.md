@@ -17,7 +17,7 @@ Compose project همیشه `eventos-production`، سرویس‌ها فقط `post
 - **SMTP اختیاری است:** تنظیم اولیه `MAIL_TRANSPORT=disabled` با `SMTP_URL=` و `SMTP_FROM=` خالی است. SMS OTP / Kavenegar و username/password به ایمیل وابسته نیستند. روش‌های ایمیلی در tenant غیرقابل‌فعال‌سازی و در login پنهان هستند؛ OTP، ثبت‌نام/ورود ایمیلی، verification، reset و invitation ایمیلی با پیام واضح unavailable رد می‌شوند، نه موفقیت ارسال جعلی. platform admin ورود email/password موجود خود را حفظ می‌کند؛ recovery ایمیلی خاموش است. Google با سه مقدار خالی خاموش و مستقل از SMTP باقی می‌ماند.
 - برای فعال‌کردن ایمیل، `MAIL_TRANSPORT=smtp` و SMTPS URL دارای credentials واقعی و sender معتبر لازم است؛ سپس روش‌های ایمیلی را از تنظیم tenant فعال کنید. `MAIL_TRANSPORT=test` در production بدون استثنا ممنوع است. هیچ credentials جعلی یا service محلی SMTP اضافه نشود.
 - تا زمانی که SMTP ندارید، بازیابی مدیر موجود نیازمند روند اپراتوری مجاز و ثبت‌شده است؛ bootstrap امن موجود فقط برای **اولین** Super Admin در دیتابیس بدون admin است و ابزار reset حساب موجود نیست. دعوت initial tenant owner / staff / participant که به email نیاز دارد نیز unavailable است؛ این کار مسیر دعوت SMS یا provisioning جایگزین اضافه نمی‌کند. پیش از rollout tenantهای جدید، این محدودیت workflow را با اپراتور هماهنگ کنید؛ هیچ دعوت یا تحویل جعلی نسازید.
-- **S3 خارجی اجباری است:** endpoint HTTPS، bucket، region و credentials محدود به bucket لازم است. filesystem fallback یا MinIO محلی production وجود ندارد. bucket CORS/lifecycle/backup را طبق نیاز واقعی تنظیم کنید؛ secrets در محیط خصوصی، نه Git. Kavenegar credentials از تنظیم امن tenant ذخیره می‌شوند، نه Compose.
+- **رسانه محلی پایدار:** پیش‌فرض این profile برابر `MEDIA_STORAGE_DRIVER=local` و `MEDIA_LOCAL_ROOT=/app/data/media` است. فقط app به volume مستقل `eventos-production_media` دسترسی دارد؛ worker mount ندارد. مسیر فایل مستقیماً در IIS یا public منتشر نمی‌شود و همه خواندن‌ها از مسیر مجاز `/api/media/[id]` (و مسیر مجاز گواهی‌ها) انجام می‌شوند. S3 اختیاری است؛ انتخاب `s3` به endpoint خارجی HTTPS، bucket، region و credentials واقعی نیاز دارد. Kavenegar credentials همچنان از تنظیم امن tenant خوانده می‌شوند.
 - DNS/TLS/NAT و Windows→WSL loopback، reboot persistence و recovery را مطابق [راهنمای IIS](iis/README-IIS.md) در مرحله اجرای جداگانه تایید کنید.
 
 ## 2 — فایل release و secrets / SAFE CHANGE، اجرای آینده
@@ -97,14 +97,14 @@ smoke read-only از Windows loopback و Host دقیق استفاده می‌ک�
 
 ## 6 — Backup / SAFE CHANGE، بدون overwrite
 
-یک directory خصوصی مستقل مانند `C:\EventOS\backups` با ACL محدود از قبل آماده کنید. هیچ فایل موجود overwrite نمی‌شود؛ timestamp+UUID directory و dump control + تمام tenant DBهای registry همان EventOS + checksum ساخته می‌شود. فقط postgres همین project خوانده می‌شود؛ PricePilot دست‌نخورده است.
+یک directory خصوصی مستقل مانند `C:\EventOS\backups` با ACL محدود از قبل آماده کنید. هیچ فایل موجود overwrite نمی‌شود؛ timestamp+UUID directory و dump control + تمام tenant DBهای registry همان EventOS + checksum ساخته می‌شود. علاوه بر postgres همین project، در حالت local فقط mount دقیق `eventos-production_media` از app همین EventOS آرشیو می‌شود؛ PricePilot و ServerOps دست‌نخورده‌اند. `media.tar.gz` با checksum و اندازه گزارش می‌شود؛ خطای آرشیو رسانه، کل backup را ناموفق می‌کند.
 
 ```powershell
 & "$profile\powershell\backup.ps1" -WslReleasePath $wslRelease -WindowsBackupDirectory 'C:\EventOS\backups' # plan only
 & "$profile\powershell\backup.ps1" -WslReleasePath $wslRelease -WindowsBackupDirectory 'C:\EventOS\backups' -Apply # confirmation
 ```
 
-pg_dump هر DB snapshot سازگار دارد؛ snapshot اتمیک چند DB نیست. قبل از update با مجوز جداگانه writes و queue فقط EventOS را quiesce کنید؛ هیچ توقف workload دیگر یا WSL shutdown انجام نشود. restore rehearsal در محیط جدا لازم است؛ archive listing فقط صحت ساختار است. secrets/role configuration را جداگانه در vault نگه دارید، object storage را جدا backup/version کنید. فایل ناقص خطای backup باقی می‌ماند و success اعلام نمی‌شود.
+pg_dump هر DB snapshot سازگار دارد؛ snapshot اتمیک چند DB نیست. قبل از update با مجوز جداگانه writes و queue فقط EventOS را quiesce کنید؛ هیچ توقف workload دیگر یا WSL shutdown انجام نشود. restore rehearsal در محیط جدا لازم است؛ archive listing فقط صحت ساختار است. secrets/role configuration را جداگانه در vault نگه دارید، برای s3، object storage را جدا backup/version کنید. برای local، آرشیو رسانه و dumpهای همان backup را با هم در محیط مستقل بازیابی و صحت مجوزها را بررسی کنید؛ اسکریپت restore خودکار وجود ندارد. فایل ناقص خطای backup باقی می‌ماند و success اعلام نمی‌شود.
 
 ## 7 — Update و rollback
 
@@ -126,3 +126,25 @@ rollback تنها image برنامه است؛ image قدیمی باید با sch
 فقط syntax/static checks، env validator با داده مصنوعی non-production، Compose config، template XML و diff check. هیچ کانتینر production، IIS تغییر، remote command یا application full suite در C1 اجرا نشود. server prerequisites تا زمان اجرای read-only preflight روی سرور واقعی تایید نشده‌اند.
 
 فرمان محلی artifact gate: `node --test deployment/windows-iis/validate.test.mjs`؛ 10/10 passed (C1.1). این تست Docker Compose را فقط به صورت client-side config اجرا می‌کند و WSL را برای تست guard PowerShell mock می‌کند. PowerShell 5.1 guard tests در process محلی با policy موقت همان process اجرا شده‌اند؛ هیچ policy persistent یا server تغییر نکرده است. هر هفت فایل PowerShell syntax صحیح، bash `-n` صحیح، XML template صحیح و lint فقط دو فایل JavaScript جدید صحیح بودند. PSScriptAnalyzer در محیط موجود نبود و نصب نشد. full application suites دوباره اجرا نشدند.
+
+
+## C1.3 — local media lifecycle and future S3 migration
+
+The app image creates `/app/data/media` owned by `node`, mode 0700, before the Docker named volume is initialized. Media objects are mode 0600, never executable. Do not bind-mount a public directory, mount the volume into another workload, or grant another principal write access. Recreating the app keeps `eventos-production_media`; never delete this volume during release/rollback. The archive is not a live multi-database/filesystem snapshot: quiesce only EventOS writes before an authorized backup. Backups are private, new directories, and must be encrypted offline. A failed partial backup must not be treated as success.
+
+Host **C: physical free space** is authoritative. WSL's apparent 951 GB virtual capacity is not physical free capacity. Preflight warns below **20 GiB** and stops below **10 GiB**. Monitor host storage; there is no automatic deletion/cleanup. Runtime filesystem errors fail uploads instead of claiming success.
+
+Future migration (not executed by this package): configure real external S3 variables in the private env file, while leaving `MEDIA_STORAGE_DRIVER=local`. Run the utility in the existing app container with the same private volume/config:
+
+```bash
+# Read-only dry-run by default: validates the local tree/signatures; no remote network or writes.
+docker compose --project-name eventos-production --env-file deployment/windows-iis/.env.production -f deployment/windows-iis/compose.production.yaml exec -T app node --conditions=react-server --import=tsx scripts/migrate-local-media-to-s3.ts
+# Explicit upload, only after review. Local files and database object keys are preserved.
+docker compose --project-name eventos-production --env-file deployment/windows-iis/.env.production -f deployment/windows-iis/compose.production.yaml exec -T app node --conditions=react-server --import=tsx scripts/migrate-local-media-to-s3.ts --apply
+```
+
+The validated tree includes current tenant media and certificate objects. Content types are derived from accepted file signatures. Apply compares full size and SHA-256 with existing remote objects, uses conditional `If-None-Match: *` to avoid overwrite races, and re-reads newly uploaded objects to verify size/checksum. A mismatched existing object is counted as a conflict and gives a nonzero exit; verification/network failures also give a nonzero exit. Local files are never removed. Reruns skip identical objects and resume missing ones; no secret values or object names are printed, only summary counts. Providers must support conditional writes and AES256 server-side encryption; unsupported behavior fails closed.
+
+Quiesce writes for the final migration/verification pass. Only after zero conflicts and successful verification should the operator explicitly change `MEDIA_STORAGE_DRIVER=s3`, run preflight, and recreate EventOS app/worker in a separately authorized deployment. Verify authorized media/certificate reads before accepting traffic. Do not remove local copies until a separately approved retention/restore plan exists. No automatic driver switch or database rewrite is performed.
+
+Artifact-only backup validation: `bash deployment/windows-iis/backup.test.sh` uses a temporary directory and a mocked Docker executable; it does not deploy or access real Docker volumes.

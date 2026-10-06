@@ -18,6 +18,8 @@ function fixture() {
     NODE_ENV: "production",
     MAIL_TRANSPORT: "smtp",
     SMS_TRANSPORT: "provider",
+    MEDIA_STORAGE_DRIVER: "s3",
+    MEDIA_LOCAL_ROOT: "/app/data/media",
     MEDIA_S3_ALLOW_HTTP_LOCAL: "false",
     PLATFORM_REQUIRE_MFA: "false",
     TRUSTED_PROXY_CIDRS: "",
@@ -148,6 +150,16 @@ test("example intentionally cannot be used as production", () => {
 test("Docker Compose config has only isolated EventOS resources and loopback app port", () => {
   // config is client-side only: no pull/start/daemon access and synthetic test data.
   const env = { ...process.env, ...fixture() };
+  delete env.MEDIA_STORAGE_DRIVER; // Windows profile must default to local.
+  for (const key of [
+    "MEDIA_S3_ENDPOINT",
+    "MEDIA_S3_REGION",
+    "MEDIA_S3_BUCKET",
+    "MEDIA_S3_ACCESS_KEY_ID",
+    "MEDIA_S3_SECRET_ACCESS_KEY",
+  ])
+    env[key] = "";
+
   for (const key of Object.keys(env))
     if (/^EVENTOS_(E2E|TEST)_/.test(key)) delete env[key];
   let config;
@@ -196,7 +208,29 @@ test("Docker Compose config has only isolated EventOS resources and loopback app
     assert.ok(!resource.external);
   }
   assert.equal(config.networks.database.internal, true);
+  assert.equal(
+    config.volumes["production-media"].name,
+    "eventos-production_media",
+  );
+  assert.ok(
+    config.services.app.volumes.some(
+      (mount) =>
+        mount.source === "production-media" &&
+        mount.target === "/app/data/media",
+    ),
+  );
+  assert.ok(
+    !config.services.worker.volumes?.some(
+      (mount) => mount.target === "/app/data/media",
+    ),
+  );
   assert.equal(config.services.app.environment.SMS_TRANSPORT, "provider");
+  assert.equal(config.services.app.environment.MEDIA_STORAGE_DRIVER, "local");
+  assert.equal(
+    config.services.app.environment.MEDIA_LOCAL_ROOT,
+    "/app/data/media",
+  );
+
   assert.ok(
     config.services.app.command.join(" ").includes("windows-iis-preflight.mjs"),
   );
@@ -269,4 +303,89 @@ test("PowerShell isolation guard accepts only the exact EventOS topology (mocked
     unlinkSync(file);
     rmdirSync(directory);
   }
+});
+
+test("local production media requires only the exact persistent root, not S3 credentials", () => {
+  const env = fixture();
+  env.MEDIA_STORAGE_DRIVER = "local";
+  delete env.MEDIA_S3_ALLOW_HTTP_LOCAL;
+  for (const key of [
+    "MEDIA_S3_ENDPOINT",
+    "MEDIA_S3_REGION",
+    "MEDIA_S3_BUCKET",
+    "MEDIA_S3_ACCESS_KEY_ID",
+    "MEDIA_S3_SECRET_ACCESS_KEY",
+  ])
+    env[key] = "";
+  assert.deepEqual(validateWindowsIisEnvironment(env), []);
+  env.MEDIA_LOCAL_ROOT = "/app/public/media";
+  assert.ok(
+    validateWindowsIisEnvironment(env).some((error) =>
+      error.includes("MEDIA_LOCAL_ROOT"),
+    ),
+  );
+  env.MEDIA_STORAGE_DRIVER = "invalid";
+  assert.ok(
+    validateWindowsIisEnvironment(env).some((error) =>
+      error.includes("MEDIA_STORAGE_DRIVER"),
+    ),
+  );
+});
+
+test("media backup binds only the exact EventOS volume and fails closed", () => {
+  const source = readFileSync(new URL("backup.sh", import.meta.url), "utf8");
+  assert.ok(source.includes('"$media_volume" == eventos-production_media'));
+  assert.ok(source.includes("scripts/backup-local-media.ts"));
+  assert.ok(source.includes("gzip -t"));
+  assert.ok(source.includes("media.tar.gz"));
+  assert.ok(source.includes("sha256sum"));
+  assert.ok(source.includes("set -o noclobber"));
+  assert.ok(!/volume\s+(?:ls|prune|rm)|system\s+prune/.test(source));
+});
+
+test("host physical disk preflight warns at 20 GiB and stops at 10 GiB", () => {
+  const source = readFileSync(
+    new URL("powershell/preflight.ps1", import.meta.url),
+    "utf8",
+  );
+  assert.ok(source.includes("$disk.FreeSpace -lt 10GB"));
+  assert.ok(source.includes("$disk.FreeSpace -lt 20GB"));
+  assert.ok(source.includes("Write-Warning"));
+});
+
+test("S3 selection retains complete external HTTPS production requirements", () => {
+  for (const key of [
+    "MEDIA_S3_ENDPOINT",
+    "MEDIA_S3_REGION",
+    "MEDIA_S3_BUCKET",
+    "MEDIA_S3_ACCESS_KEY_ID",
+    "MEDIA_S3_SECRET_ACCESS_KEY",
+  ]) {
+    const env = fixture();
+    env[key] = "";
+    assert.ok(
+      validateWindowsIisEnvironment(env).some((error) => error.includes(key)),
+    );
+  }
+  const env = fixture();
+  env.MEDIA_S3_ENDPOINT = "http://storage.example.test";
+  assert.ok(
+    validateWindowsIisEnvironment(env).some((error) =>
+      error.includes("MEDIA_S3_ENDPOINT"),
+    ),
+  );
+});
+
+test("runtime image prepares a private node-owned media root and archive tools", () => {
+  const source = readFileSync(
+    new URL("../../Dockerfile", import.meta.url),
+    "utf8",
+  );
+  const runtime = source.slice(source.lastIndexOf("FROM node:"));
+  assert.ok(runtime.includes("ca-certificates tar gzip"));
+  assert.ok(runtime.includes("chown node:node /app/data/media"));
+  assert.ok(runtime.includes("chmod 700 /app/data/media"));
+  assert.ok(
+    runtime.indexOf("mkdir -p /app/data/media") < runtime.indexOf("USER node"),
+  );
 });

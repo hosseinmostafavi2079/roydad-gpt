@@ -16,6 +16,7 @@ function storage() {
   const config = getServerConfig();
   if (
     !config.MEDIA_S3_ENDPOINT ||
+    !config.MEDIA_S3_REGION ||
     !config.MEDIA_S3_BUCKET ||
     !config.MEDIA_S3_ACCESS_KEY_ID ||
     !config.MEDIA_S3_SECRET_ACCESS_KEY

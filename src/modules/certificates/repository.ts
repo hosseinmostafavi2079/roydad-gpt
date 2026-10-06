@@ -7,7 +7,7 @@ import {
   deleteMediaObject,
   getMediaObject,
   putMediaObject,
-} from "@/infrastructure/media/s3";
+} from "@/infrastructure/media/storage";
 import type { TenantContext } from "@/modules/tenant-identity/auth";
 import { authorize } from "@/modules/tenant-identity/permissions";
 import type { TenantActor } from "@/modules/tenant-identity/request-auth";

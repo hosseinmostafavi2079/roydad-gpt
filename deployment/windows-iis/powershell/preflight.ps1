@@ -10,7 +10,7 @@ Check-ReadOnly 'Windows Server 2022' {
     Write-Output "$($os.Caption); version $($os.Version); free memory KB $($os.FreePhysicalMemory)"
     if ($os.Caption -notmatch 'Windows Server 2022' -or [int64]$os.FreePhysicalMemory -lt 2097152) { throw 'Unsupported OS or less than 2 GiB free RAM.' }
 }
-Check-ReadOnly 'C: capacity (10 GiB free minimum)' { $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; Write-Output "C: free bytes $($disk.FreeSpace)"; if ($disk.FreeSpace -lt 10GB) { throw 'Disk space' } }
+Check-ReadOnly 'C: capacity (10 GiB free minimum)' { $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; Write-Output "C: free bytes $($disk.FreeSpace)"; if ($disk.FreeSpace -lt 10GB) { throw 'Host C: has less than 10 GiB free; stop.' }; if ($disk.FreeSpace -lt 20GB) { Write-Warning 'Host C: has less than 20 GiB free. Local media consumes physical host space; WSL virtual capacity is not authoritative.' } }
 Check-ReadOnly 'IIS, ARR, URL Rewrite and current bindings' {
     Import-Module WebAdministration
     $modules = @(Get-WebGlobalModule | Select-Object -ExpandProperty Name)

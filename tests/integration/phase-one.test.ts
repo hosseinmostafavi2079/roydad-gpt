@@ -38,7 +38,7 @@ import {
   getTenantPool,
   tenantPoolCacheSize,
 } from "@/infrastructure/db/tenant/pool";
-import { getMediaObject } from "@/infrastructure/media/s3";
+import { getMediaObject } from "@/infrastructure/media/storage";
 import {
   getProvisioningBoss,
   provisioningQueueName,
@@ -1132,6 +1132,57 @@ describe("Phase 1 real PostgreSQL gates", () => {
     expect(logoObjectKey).toBeDefined();
     if (!logoObjectKey) throw new Error("Uploaded logo object key is missing.");
     expect(await getMediaObject(logoObjectKey)).toEqual(logoBytes);
+    const rangeMedia = await getPublicMedia(
+      new Request(`${websiteOrigin}${logo.url}`, {
+        headers: { host: `${slugA}.localhost:3000`, range: "bytes=0-7" },
+      }),
+      { params: Promise.resolve({ id: logo.id }) },
+    );
+    expect(rangeMedia.status).toBe(206);
+    expect(rangeMedia.headers.get("content-range")).toBe(
+      `bytes 0-7/${logoBytes.length}`,
+    );
+    expect(new Uint8Array(await rangeMedia.arrayBuffer())).toEqual(
+      logoBytes.slice(0, 8),
+    );
+    await expect(
+      saveMedia(
+        ownerContext,
+        { ...ownerActor, tenantId: randomUUID() },
+        "WEBSITE_LOGO",
+        ownerContext.tenantId,
+        "image/png",
+        logoBytes,
+        randomUUID(),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      saveMedia(
+        ownerContext,
+        { ...ownerActor, permissions: new Set() },
+        "WEBSITE_LOGO",
+        ownerContext.tenantId,
+        "image/png",
+        logoBytes,
+        randomUUID(),
+      ),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      saveMedia(
+        {
+          ...ownerContext,
+          limits: { ...ownerContext.limits, max_storage_mb: 0 },
+        },
+        ownerActor,
+        "WEBSITE_LOGO",
+        ownerContext.tenantId,
+        "image/png",
+        logoBytes,
+        randomUUID(),
+      ),
+    ).rejects.toMatchObject({ code: "TENANT_LIMIT_REACHED" });
+    expect(await getMediaObject(logoObjectKey)).toEqual(logoBytes);
+
     const profileWithLogo = await putWebsiteProfile(
       websiteRequest({ ...websiteInput, logoUrl: logo.url }),
     );

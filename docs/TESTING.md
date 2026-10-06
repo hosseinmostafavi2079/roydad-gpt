@@ -267,3 +267,14 @@ The focused Playwright run passed 2/2 journeys, including activation and usernam
 Forward migration fixtures now expect tenant migration `0015_owner_password_setup`; the control database adds `0012_owner_activation_result`. Historical migrations are unchanged. No Docker, IIS, deployment, or external SMTP validation is required for this bootstrap task.
 
 C1.2 final local results: `pnpm check` passed; focused units **28/28**; relevant real PostgreSQL coverage **18/18** (16 Identity V2, one disabled-mail bootstrap, one existing SMTP provisioning scenario); focused browser **2/2**; the single full Playwright run **11/11**; production build with `MAIL_TRANSPORT=disabled` passed; Prisma validation passed; `git diff --check` passed. Existing stream-close, color-environment and pg deprecation warnings were not changed. Current-commit GitHub results require publication and are not inferred from the prior green release.
+
+
+## C1.3 — local persistent media storage
+
+Focused unit validation: **34/34** across local storage/migration, server configuration, organization media validation and deployment checks. Coverage includes put/get/atomic replacement/exact idempotent delete, byte ranges, S3-compatible tenant and certificate keys, traversal, parent/root symlinks/junctions and outside hard links, local operation without S3 configuration, S3 TLS/missing-config failure, dry-run with zero destination initialization/writes, idempotent resume, remote conflicts and checksum failure.
+
+The existing real PostgreSQL provisioning/media/isolation journey passed **1/1** with `MEDIA_STORAGE_DRIVER=local`, a disposable OS-temp root, and all S3 endpoint/region/bucket/credential variables empty. It retains tenant-scoped media reads, adds range response assertions, and proves wrong-tenant/permission and storage-quota rejection leave the stored media unchanged. CI's default S3 journey continues exercising the existing adapter.
+
+Windows/IIS artifact tests passed **15/15** (`node --test deployment/windows-iis/validate.test.mjs`), including client-only Docker Compose parsing with local default and empty S3 settings; exact named volume/app-only mount; local/S3 preflight separation; and host C: thresholds. The WSL bash backup harness passed **1/1** (`bash deployment/windows-iis/backup.test.sh`), with every Docker command mocked: archive checksums and size, separate directories/no overwrite, wrong-volume rejection and media-backup failure propagation. No real volumes or other workloads were accessed.
+
+`pnpm check` and a production build with `MEDIA_STORAGE_DRIVER=local`, `/app/data/media`, disabled mail and empty S3 settings passed. Diff checks passed. No browser-visible behavior changed, so no local full Playwright run was needed. No deployment, live backup, S3 migration or driver switch was performed. New filesystem tests also run on Linux in the GitHub unit gate; release approval requires current-commit Quality Gates and CodeQL.

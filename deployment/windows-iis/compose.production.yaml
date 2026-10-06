@@ -22,11 +22,13 @@ x-runtime-environment: &runtime-environment
   GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
   GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
   GOOGLE_OAUTH_ALLOWED_ORIGINS: ${GOOGLE_OAUTH_ALLOWED_ORIGINS:-}
-  MEDIA_S3_ENDPOINT: ${MEDIA_S3_ENDPOINT:?Set external S3 endpoint}
-  MEDIA_S3_REGION: ${MEDIA_S3_REGION:?Set S3 region}
-  MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:?Set S3 bucket}
-  MEDIA_S3_ACCESS_KEY_ID: ${MEDIA_S3_ACCESS_KEY_ID:?Set S3 access key}
-  MEDIA_S3_SECRET_ACCESS_KEY: ${MEDIA_S3_SECRET_ACCESS_KEY:?Set S3 secret key}
+  MEDIA_STORAGE_DRIVER: ${MEDIA_STORAGE_DRIVER:-local}
+  MEDIA_LOCAL_ROOT: /app/data/media
+  MEDIA_S3_ENDPOINT: ${MEDIA_S3_ENDPOINT:-}
+  MEDIA_S3_REGION: ${MEDIA_S3_REGION:-}
+  MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:-}
+  MEDIA_S3_ACCESS_KEY_ID: ${MEDIA_S3_ACCESS_KEY_ID:-}
+  MEDIA_S3_SECRET_ACCESS_KEY: ${MEDIA_S3_SECRET_ACCESS_KEY:-}
   MEDIA_S3_ALLOW_HTTP_LOCAL: "false"
   TENANT_POOL_LIMIT: ${TENANT_POOL_LIMIT:-16}
   TENANT_POOL_CONNECTIONS_PER_DATABASE: ${TENANT_POOL_CONNECTIONS_PER_DATABASE:-2}
@@ -67,6 +69,8 @@ services:
       <<: *runtime-environment
       HOSTNAME: 0.0.0.0
       PORT: "3000"
+    volumes:
+      - production-media:/app/data/media
     ports: ["127.0.0.1:18280:3000"]
     command: ["sh", "-ec", "node scripts/windows-iis-preflight.mjs --runtime-only; exec node standalone/server.js"]
     networks: [frontend, database]
@@ -107,3 +111,5 @@ networks:
 
 volumes:
   production-postgres: {}
+  production-media:
+    name: eventos-production_media

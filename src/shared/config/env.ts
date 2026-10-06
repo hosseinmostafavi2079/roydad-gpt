@@ -1,6 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
+import path from "node:path";
 
 const nonPlaceholder = (name: string) =>
   z
@@ -52,6 +53,8 @@ const serverConfigSchema = z
     SMTP_URL: z.string().optional().default(""),
     MAIL_TRANSPORT: z.enum(["disabled", "smtp", "test"]).default("smtp"),
     SMS_TRANSPORT: z.enum(["provider", "test"]).default("provider"),
+    MEDIA_STORAGE_DRIVER: z.enum(["local", "s3"]).default("s3"),
+    MEDIA_LOCAL_ROOT: z.string().default("/app/data/media"),
     MEDIA_S3_ENDPOINT: z.string().default(""),
     MEDIA_S3_REGION: z.string().default("us-east-1"),
     MEDIA_S3_BUCKET: z.string().default(""),
@@ -86,6 +89,18 @@ const serverConfigSchema = z
       .default("info"),
   })
   .superRefine((config, ctx) => {
+    if (
+      config.MEDIA_STORAGE_DRIVER === "local" &&
+      (!path.isAbsolute(config.MEDIA_LOCAL_ROOT) ||
+        config.MEDIA_LOCAL_ROOT.includes("\0") ||
+        path.resolve(config.MEDIA_LOCAL_ROOT) ===
+          path.parse(config.MEDIA_LOCAL_ROOT).root)
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["MEDIA_LOCAL_ROOT"],
+        message: "Local media requires a private absolute directory",
+      });
     if (config.NODE_ENV === "production" && config.SMS_TRANSPORT === "test") {
       ctx.addIssue({
         code: "custom",

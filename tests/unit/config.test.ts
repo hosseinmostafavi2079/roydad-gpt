@@ -157,4 +157,22 @@ describe("server configuration", () => {
         .SMS_TRANSPORT,
     ).toBe("test");
   });
+  it("accepts local storage without S3 credentials and rejects invalid drivers/relative roots", () => {
+    const local = {
+      ...validConfig,
+      NODE_ENV: "production",
+      MAIL_TRANSPORT: "disabled",
+      TENANT_BOOTSTRAP_ENCRYPTION_KEY: "b".repeat(32),
+      MEDIA_STORAGE_DRIVER: "local",
+      MEDIA_LOCAL_ROOT:
+        process.platform === "win32" ? "C:\\EventOS\\media" : "/app/data/media",
+    };
+    expect(parseServerConfig(local).MEDIA_STORAGE_DRIVER).toBe("local");
+    expect(() =>
+      parseServerConfig({ ...local, MEDIA_STORAGE_DRIVER: "invalid" }),
+    ).toThrow(/MEDIA_STORAGE_DRIVER/);
+    expect(() =>
+      parseServerConfig({ ...local, MEDIA_LOCAL_ROOT: "public/media" }),
+    ).toThrow(/MEDIA_LOCAL_ROOT/);
+  });
 });

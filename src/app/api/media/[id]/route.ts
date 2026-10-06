@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getMediaObject } from "@/infrastructure/media/s3";
+import { getMediaObject } from "@/infrastructure/media/storage";
 import { getTenantPool } from "@/infrastructure/db/tenant/pool";
 import {
   resolveTenantRequest,

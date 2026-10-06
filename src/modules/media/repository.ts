@@ -2,7 +2,10 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import { getTenantPool } from "@/infrastructure/db/tenant/pool";
-import { deleteMediaObject, putMediaObject } from "@/infrastructure/media/s3";
+import {
+  deleteMediaObject,
+  putMediaObject,
+} from "@/infrastructure/media/storage";
 import type { TenantContext } from "@/modules/tenant-identity/auth";
 import type { TenantActor } from "@/modules/tenant-identity/request-auth";
 import { authorize } from "@/modules/tenant-identity/permissions";
