@@ -7,6 +7,7 @@ const items = [
   { href: "/platform", label: "نمای کلی", icon: "⌂" },
   { href: "/platform/tenants", label: "سازمان‌ها", icon: "▦" },
   { href: "/platform/plans", label: "طرح‌ها و محدودیت‌ها", icon: "◇" },
+  { href: "/platform/backups", label: "پشتیبان‌گیری", icon: "↥" },
 ];
 
 export function PlatformNav({ requireMfa = false }: { requireMfa?: boolean }) {
