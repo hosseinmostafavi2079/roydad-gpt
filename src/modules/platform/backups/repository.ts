@@ -64,9 +64,34 @@ type Job = {
   completed_at: Date | null;
   created_at: Date;
   updated_at: Date;
+  delete_state?: "QUEUED" | "RUNNING" | "FAILED" | "SUCCEEDED" | null;
+  can_delete?: boolean;
+  delete_blocked_last?: boolean;
+};
+type Deletion = {
+  id: string;
+  backup_job_id: string;
+  requested_by: string;
+  request_id: string;
+  state: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED";
+};
+const activeDeletion = (alias: string) =>
+  `EXISTS(SELECT 1 FROM platform_backup_deletion_requests d WHERE d.backup_job_id=${alias}.id AND d.state IN ('QUEUED','RUNNING'))`;
+// Durable deletion reservations are excluded from surviving backups, including
+// retention selections whose host-side filesystem operation may be in progress.
+const availableGroup = (alias: string) =>
+  `SELECT count(*) FROM platform_backup_jobs survivor WHERE survivor.scope=${alias}.scope AND survivor.tenant_id IS NOT DISTINCT FROM ${alias}.tenant_id AND survivor.state='SUCCEEDED' AND survivor.checksum_verified AND survivor.prune_authorized_by IS NULL AND NOT ${activeDeletion("survivor")}`;
+const safeKey = (job: Job) => {
+  const uuid = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}";
+  const prefix =
+    job.scope === "FULL_PLATFORM" ? "eventos" : `tenant-${job.tenant_id}`;
+  return new RegExp(`^${prefix}-[0-9]{8}T[0-9]{6}Z-${uuid}$`).test(
+    job.backup_key,
+  );
 };
 const columns =
   "id,scope,tenant_id,trigger_type,state,request_id,backup_key,size_bytes,checksum_verified,safe_error_code,safe_error_message,started_at,completed_at,created_at,updated_at";
+const readColumns = `${columns},(SELECT d.state FROM platform_backup_deletion_requests d WHERE d.backup_job_id=j.id ORDER BY d.created_at DESC,d.id DESC LIMIT 1) AS delete_state,(j.state='SUCCEEDED' AND j.checksum_verified AND j.prune_authorized_by IS NULL AND NOT ${activeDeletion("j")} AND (${availableGroup("j")})>1) AS can_delete,(j.state='SUCCEEDED' AND j.checksum_verified AND NOT ${activeDeletion("j")} AND (${availableGroup("j")})<=1) AS delete_blocked_last`;
 export function safeBackupJob(row: Job) {
   return {
     id: row.id,
@@ -84,6 +109,12 @@ export function safeBackupJob(row: Job) {
     completedAt: row.completed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    deleteRequest: {
+      state:
+        row.delete_state === "SUCCEEDED" ? null : (row.delete_state ?? null),
+    },
+    canDelete: Boolean(row.can_delete) && safeKey(row),
+    deleteProtected: Boolean(row.delete_blocked_last),
   };
 }
 export class BackupRepository {
@@ -163,7 +194,7 @@ export class BackupRepository {
   async list(limit: number, offset: number) {
     return (
       await this.pool.query<Job>(
-        `SELECT ${columns} FROM platform_backup_jobs ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2`,
+        `SELECT ${readColumns} FROM platform_backup_jobs j ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2`,
         [limit, offset],
       )
     ).rows.map(safeBackupJob);
@@ -171,7 +202,7 @@ export class BackupRepository {
   async detail(id: string) {
     const row = (
       await this.pool.query<Job>(
-        `SELECT ${columns} FROM platform_backup_jobs WHERE id=$1`,
+        `SELECT ${readColumns} FROM platform_backup_jobs j WHERE id=$1`,
         [id],
       )
     ).rows[0];
@@ -280,6 +311,213 @@ export class BackupRepository {
       }
     }
     return result;
+  }
+  private async deletionAudit(
+    client: PoolClient,
+    job: Job,
+    deletion: Deletion,
+    action: string,
+  ) {
+    await appendAuditRecord(client, {
+      actorType: "PLATFORM_ADMIN",
+      actorId: deletion.requested_by,
+      action,
+      targetType: "BACKUP_JOB",
+      targetId: job.id,
+      requestId: deletion.request_id,
+      afterState: {
+        jobId: job.id,
+        scope: job.scope,
+        tenantId: job.tenant_id,
+        deletionRequestId: deletion.id,
+        state: deletion.state,
+      },
+    });
+  }
+  private deletionClaim(job: Job, deletion: Deletion) {
+    return {
+      id: deletion.id,
+      backupJobId: job.id,
+      backupKey: job.backup_key,
+      scope: job.scope,
+      tenantId: job.tenant_id,
+    };
+  }
+  private async assertSurvivor(client: PoolClient, job: Job, required: number) {
+    const result = await client.query<{ count: string }>(
+      `SELECT (${availableGroup("j")}) AS count FROM platform_backup_jobs j WHERE j.id=$1`,
+      [job.id],
+    );
+    if (Number(result.rows[0]?.count ?? 0) < required)
+      throw new DomainError(
+        "CONFLICT",
+        "حداقل یک نسخه پشتیبان موفق باید باقی بماند.",
+      );
+  }
+  async requestDeletion(id: string, actorId: string, requestId: string) {
+    return this.transaction(async (client) => {
+      // Share retention's policy lock: a queued request reserves its target before
+      // any other manual/retention deletion can authorize physical removal.
+      await this.lockedPolicy(client);
+      const job = (
+        await client.query<Job & { prune_authorized_by: string | null }>(
+          `SELECT ${columns},prune_authorized_by FROM platform_backup_jobs WHERE id=$1 FOR UPDATE`,
+          [id],
+        )
+      ).rows[0];
+      if (!job) throw new DomainError("NOT_FOUND", "Backup job not found.");
+      if (
+        job.state !== "SUCCEEDED" ||
+        !job.checksum_verified ||
+        !safeKey(job) ||
+        job.prune_authorized_by
+      )
+        throw new DomainError(
+          "INVALID_STATE_TRANSITION",
+          "Backup deletion unavailable.",
+        );
+      const existing = (
+        await client.query<Deletion>(
+          "SELECT * FROM platform_backup_deletion_requests WHERE backup_job_id=$1 AND state IN ('QUEUED','RUNNING') FOR UPDATE",
+          [id],
+        )
+      ).rows[0];
+      if (existing) return { id: existing.id, state: existing.state };
+      await this.assertSurvivor(client, job, 2);
+      const deletion = (
+        await client.query<Deletion>(
+          "INSERT INTO platform_backup_deletion_requests(backup_job_id,requested_by,request_id) VALUES($1,$2,$3) RETURNING *",
+          [id, actorId, requestId],
+        )
+      ).rows[0];
+      if (!deletion) throw new Error("Deletion request unavailable");
+      await this.deletionAudit(
+        client,
+        job,
+        deletion,
+        "backup.delete_requested",
+      );
+      return { id: deletion.id, state: deletion.state };
+    });
+  }
+  async claimDeletion() {
+    return this.transaction(async (client) => {
+      await this.lockedPolicy(client);
+      const deletion = (
+        await client.query<Deletion>(
+          "UPDATE platform_backup_deletion_requests SET state='RUNNING',started_at=now(),updated_at=now() WHERE id=(SELECT id FROM platform_backup_deletion_requests WHERE state='QUEUED' ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *",
+        )
+      ).rows[0];
+      if (!deletion) return null;
+      const job = (
+        await client.query<Job>(
+          `SELECT ${columns} FROM platform_backup_jobs WHERE id=$1 FOR UPDATE`,
+          [deletion.backup_job_id],
+        )
+      ).rows[0];
+      if (!job) throw new Error("Deletion target unavailable");
+      return this.deletionClaim(job, deletion);
+    });
+  }
+  private async lockedDeletion(client: PoolClient, id: string, key: string) {
+    const deletion = (
+      await client.query<Deletion>(
+        "SELECT * FROM platform_backup_deletion_requests WHERE id=$1 FOR UPDATE",
+        [id],
+      )
+    ).rows[0];
+    if (!deletion)
+      throw new DomainError("NOT_FOUND", "Deletion request not found.");
+    const job = (
+      await client.query<Job & { prune_authorized_by: string | null }>(
+        `SELECT ${columns},prune_authorized_by FROM platform_backup_jobs WHERE id=$1 FOR UPDATE`,
+        [deletion.backup_job_id],
+      )
+    ).rows[0];
+    if (
+      !job ||
+      job.backup_key !== key ||
+      !safeKey(job) ||
+      job.prune_authorized_by
+    )
+      throw new DomainError(
+        "INVALID_STATE_TRANSITION",
+        "Backup deletion authorization unavailable.",
+      );
+    return { job, deletion };
+  }
+  async checkDeletion(id: string, key: string) {
+    return this.transaction(async (client) => {
+      await this.lockedPolicy(client);
+      const { job, deletion } = await this.lockedDeletion(client, id, key);
+      if (
+        deletion.state !== "RUNNING" ||
+        job.state !== "SUCCEEDED" ||
+        !job.checksum_verified
+      )
+        throw new DomainError(
+          "INVALID_STATE_TRANSITION",
+          "Backup deletion authorization unavailable.",
+        );
+      await this.assertSurvivor(client, job, 1);
+      return this.deletionClaim(job, deletion);
+    });
+  }
+  async completeDeletion(id: string, key: string) {
+    return this.transaction(async (client) => {
+      await this.lockedPolicy(client);
+      const { job, deletion } = await this.lockedDeletion(client, id, key);
+      if (deletion.state === "SUCCEEDED" && job.state === "PRUNED")
+        return { id, state: deletion.state };
+      if (
+        deletion.state !== "RUNNING" ||
+        job.state !== "SUCCEEDED" ||
+        !job.checksum_verified
+      )
+        throw new DomainError(
+          "INVALID_STATE_TRANSITION",
+          "Backup deletion authorization unavailable.",
+        );
+      await this.assertSurvivor(client, job, 1);
+      await client.query(
+        "UPDATE platform_backup_jobs SET state='PRUNED',updated_at=now() WHERE id=$1",
+        [job.id],
+      );
+      await client.query(
+        "UPDATE platform_backup_deletion_requests SET state='SUCCEEDED',completed_at=now(),updated_at=now() WHERE id=$1",
+        [id],
+      );
+      await this.deletionAudit(
+        client,
+        { ...job, state: "PRUNED" },
+        { ...deletion, state: "SUCCEEDED" },
+        "backup.deleted",
+      );
+      return { id, state: "SUCCEEDED" as const };
+    });
+  }
+  async failDeletion(id: string, key: string) {
+    return this.transaction(async (client) => {
+      await this.lockedPolicy(client);
+      const { job, deletion } = await this.lockedDeletion(client, id, key);
+      if (deletion.state === "FAILED") return { id, state: deletion.state };
+      if (deletion.state !== "RUNNING" || job.state !== "SUCCEEDED")
+        throw new DomainError(
+          "INVALID_STATE_TRANSITION",
+          "Backup deletion failure transition unavailable.",
+        );
+      await client.query(
+        "UPDATE platform_backup_deletion_requests SET state='FAILED',safe_error_code='BACKUP_DELETE_FAILED',safe_error_message='Backup deletion failed safely.',completed_at=now(),updated_at=now() WHERE id=$1",
+        [id],
+      );
+      await this.deletionAudit(
+        client,
+        job,
+        { ...deletion, state: "FAILED" },
+        "backup.delete_failed",
+      );
+      return { id, state: "FAILED" as const };
+    });
   }
   // Trusted host CLI only: explicit allow-list, parameterized tenant identity; never exposed by HTTP.
   async tenantMetadata(tenantId: string) {
@@ -415,7 +653,7 @@ export class BackupRepository {
         )
       ).rows[0];
       if (!trigger) return [];
-      const ranked = `SELECT id,row_number() OVER(ORDER BY completed_at DESC,created_at DESC,id DESC) AS rank FROM platform_backup_jobs WHERE scope=$1 AND tenant_id IS NOT DISTINCT FROM $2::uuid AND state='SUCCEEDED' AND checksum_verified AND completed_at IS NOT NULL`;
+      const ranked = `SELECT id,row_number() OVER(ORDER BY completed_at DESC,created_at DESC,id DESC) AS rank FROM platform_backup_jobs j WHERE scope=$1 AND tenant_id IS NOT DISTINCT FROM $2::uuid AND state='SUCCEEDED' AND checksum_verified AND completed_at IS NOT NULL AND NOT ${activeDeletion("j")}`;
       const result = await client.query<{ id: string; backup_key: string }>(
         `UPDATE platform_backup_jobs j SET prune_authorized_by=$3,prune_authorized_at=now() FROM (SELECT id FROM (${ranked}) ranked WHERE ranked.rank>$4 AND ranked.id<>$3 ORDER BY ranked.rank DESC LIMIT 10) selected WHERE j.id=selected.id RETURNING j.id,j.backup_key`,
         [trigger.scope, trigger.tenant_id, trigger.id, policy.retention_count],
@@ -430,7 +668,7 @@ export class BackupRepository {
     // Only previously selected candidates. Rank is re-evaluated after policy changes.
     const rows = (
       await this.pool.query<{ id: string; backup_key: string }>(
-        `SELECT j.id,j.backup_key FROM (SELECT id,backup_key,prune_authorized_by,row_number()OVER(PARTITION BY scope,tenant_id ORDER BY completed_at DESC,created_at DESC,id DESC) AS rank FROM platform_backup_jobs WHERE state='SUCCEEDED' AND checksum_verified AND completed_at IS NOT NULL)j JOIN platform_backup_policies p ON p.scope='FULL_PLATFORM' WHERE j.prune_authorized_by IS NOT NULL AND j.rank>p.retention_count ORDER BY j.id LIMIT 10`,
+        `SELECT j.id,j.backup_key FROM (SELECT id,backup_key,prune_authorized_by,row_number()OVER(PARTITION BY scope,tenant_id ORDER BY completed_at DESC,created_at DESC,id DESC) AS rank FROM platform_backup_jobs b WHERE state='SUCCEEDED' AND checksum_verified AND completed_at IS NOT NULL AND NOT ${activeDeletion("b")})j JOIN platform_backup_policies p ON p.scope='FULL_PLATFORM' WHERE j.prune_authorized_by IS NOT NULL AND j.rank>p.retention_count ORDER BY j.id LIMIT 10`,
       )
     ).rows;
     return rows.map((row) => ({ id: row.id, backupKey: row.backup_key }));
@@ -465,13 +703,19 @@ export class BackupRepository {
       if (existing.state === "PRUNED") return safeBackupJob(existing);
       const retained = (
         await client.query(
-          "SELECT id FROM platform_backup_jobs WHERE scope=$1 AND tenant_id IS NOT DISTINCT FROM $2::uuid AND state='SUCCEEDED' AND checksum_verified ORDER BY completed_at DESC,created_at DESC,id DESC LIMIT $3",
+          `SELECT id FROM platform_backup_jobs j WHERE scope=$1 AND tenant_id IS NOT DISTINCT FROM $2::uuid AND state='SUCCEEDED' AND checksum_verified AND NOT ${activeDeletion("j")} ORDER BY completed_at DESC,created_at DESC,id DESC LIMIT $3`,
           [existing.scope, existing.tenant_id, policy.retention_count],
         )
       ).rows;
       if (
         existing.state !== "SUCCEEDED" ||
         !existing.checksum_verified ||
+        (
+          await client.query(
+            `SELECT 1 FROM platform_backup_deletion_requests WHERE backup_job_id=$1 AND state IN ('QUEUED','RUNNING')`,
+            [id],
+          )
+        ).rowCount ||
         retained.some((row) => row.id === id)
       )
         throw new DomainError(

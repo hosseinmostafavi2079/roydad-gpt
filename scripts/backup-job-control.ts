@@ -13,6 +13,27 @@ try {
   const repository = new BackupRepository(undefined, diagnosticWarning);
   let result: unknown;
   switch (command) {
+    case "claim-delete":
+      if (id) throw new Error();
+      result = await repository.claimDeletion();
+      break;
+    case "check-delete":
+    case "complete-delete":
+    case "fail-delete": {
+      if (size) throw new Error();
+      const requestId = z.uuid().parse(id);
+      const backupKey = z
+        .string()
+        .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/)
+        .parse(key);
+      result =
+        command === "check-delete"
+          ? await repository.checkDeletion(requestId, backupKey)
+          : command === "complete-delete"
+            ? await repository.completeDeletion(requestId, backupKey)
+            : await repository.failDeletion(requestId, backupKey);
+      break;
+    }
     case "enqueue-due":
       if (id) throw new Error();
       result = await repository.enqueueDueScheduledBackup();
