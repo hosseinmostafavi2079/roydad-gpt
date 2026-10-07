@@ -151,6 +151,9 @@ jobs:
           pnpm db:migrate
           pnpm db:seed:dev
 
+      - name: Enforce self-hosted frontend assets
+        run: node scripts/check-external-runtime-assets.mjs
+
       - name: Format, lint, and type check
         run: pnpm check
 
