@@ -64,6 +64,11 @@ let root: Root;
 let host: HTMLDivElement;
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-10-07T03:00:00Z"));
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: "visible",
+  });
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   HTMLDialogElement.prototype.showModal = function () {
     this.open = true;
@@ -82,7 +87,7 @@ beforeEach(() => {
           ? { ...policy, ...JSON.parse(init.body as string) }
           : policy;
     else if (init?.method === "POST") data = { ...job, state: "QUEUED" };
-    else if (url.includes("?limit=")) data = jobs;
+    else if (url.includes("?limit=")) data = [...jobs];
     else data = jobs[0] ?? job;
     return { ok: true, json: async () => ({ data }) };
   });
@@ -267,37 +272,111 @@ it("shows only safe errors in fetched details", async () => {
   expect(dialog?.textContent).toContain("BACKUP_FAILED");
   expect(dialog?.textContent).not.toContain(job.backupKey);
 });
-it("polls active jobs at 7.5 seconds and stops when terminal", async () => {
-  jobs = [{ ...job, state: "QUEUED" }];
+it.each(["QUEUED", "RUNNING", "VERIFYING"] as const)(
+  "polls %s at 7.5 seconds and stops when terminal",
+  async (state) => {
+    jobs = [{ ...job, state }];
+    await render();
+    const count = fetchMock.mock.calls.filter((call) =>
+      call[0].includes("?limit="),
+    ).length;
+    await tick(7000);
+    expect(
+      fetchMock.mock.calls.filter((call) => call[0].includes("?limit=")),
+    ).toHaveLength(count);
+    jobs = [job];
+    await tick(500);
+    expect(
+      fetchMock.mock.calls.filter((call) => call[0].includes("?limit=")),
+    ).toHaveLength(count + 1);
+    await tick(30000);
+    expect(
+      fetchMock.mock.calls.filter((call) => call[0].includes("?limit=")),
+    ).toHaveLength(count + 1);
+  },
+);
+it.each([
+  ["QUEUED", "در انتظار شروع سرویس بکاپ", true],
+  ["RUNNING", "در حال تهیه نسخه پشتیبان...", true],
+  ["VERIFYING", "در حال بررسی فایل‌ها و صحت Checksum...", true],
+  ["SUCCEEDED", "بکاپ با موفقیت تکمیل شد.", false],
+  ["FAILED", "اجرای بکاپ ناموفق بود.", false],
+  ["PRUNED", "طبق سیاست نگهداری حذف شده است.", false],
+] as const)(
+  "renders explicit %s status without fake progress",
+  async (state, text, spinner) => {
+    jobs = [{ ...job, state, createdAt: new Date().toISOString() }];
+    await render();
+    const card = host.querySelector(".backup-job");
+    expect(card?.textContent).toContain(text);
+    expect(Boolean(card?.querySelector(".backup-spinner"))).toBe(spinner);
+    expect(card?.querySelector("[role=progressbar]")).toBeNull();
+    expect(card?.textContent).not.toMatch(/[%٪]/);
+    expect(card?.textContent).not.toContain("این درخواست هنوز");
+    if (state === "SUCCEEDED") {
+      expect(card?.textContent).toContain("تأیید شده");
+      expect(card?.textContent).toContain("مگابایت");
+    }
+  },
+);
+it("warns only after queued age exceeds two minutes without changing its state", async () => {
+  jobs = [
+    {
+      ...job,
+      state: "QUEUED",
+      createdAt: new Date(Date.now() - 119_000).toISOString(),
+    },
+  ];
   await render();
-  const count = fetchMock.mock.calls.filter((call) =>
-    call[0].includes("?limit="),
-  ).length;
-  await tick(7000);
-  expect(
-    fetchMock.mock.calls.filter((call) => call[0].includes("?limit=")),
-  ).toHaveLength(count);
-  jobs = [job];
-  await tick(500);
-  expect(
-    fetchMock.mock.calls.filter((call) => call[0].includes("?limit=")),
-  ).toHaveLength(count + 1);
-  await tick(30000);
-  expect(
-    fetchMock.mock.calls.filter((call) => call[0].includes("?limit=")),
-  ).toHaveLength(count + 1);
+  expect(host.textContent).not.toContain("این درخواست هنوز");
+  await tick(7500);
+  expect(host.textContent).toContain(
+    "این درخواست هنوز توسط سرویس اجرای بکاپ دریافت نشده است.",
+  );
+  expect(host.textContent).toContain("حداکثر هر ۱۵ دقیقه");
+  expect(host.querySelector(".backup-job-delayed")).not.toBeNull();
+  expect(jobs[0]?.state).toBe("QUEUED");
 });
-it("does not poll idle history and supports manual refresh", async () => {
+it("pauses active polling while hidden and resumes when visible", async () => {
+  jobs = [{ ...job, state: "RUNNING" }];
   await render();
+  const calls = () =>
+    fetchMock.mock.calls.filter((call) => call[0].includes("?limit=")).length;
+  const initial = calls();
+  await act(async () => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
   await tick(30000);
-  expect(
-    fetchMock.mock.calls.filter((call) => call[0].includes("?limit=")),
-  ).toHaveLength(1);
-  await click("تازه‌سازی وضعیت");
-  expect(
-    fetchMock.mock.calls.filter((call) => call[0].includes("?limit=")),
-  ).toHaveLength(2);
+  expect(calls()).toBe(initial);
+  await act(async () => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await tick(7500);
+  expect(calls()).toBe(initial + 1);
 });
+it.each(["SUCCEEDED", "FAILED", "PRUNED"] as const)(
+  "does not poll %s history and supports manual refresh",
+  async (state) => {
+    jobs = [{ ...job, state }];
+    await render();
+    await tick(30000);
+    expect(
+      fetchMock.mock.calls.filter((call) => call[0].includes("?limit=")),
+    ).toHaveLength(1);
+    await click("تازه‌سازی وضعیت");
+    expect(
+      fetchMock.mock.calls.filter((call) => call[0].includes("?limit=")),
+    ).toHaveLength(2);
+  },
+);
 it("reports generic API failures without leaking backend response data", async () => {
   fetchMock.mockResolvedValue({
     ok: false,

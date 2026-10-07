@@ -59,6 +59,41 @@ function Badge({ state }: { state: BackupState }) {
   const [label, tone] = backupStates[state];
   return <span className={`admin-status admin-status-${tone}`}>{label}</span>;
 }
+function JobStatus({ job }: { job: BackupJob }) {
+  const active = hasActiveBackups([job]);
+  const delayed =
+    job.state === "QUEUED" &&
+    Date.now() - Date.parse(job.createdAt ?? "") > 120_000;
+  const text: Record<BackupState, string> = {
+    QUEUED: "در انتظار شروع سرویس بکاپ",
+    RUNNING: "در حال تهیه نسخه پشتیبان...",
+    VERIFYING: "در حال بررسی فایل‌ها و صحت Checksum...",
+    SUCCEEDED: "بکاپ با موفقیت تکمیل شد.",
+    FAILED: job.errorMessage ?? "اجرای بکاپ ناموفق بود.",
+    PRUNED: "طبق سیاست نگهداری حذف شده است.",
+  };
+  return (
+    <div
+      className={`backup-job-status${delayed ? " backup-job-delayed" : ""}`}
+      role="status"
+    >
+      <p>
+        {active && <span className="backup-spinner" aria-hidden="true" />}
+        {text[job.state]}
+      </p>
+      {job.state === "QUEUED" && (
+        <>
+          {delayed && (
+            <p>این درخواست هنوز توسط سرویس اجرای بکاپ دریافت نشده است.</p>
+          )}
+          <small>
+            در حالت عادی سرویس بکاپ حداکثر هر ۱۵ دقیقه صف را بررسی می‌کند.
+          </small>
+        </>
+      )}
+    </div>
+  );
+}
 function JobFields({ job, tenant }: { job: BackupJob; tenant: string }) {
   return (
     <dl className="backup-details">
@@ -115,6 +150,7 @@ export function BackupCenter() {
   const [form, setForm] = useState<BackupPolicy | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [visible, setVisible] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -214,12 +250,18 @@ export function BackupCenter() {
   }, [search, tenantPage]);
   const active = hasActiveBackups(jobs);
   useEffect(() => {
-    if (!active || refreshing) return;
+    const update = () => setVisible(document.visibilityState !== "hidden");
+    update();
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
+  useEffect(() => {
+    if (!active || refreshing || !visible) return;
     const timer = setTimeout(() => {
       void refresh();
     }, 7500);
     return () => clearTimeout(timer);
-  }, [active, refreshing, refresh]);
+  }, [active, refreshing, refresh, visible]);
   const tenantName = (job: BackupJob) =>
     job.tenantId
       ? (names.current.get(job.tenantId) ?? "سازمان خارج از فهرست فعلی")
@@ -643,6 +685,7 @@ export function BackupCenter() {
                     جزئیات
                   </AdminButton>
                 </div>
+                <JobStatus job={job} />
                 <JobFields job={job} tenant={tenantName(job)} />
               </article>
             ))}
@@ -698,6 +741,7 @@ export function BackupCenter() {
         {detail && (
           <>
             <Badge state={detail.state} />
+            <JobStatus job={detail} />
             <JobFields job={detail} tenant={tenantName(detail)} />
             {detail.state === "FAILED" && (
               <div className="backup-notice backup-error">

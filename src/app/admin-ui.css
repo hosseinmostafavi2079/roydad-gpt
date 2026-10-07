@@ -1163,6 +1163,47 @@ main.content:has(.admin-data-panel) .page-title {
   margin-top: 16px;
   font-size: 12px;
 }
+.backup-job-status {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.backup-job-status p {
+  margin: 0 0 6px;
+}
+.backup-job-status small {
+  display: block;
+  color: var(--muted);
+}
+.backup-job-delayed {
+  background: #fff8e6;
+  color: #795400;
+  border: 1px solid #ead59b;
+}
+.backup-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-inline-end: 8px;
+  vertical-align: middle;
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  animation: backup-spin 0.9s linear infinite;
+}
+@keyframes backup-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .backup-spinner {
+    animation: none;
+  }
+}
 .backup-center .backup-details > div {
   min-width: 0;
 }

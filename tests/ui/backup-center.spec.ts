@@ -35,7 +35,26 @@ test("backup center: authorization, safe requests, details and responsive RTL", 
     errorCode: null,
     errorMessage: null,
   };
-  let jobs = [job];
+  let jobs = [
+    job,
+    {
+      ...job,
+      id: "queued-fresh",
+      requestId: "queued-fresh",
+      state: "QUEUED",
+      createdAt: new Date().toISOString(),
+    },
+    {
+      ...job,
+      id: "queued-delayed",
+      requestId: "queued-delayed",
+      state: "QUEUED",
+      createdAt: new Date(Date.now() - 180_000).toISOString(),
+    },
+    { ...job, id: "running", requestId: "running", state: "RUNNING" },
+    { ...job, id: "verifying", requestId: "verifying", state: "VERIFYING" },
+    { ...job, id: "pruned", requestId: "pruned", state: "PRUNED" },
+  ];
   let policy = {
     id: "policy",
     scope: "FULL_PLATFORM",
@@ -91,6 +110,27 @@ test("backup center: authorization, safe requests, details and responsive RTL", 
     page.getByRole("button", { name: "تهیه بکاپ سازمان", exact: true }),
   ).toBeDisabled();
   mkdirSync(".local/backup-center-screenshots", { recursive: true });
+  await expect(
+    page.getByText("بکاپ با موفقیت تکمیل شد.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("در انتظار شروع سرویس بکاپ", { exact: true }),
+  ).toHaveCount(2);
+  await expect(
+    page.getByText("این درخواست هنوز توسط سرویس اجرای بکاپ دریافت نشده است.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("در حال تهیه نسخه پشتیبان...", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("در حال بررسی فایل‌ها و صحت Checksum...", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("طبق سیاست نگهداری حذف شده است.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".backup-job .backup-spinner")).toHaveCount(4);
   for (const width of [1440, 768, 390, 320]) {
     await page.setViewportSize({ width, height: 1000 });
     await expect(

@@ -36,6 +36,8 @@ test("installer is explicit interactive principal, dry-run, fixed isolated task 
   assert.ok(installer.includes("-LogonType Interactive"));
   assert.ok(installer.includes("-Minutes 15"));
   assert.ok(installer.includes("WindowsIdentity]::GetCurrent"));
+  assert.ok(installer.includes('-NonInteractive -Command "&'));
+  assert.doesNotMatch(installer, /-File .*?-Confirm:\$false/);
   assert.doesNotMatch(
     installer,
     /WSL-Ubuntu-KeepAlive|PricePilot|ServerOps|-Password|LogonType Password|UserId ['"]SYSTEM/i,
@@ -65,7 +67,7 @@ test("PowerShell 5.1 maintenance and installer run only mocked host calls", {
     & { ${clean(maintenance)} } -WslReleasePath '/mnt/c/EventOS/releases/approved' -WindowsBackupDirectory 'C:\\EventOS\\backups' -Apply -Confirm:$false
     if($script:executions -ne 1){throw 'Expected one invocation'}
     function Get-ScheduledTask {param($TaskName);if($TaskName -ne 'EventOS-Backup-Maintenance'){throw 'Protected task touched'};if($script:conflict){return [pscustomobject]@{TaskName=$TaskName}}}
-    function New-ScheduledTaskAction {param($Execute,$Argument);return @{}}
+    function New-ScheduledTaskAction {param($Execute,$Argument);$script:actionArguments=$Argument;return @{}}
     function New-ScheduledTaskTrigger {param([switch]$Once,$At,$RepetitionInterval,$RepetitionDuration);return @{}}
     function New-ScheduledTaskPrincipal {param($UserId,$LogonType,$RunLevel);if($LogonType -ne 'Interactive'){throw 'Unsafe principal'};return @{}}
     function New-ScheduledTaskSettingsSet {param($MultipleInstances,[switch]$StartWhenAvailable,$ExecutionTimeLimit);return @{}}
@@ -75,12 +77,37 @@ test("PowerShell 5.1 maintenance and installer run only mocked host calls", {
     if($script:registered -ne 0){throw 'Installer dry run mutated'}
     & { ${clean(installer)} } -TaskUser $user -WslReleasePath '/mnt/c/EventOS/releases/approved' -WindowsBackupDirectory 'C:\\EventOS\\backups' -Apply -Confirm:$false | Out-Null
     if($script:registered -ne 1){throw 'Mock registration missing'}
+    if($script:actionArguments -notlike '-NoProfile -NonInteractive -Command *' -or $script:actionArguments -match '-File '){throw 'Broken task action'}
+    $fixture=[IO.Path]::Combine([IO.Path]::GetTempPath(),[Guid]::NewGuid().ToString()+'.ps1')
+    try {
+      [IO.File]::WriteAllText($fixture,@'
+[CmdletBinding(SupportsShouldProcess)]
+param([string]$Distribution,[string]$WslReleasePath,[string]$WindowsBackupDirectory,[switch]$Apply)
+if($PSVersionTable.PSVersion.Major -ne 5){throw 'Expected PowerShell 5.1'}
+if(!$PSBoundParameters.ContainsKey('Confirm') -or $PSBoundParameters['Confirm'].IsPresent){throw 'Confirm must be boolean false'}
+if(!$Apply -or $Distribution -ne 'Ubuntu' -or $WslReleasePath -ne '/mnt/c/EventOS/releases/approved' -or $WindowsBackupDirectory -ne 'C:\\EventOS\\backups'){throw 'Task arguments changed'}
+Write-Output 'generated-action-pass'
+'@)
+      $nativeArguments=$script:actionArguments.Replace("'C:\\EventOS\\run-backup-maintenance.ps1'", "'"+$fixture.Replace("'","''")+"'")
+      $start=New-Object System.Diagnostics.ProcessStartInfo
+      $start.FileName="$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+      # Only this disposable mocked test process may execute its unsigned fixture.
+      # The installer action and machine/operator execution policy stay unchanged.
+      $start.Arguments='-ExecutionPolicy Bypass '+$nativeArguments;$start.UseShellExecute=$false;$start.CreateNoWindow=$true
+      $start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+      $child=[Diagnostics.Process]::Start($start)
+      $result=$child.StandardOutput.ReadToEnd();$failure=$child.StandardError.ReadToEnd();$child.WaitForExit()
+      if($child.ExitCode -ne 0 -or $result.Trim() -ne 'generated-action-pass'){throw "Generated native action failed: $failure"}
+    } finally {if([IO.File]::Exists($fixture)){[IO.File]::Delete($fixture)}}
     $script:conflict=$true;$rejected=$false
     try { & { ${clean(installer)} } -TaskUser $user -WslReleasePath '/mnt/c/EventOS/releases/approved' -WindowsBackupDirectory 'C:\\EventOS\\backups' -Apply -Confirm:$false | Out-Null } catch {$rejected=$true}
     if(!$rejected -or $script:registered -ne 1){throw 'Unexpected task overwritten'}
     $rejected=$false
     try { & { ${clean(installer)} } -TaskUser 'SYSTEM' -WslReleasePath '/mnt/c/EventOS/releases/approved' -WindowsBackupDirectory 'C:\\EventOS\\backups' | Out-Null } catch {$rejected=$true}
     if(!$rejected){throw 'SYSTEM accepted'}
+    $rejected=$false
+    try { & { ${clean(installer)} } -TaskUser 'OTHER\\unexpected-user' -WslReleasePath '/mnt/c/EventOS/releases/approved' -WindowsBackupDirectory 'C:\\EventOS\\backups' | Out-Null } catch {$rejected=$true}
+    if(!$rejected -or $script:registered -ne 1){throw 'Non-current user accepted or protected task changed'}
     Write-Output 'PowerShell 5.1 maintenance/installer guards passed; all mutations mocked.'
   `;
   const directory = mkdtempSync(

@@ -12,7 +12,9 @@ if ($scriptPath -notmatch '^[A-Za-z]:\\[A-Za-z0-9_.\\-]+$' -or $WindowsBackupDir
 $taskName = 'EventOS-Backup-Maintenance'
 if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) { throw 'Task already exists; review explicitly rather than overwrite.' }
 if ($Apply -and $PSCmdlet.ShouldProcess($taskName,'Register interactive EventOS maintenance task every 15 minutes')) {
-    $arguments = '-NoProfile -NonInteractive -File "{0}" -Distribution "{1}" -WslReleasePath "{2}" -WindowsBackupDirectory "{3}" -Apply -Confirm:$false' -f $scriptPath,$Distribution,$WslReleasePath,$WindowsBackupDirectory
+    # Validated path/distribution grammars exclude quotes and command metacharacters.
+    # -Command parses $false as a boolean; PowerShell 5.1 -File passes it as text.
+    $arguments = '-NoProfile -NonInteractive -Command "& ''{0}'' -Distribution ''{1}'' -WslReleasePath ''{2}'' -WindowsBackupDirectory ''{3}'' -Apply -Confirm:$false"' -f $scriptPath,$Distribution,$WslReleasePath,$WindowsBackupDirectory
     $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Argument $arguments
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 15) -RepetitionDuration (New-TimeSpan -Days 3650)
     $principal = New-ScheduledTaskPrincipal -UserId $TaskUser -LogonType Interactive -RunLevel Highest
