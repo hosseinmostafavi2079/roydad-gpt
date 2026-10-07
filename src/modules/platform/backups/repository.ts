@@ -4,7 +4,47 @@ import type { Pool, PoolClient } from "pg";
 import { getControlPool } from "@/infrastructure/db/control/pool";
 import { appendAuditRecord } from "@/modules/platform/audit/repository";
 import { DomainError } from "@/shared/errors/domain-error";
-import type { ManualBackupInput, BackupState } from "./schema";
+import { nextBackupRun } from "./schedule";
+import type { BackupState, ManualBackupInput } from "./schema";
+import { type BackupPolicy, backupPolicySchema } from "./schema";
+
+type PolicyRow = {
+  id: string;
+  enabled: boolean;
+  scope: "FULL_PLATFORM";
+  frequency: "DAILY" | "WEEKLY";
+  execution_time: string;
+  weekday: number | null;
+  timezone: string;
+  retention_count: number;
+  last_run_at: Date | null;
+  next_run_at: Date | null;
+};
+function safePolicy(row: PolicyRow) {
+  return {
+    id: row.id,
+    enabled: row.enabled,
+    scope: row.scope,
+    frequency: row.frequency,
+    executionTime: row.execution_time.slice(0, 5),
+    weekday: row.weekday,
+    timezone: row.timezone,
+    retentionCount: row.retention_count,
+    lastRunAt: row.last_run_at,
+    nextRunAt: row.next_run_at,
+  };
+}
+function policyInput(row: PolicyRow): BackupPolicy {
+  return {
+    enabled: row.enabled,
+    scope: row.scope,
+    frequency: row.frequency,
+    executionTime: row.execution_time.slice(0, 5),
+    weekday: row.weekday,
+    timezone: row.timezone,
+    retentionCount: row.retention_count,
+  };
+}
 
 type Job = {
   id: string;
@@ -132,7 +172,7 @@ export class BackupRepository {
   async claim() {
     return this.transaction(async (client) => {
       const result = await client.query<Job>(
-        `UPDATE platform_backup_jobs SET state='RUNNING',started_at=now(),updated_at=now() WHERE id=(SELECT id FROM platform_backup_jobs WHERE state='QUEUED' AND trigger_type='MANUAL' ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING ${columns}`,
+        `UPDATE platform_backup_jobs SET state='RUNNING',started_at=now(),updated_at=now() WHERE id=(SELECT id FROM platform_backup_jobs WHERE state='QUEUED' ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING ${columns}`,
       );
       const job = result.rows[0];
       if (!job) return null;
@@ -221,5 +261,186 @@ export class BackupRepository {
         "Tenant backup registry unavailable.",
       );
     return row.metadata;
+  }
+
+  private async lockedPolicy(client: PoolClient) {
+    await client.query(
+      "INSERT INTO platform_backup_policies(scope,frequency,execution_time,timezone,retention_count,updated_by) VALUES('FULL_PLATFORM','DAILY','02:00','UTC',7,'SYSTEM') ON CONFLICT(scope) DO NOTHING",
+    );
+    const row = (
+      await client.query<PolicyRow>(
+        "SELECT * FROM platform_backup_policies WHERE scope='FULL_PLATFORM' FOR UPDATE",
+      )
+    ).rows[0];
+    if (!row) throw new Error("Backup policy unavailable");
+    return row;
+  }
+  async policy() {
+    return this.transaction(async (client) =>
+      safePolicy(await this.lockedPolicy(client)),
+    );
+  }
+  async updatePolicy(
+    input: BackupPolicy,
+    actorId: string,
+    requestId: string,
+    now = new Date(),
+  ) {
+    const policy = backupPolicySchema.parse(input);
+    return this.transaction(async (client) => {
+      const before = await this.lockedPolicy(client);
+      const next = policy.enabled ? nextBackupRun(policy, now) : null;
+      const row = (
+        await client.query<PolicyRow>(
+          "UPDATE platform_backup_policies SET enabled=$1,frequency=$2,execution_time=$3,weekday=$4,timezone=$5,retention_count=$6,next_run_at=$7,updated_by=$8,updated_at=now() WHERE id=$9 RETURNING *",
+          [
+            policy.enabled,
+            policy.frequency,
+            policy.executionTime,
+            policy.weekday ?? null,
+            policy.timezone,
+            policy.retentionCount,
+            next,
+            actorId,
+            before.id,
+          ],
+        )
+      ).rows[0];
+      if (!row) throw new Error("Backup policy unavailable");
+      const auditValues = (value: ReturnType<typeof safePolicy>) => ({
+        enabled: value.enabled,
+        frequency: value.frequency,
+        executionTime: value.executionTime,
+        weekday: value.weekday,
+        timezone: value.timezone,
+        retentionCount: value.retentionCount,
+      });
+      await appendAuditRecord(client, {
+        actorType: "PLATFORM_ADMIN",
+        actorId,
+        action: "backup.policy_updated",
+        targetType: "BACKUP_POLICY",
+        targetId: row.id,
+        requestId,
+        beforeState: auditValues(safePolicy(before)),
+        afterState: auditValues(safePolicy(row)),
+      });
+      return safePolicy(row);
+    });
+  }
+  async enqueueDueScheduledBackup(now = new Date()) {
+    return this.transaction(async (client) => {
+      const policy = await this.lockedPolicy(client);
+      if (!policy.enabled) return null;
+      if (!policy.next_run_at) {
+        await client.query(
+          "UPDATE platform_backup_policies SET next_run_at=$2 WHERE id=$1",
+          [policy.id, nextBackupRun(policyInput(policy), now)],
+        );
+        return null;
+      }
+      if (policy.next_run_at > now) return null;
+      const id = randomUUID(),
+        requestId = randomUUID();
+      const job = (
+        await client.query<Job>(
+          `INSERT INTO platform_backup_jobs(id,scope,trigger_type,request_id,backup_key)VALUES($1,'FULL_PLATFORM','SCHEDULED',$2,$3)RETURNING ${columns}`,
+          [id, requestId, `job-${id}`],
+        )
+      ).rows[0];
+      if (!job) throw new Error("Scheduled backup unavailable");
+      await client.query(
+        "UPDATE platform_backup_policies SET last_run_at=$2,next_run_at=$3,updated_at=now() WHERE id=$1",
+        [policy.id, now, nextBackupRun(policyInput(policy), now)],
+      );
+      await this.audit(client, job, "backup.scheduled_queued");
+      return safeBackupJob(job);
+    });
+  }
+  // Authorization is durable: a retry may handle an already removed directory only
+  // when the database proves this exact verified backup was selected previously.
+  async retentionCandidates(completedJobId: string) {
+    return this.transaction(async (client) => {
+      const policy = await this.lockedPolicy(client);
+      const trigger = (
+        await client.query<Job>(
+          `SELECT ${columns} FROM platform_backup_jobs WHERE id=$1 AND state='SUCCEEDED' AND checksum_verified AND completed_at IS NOT NULL FOR UPDATE`,
+          [completedJobId],
+        )
+      ).rows[0];
+      if (!trigger) return [];
+      const ranked = `SELECT id,row_number() OVER(ORDER BY completed_at DESC,created_at DESC,id DESC) AS rank FROM platform_backup_jobs WHERE scope=$1 AND tenant_id IS NOT DISTINCT FROM $2::uuid AND state='SUCCEEDED' AND checksum_verified AND completed_at IS NOT NULL`;
+      const result = await client.query<{ id: string; backup_key: string }>(
+        `UPDATE platform_backup_jobs j SET prune_authorized_by=$3,prune_authorized_at=now() FROM (SELECT id FROM (${ranked}) ranked WHERE ranked.rank>$4 AND ranked.id<>$3 ORDER BY ranked.rank DESC LIMIT 10) selected WHERE j.id=selected.id RETURNING j.id,j.backup_key`,
+        [trigger.scope, trigger.tenant_id, trigger.id, policy.retention_count],
+      );
+      return result.rows
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .slice(0, 10)
+        .map((row) => ({ id: row.id, backupKey: row.backup_key }));
+    });
+  }
+  async retryPruneCandidates() {
+    // Only previously selected candidates. Rank is re-evaluated after policy changes.
+    const rows = (
+      await this.pool.query<{ id: string; backup_key: string }>(
+        `SELECT j.id,j.backup_key FROM (SELECT id,backup_key,prune_authorized_by,row_number()OVER(PARTITION BY scope,tenant_id ORDER BY completed_at DESC,created_at DESC,id DESC) AS rank FROM platform_backup_jobs WHERE state='SUCCEEDED' AND checksum_verified AND completed_at IS NOT NULL)j JOIN platform_backup_policies p ON p.scope='FULL_PLATFORM' WHERE j.prune_authorized_by IS NOT NULL AND j.rank>p.retention_count ORDER BY j.id LIMIT 10`,
+      )
+    ).rows;
+    return rows.map((row) => ({ id: row.id, backupKey: row.backup_key }));
+  }
+  async checkPruneCandidate(id: string, key: string) {
+    const candidates = await this.retryPruneCandidates();
+    if (!candidates.some((row) => row.id === id && row.backupKey === key))
+      throw new DomainError(
+        "INVALID_STATE_TRANSITION",
+        "Backup prune authorization unavailable.",
+      );
+    return { id, backupKey: key };
+  }
+  async markPruned(id: string, key: string) {
+    return this.transaction(async (client) => {
+      const policy = await this.lockedPolicy(client);
+      const existing = (
+        await client.query<Job & { prune_authorized_by: string | null }>(
+          `SELECT ${columns},prune_authorized_by FROM platform_backup_jobs WHERE id=$1 FOR UPDATE`,
+          [id],
+        )
+      ).rows[0];
+      if (
+        !existing ||
+        existing.backup_key !== key ||
+        !existing.prune_authorized_by
+      )
+        throw new DomainError(
+          "INVALID_STATE_TRANSITION",
+          "Backup prune authorization unavailable.",
+        );
+      if (existing.state === "PRUNED") return safeBackupJob(existing);
+      const retained = (
+        await client.query(
+          "SELECT id FROM platform_backup_jobs WHERE scope=$1 AND tenant_id IS NOT DISTINCT FROM $2::uuid AND state='SUCCEEDED' AND checksum_verified ORDER BY completed_at DESC,created_at DESC,id DESC LIMIT $3",
+          [existing.scope, existing.tenant_id, policy.retention_count],
+        )
+      ).rows;
+      if (
+        existing.state !== "SUCCEEDED" ||
+        !existing.checksum_verified ||
+        retained.some((row) => row.id === id)
+      )
+        throw new DomainError(
+          "INVALID_STATE_TRANSITION",
+          "Backup prune authorization unavailable.",
+        );
+      const job = (
+        await client.query<Job>(
+          `UPDATE platform_backup_jobs SET state='PRUNED',updated_at=now() WHERE id=$1 RETURNING ${columns}`,
+          [id],
+        )
+      ).rows[0];
+      if (!job) throw new Error("Backup prune unavailable");
+      await this.audit(client, job, "backup.pruned");
+      return safeBackupJob(job);
+    });
   }
 }

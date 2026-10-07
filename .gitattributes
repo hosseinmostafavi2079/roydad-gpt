@@ -1,3 +1,6 @@
 deployment/windows-iis/backup-tenant.sh text eol=lf
 deployment/windows-iis/run-backup-job.sh text eol=lf
 deployment/windows-iis/manual-backup.test.sh text eol=lf
+deployment/windows-iis/prune-backup.sh text eol=lf
+deployment/windows-iis/run-backup-maintenance.sh text eol=lf
+deployment/windows-iis/backup-maintenance.test.sh text eol=lf

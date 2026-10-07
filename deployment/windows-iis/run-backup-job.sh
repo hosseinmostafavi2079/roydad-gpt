@@ -8,7 +8,10 @@ compose=(docker compose --project-name eventos-production --env-file "$release/d
 control() { "${compose[@]}" exec -T app node --conditions=react-server --import=tsx scripts/backup-job-control.ts "$@"; }
 parse() { "${compose[@]}" exec -T app node --input-type=module -e "$1" "${@:2}" 2>/dev/null; }
 claim="$(control claim 2>/dev/null)" || { echo 'Backup claim failed safely.' >&2; exit 1; }
-if [[ "$claim" == '{"data":null}' ]]; then echo 'No queued manual backup job.'; exit 0; fi
+if [[ "$claim" == '{"data":null}' ]]; then
+  if [[ "${EVENTOS_BACKUP_RESULT_JSON:-0}" == 1 ]]; then echo '{"data":null}'; else echo 'No queued manual backup job.'; fi
+  exit 0
+fi
 context="$(parse 'let t="";for await(const p of process.stdin)t+=p;const j=JSON.parse(t).data;const u=/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;if(!u.test(j.id)||!(["FULL_PLATFORM","TENANT"].includes(j.scope))||(j.scope==="TENANT"&&!u.test(j.tenantId)))process.exit(1);console.log([j.id,j.scope,j.tenantId||"-"].join(" "))' <<< "$claim")"
 read -r job scope tenant <<< "$context"
 failed() { control fail "$job" >/dev/null 2>&1 || true; echo 'Backup job failed; partial archives retained. Job control must be checked if failure recording was unavailable.' >&2; }
@@ -50,4 +53,8 @@ fi
 size="$(find "$run_dir" -maxdepth 1 -type f -printf '%s\n' | awk '{sum+=$1} END {printf "%.0f",sum}')"
 control complete "$job" "$key" "$size" >/dev/null 2>&1
 trap - ERR
-echo 'Backup job succeeded; archives and checksums verified (not a restore rehearsal).'
+if [[ "${EVENTOS_BACKUP_RESULT_JSON:-0}" == 1 ]]; then
+  printf '{"data":{"id":"%s"}}\n' "$job"
+else
+  echo 'Backup job succeeded; archives and checksums verified (not a restore rehearsal).'
+fi

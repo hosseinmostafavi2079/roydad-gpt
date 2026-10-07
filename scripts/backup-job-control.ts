@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { BackupRepository } from "../src/modules/platform/backups/repository";
 import { closeControlPool } from "../src/infrastructure/db/control/pool";
+import { BackupRepository } from "../src/modules/platform/backups/repository";
+
 // Local image CLI only. No Docker, shell or backup-directory access in this process.
 try {
   const [command, id, key, size, ...extra] = process.argv.slice(2);
@@ -8,6 +9,38 @@ try {
   const repository = new BackupRepository();
   let result: unknown;
   switch (command) {
+    case "enqueue-due":
+      if (id) throw new Error();
+      result = await repository.enqueueDueScheduledBackup();
+      break;
+    case "retention":
+      if (key || size) throw new Error();
+      result = await repository.retentionCandidates(z.uuid().parse(id));
+      break;
+    case "retry-prunes":
+      if (id) throw new Error();
+      result = await repository.retryPruneCandidates();
+      break;
+    case "check-prune":
+      if (size) throw new Error();
+      result = await repository.checkPruneCandidate(
+        z.uuid().parse(id),
+        z
+          .string()
+          .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/)
+          .parse(key),
+      );
+      break;
+    case "mark-pruned":
+      if (size) throw new Error();
+      result = await repository.markPruned(
+        z.uuid().parse(id),
+        z
+          .string()
+          .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/)
+          .parse(key),
+      );
+      break;
     case "claim":
       if (id) throw new Error();
       result = await repository.claim();
