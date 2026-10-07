@@ -51,3 +51,13 @@ export type BackupScope = z.infer<typeof backupScopeSchema>;
 export type BackupTrigger = z.infer<typeof backupTriggerSchema>;
 export type BackupState = z.infer<typeof backupStateSchema>;
 export type BackupPolicy = z.infer<typeof backupPolicySchema>;
+
+export const manualBackupSchema = z.discriminatedUnion("scope", [
+  z.strictObject({ scope: z.literal("FULL_PLATFORM") }),
+  z.strictObject({ scope: z.literal("TENANT"), tenantId: z.uuid() }),
+]);
+export const backupListSchema = z.strictObject({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  offset: z.coerce.number().int().min(0).max(10000).default(0),
+});
+export type ManualBackupInput = z.infer<typeof manualBackupSchema>;

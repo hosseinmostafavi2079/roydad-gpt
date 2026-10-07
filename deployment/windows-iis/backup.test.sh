@@ -36,6 +36,8 @@ bash deployment/windows-iis/backup.sh "$release" "$fixture/backups" > "$fixture/
 grep -q 'EventOS media backup bytes:' "$fixture/output"
 run="$(find "$fixture/backups" -mindepth 1 -maxdepth 1 -type d)"
 [[ -s "$run/media.tar.gz" && -s "$run/SHA256SUMS" ]]
+[[ -s "$run/manifest.json" ]]
+grep -q '"scope":"FULL_PLATFORM"' "$run/manifest.json"
 (cd "$run" && sha256sum -c SHA256SUMS > /dev/null)
 first_checksum="$(sha256sum "$run/media.tar.gz")"
 bash deployment/windows-iis/backup.sh "$release" "$fixture/backups" > /dev/null

@@ -1,0 +1,3 @@
+deployment/windows-iis/backup-tenant.sh text eol=lf
+deployment/windows-iis/run-backup-job.sh text eol=lf
+deployment/windows-iis/manual-backup.test.sh text eol=lf

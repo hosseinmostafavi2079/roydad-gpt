@@ -3,6 +3,7 @@ set -euo pipefail
 set -o noclobber
 umask 077
 [[ $# -eq 2 && "$1" =~ ^/[a-zA-Z0-9_./-]+$ && "$2" =~ ^/[a-zA-Z0-9_./-]+$ && -d "$2" ]] || { echo 'Absolute release and existing private backup directory required' >&2; exit 2; }
+[[ -z "${EVENTOS_BACKUP_JOB_ID:-}" || "$EVENTOS_BACKUP_JOB_ID" =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ ]] || exit 2
 release="$1"
 run_dir="$2/eventos-$(date -u +%Y%m%dT%H%M%SZ)-$(cat /proc/sys/kernel/random/uuid)"
 mkdir -- "$run_dir" # fail if directory exists; never overwrite
@@ -33,5 +34,7 @@ if [[ "$driver" == local ]]; then
 elif [[ "$driver" != s3 ]]; then
   echo 'Unknown media driver; backup aborted' >&2; exit 1
 fi
-(cd "$run_dir" && sha256sum -- ./*.dump $( [[ "$driver" != local ]] || printf '%s' './media.tar.gz' ) > SHA256SUMS)
+tenant_count="$(wc -l < "$run_dir/tenant-databases.txt")"
+printf '{"formatVersion":1,"scope":"FULL_PLATFORM","jobId":"%s","createdAt":"%s","tenantCount":%s,"mediaDriver":"%s"}\n' "${EVENTOS_BACKUP_JOB_ID:-}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$tenant_count" "$driver" > "$run_dir/manifest.json"
+(cd "$run_dir" && sha256sum -- ./*.dump ./tenant-databases.txt ./manifest.json $( [[ "$driver" != local ]] || printf '%s' './media.tar.gz' ) > SHA256SUMS)
 printf 'Backup archives verified (not a restore rehearsal): %s\n' "$run_dir"

@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 import { LocalMediaStorage } from "../src/infrastructure/media/local";
+import { z } from "zod";
+import { tenantArchiveKeys } from "../src/modules/platform/backups/media-archive";
 
 // Invoked only inside the EventOS app container after the exact named mount is checked.
 try {
@@ -8,7 +10,18 @@ try {
     process.env.MEDIA_LOCAL_ROOT !== "/app/data/media"
   )
     throw new Error("Unexpected media source");
-  await new LocalMediaStorage("/app/data/media").listKeys(); // reject links/non-media files before archiving
+  const args = process.argv.slice(2);
+  const tenantId = args.length
+    ? z
+        .uuid()
+        .parse(
+          args[0] === "--tenant-id" && args.length === 2 ? args[1] : undefined,
+        )
+        .toLowerCase()
+    : null;
+  const storage = new LocalMediaStorage("/app/data/media");
+  const selected = tenantId ? await tenantArchiveKeys(storage, tenantId) : null;
+  if (!tenantId) await storage.listKeys(); // preserve full-media validation
   const child = spawn(
     "tar",
     [
@@ -19,11 +32,15 @@ try {
       "-",
       "-C",
       "/app/data/media",
-      ".",
+      ...(selected ? ["--null", "--no-recursion", "--files-from=-"] : ["."]),
     ],
-    { stdio: ["ignore", "inherit", "pipe"] },
+    { stdio: [selected ? "pipe" : "ignore", "inherit", "pipe"] },
   );
-  child.stderr.resume(); // tar may print private paths; report only safe failure status
+  if (selected) {
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(selected.length ? `${selected.join("\0")}\0` : "");
+  }
+  child.stderr?.resume(); // tar may print private paths; report only safe failure status
   child.on("error", () => {
     console.error("EventOS media archive failed.");
     process.exitCode = 1;
