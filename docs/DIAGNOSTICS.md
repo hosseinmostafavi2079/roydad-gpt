@@ -1,6 +1,6 @@
 # Platform diagnostics foundation — Step 5
 
-Diagnostics complements Pino and platform audit. Audit records who changed what; diagnostics records reviewed operational failures. No UI, public monitoring endpoint, Docker log access, Docker socket, host commands or external monitoring service is added.
+Diagnostics complements Pino and platform audit. Audit records who changed what; diagnostics records reviewed operational failures. The foundation adds no public monitoring endpoint, Docker log access, Docker socket, host commands or external monitoring service. Step 6 adds the protected Diagnostics Center at `/platform/diagnostics`.
 
 ## Storage and incident correlation
 
@@ -47,4 +47,4 @@ Unknown incident IDs return a safe 404. Export contains no environment, token, a
 
 ## Remaining work
 
-No Diagnostics UI/navigation, external monitoring, restore, automatic diagnostic retention, stale-worker recovery or host probing is implemented. The APIs expose measured evidence rather than asserting provider/storage health. Tests use isolated schemas in local PostgreSQL and mocks; no production connection, deployment, push or task installation is performed.
+External monitoring, restore, automatic diagnostic retention, stale-worker recovery and host probing remain unimplemented. The protected Diagnostics UI and APIs expose measured evidence rather than asserting provider/storage health. Tests use isolated schemas in local PostgreSQL and mocks; no production connection, deployment, push or task installation is performed.

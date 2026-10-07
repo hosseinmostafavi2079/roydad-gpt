@@ -36,6 +36,12 @@ it("applies backup foundation and enforces control database constraints", async 
     const policy =
       "INSERT INTO platform_backup_policies (frequency,execution_time,timezone,retention_count,updated_by,weekday) VALUES ($1,'02:30','Asia/Tehran',$2,'test',$3)";
     await client.query(policy, ["DAILY", 10, null]);
+    await expect(
+      client.query(policy, ["WEEKLY", 100, 6]),
+    ).rejects.toMatchObject({
+      code: "23505",
+    });
+    await client.query("DELETE FROM platform_backup_policies");
     await client.query(policy, ["WEEKLY", 100, 6]);
     for (const values of [
       ["DAILY", 0, null],

@@ -330,6 +330,14 @@ async function removeTenantFixtures(): Promise<void> {
       try {
         await client.query("BEGIN");
         await client.query(
+          "DELETE FROM platform_diagnostic_events WHERE tenant_id = $1",
+          [tenantId],
+        );
+        await client.query(
+          "DELETE FROM platform_incidents WHERE tenant_id = $1",
+          [tenantId],
+        );
+        await client.query(
           "DELETE FROM provisioning_job_transitions WHERE job_id IN (SELECT id FROM provisioning_jobs WHERE tenant_id = $1)",
           [tenantId],
         );
@@ -772,6 +780,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
     const failedWorker = await startWorker("MIGRATING");
     const slugA = `test-${randomUUID().slice(0, 8)}`;
     const createRequestId = randomUUID();
+    const concurrentCreateRequestId = randomUUID();
     const creationKey = randomUUID();
     const firstInput = {
       slug: slugA,
@@ -784,7 +793,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
     };
     const [first, concurrent] = await Promise.all([
       createTenant(firstInput, actor, createRequestId),
-      createTenant(firstInput, actor, randomUUID()),
+      createTenant(firstInput, actor, concurrentCreateRequestId),
     ]);
     cleanupTenantIds.push(first.tenant.id);
     expect(concurrent.tenant.id).toBe(first.tenant.id);
@@ -2118,15 +2127,18 @@ describe("Phase 1 real PostgreSQL gates", () => {
       request_id: string;
     }>(
       `SELECT actor_id, target_type, target_id, request_id FROM platform_audit_logs
-       WHERE action = 'tenant.created' AND target_id = $1 AND request_id = $2`,
-      [first.tenant.id, createRequestId],
+       WHERE action = 'tenant.created' AND target_id = $1`,
+      [first.tenant.id],
     );
+    expect(createAudit.rows).toHaveLength(1);
     expect(createAudit.rows[0]).toMatchObject({
       actor_id: adminId,
       target_type: "TENANT",
       target_id: first.tenant.id,
-      request_id: createRequestId,
     });
+    expect([createRequestId, concurrentCreateRequestId]).toContain(
+      createAudit.rows[0]?.request_id,
+    );
     await stopWorker(worker);
   }, 180_000);
 

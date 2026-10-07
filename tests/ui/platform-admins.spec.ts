@@ -100,11 +100,17 @@ test("create, one-time activation, existing password sign-in and responsive admi
     await activation.getByLabel("کد فعال‌سازی", { exact: true }).fill(code);
     await activation.getByLabel("رمز عبور جدید").fill(password);
     await activation.getByLabel("تکرار رمز عبور").fill(password);
-    expect(
-      await activation.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
-      ),
-    ).toBe(true);
+    for (const width of [1440, 768, 390, 320]) {
+      await activation.setViewportSize({ width, height: 900 });
+      expect(
+        await activation.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await expect(
+        activation.getByRole("button", { name: "فعال‌سازی حساب", exact: true }),
+      ).toBeVisible();
+    }
     await activation
       .getByRole("button", { name: "فعال‌سازی حساب", exact: true })
       .click();
@@ -135,7 +141,7 @@ test("create, one-time activation, existing password sign-in and responsive admi
     await expect(activation).toHaveURL(`${origin}/platform`);
     await page.reload();
     mkdirSync(".local/platform-admins-screenshots", { recursive: true });
-    for (const width of [1440, 390, 320]) {
+    for (const width of [1440, 768, 390, 320]) {
       await page.setViewportSize({ width, height: 1000 });
       await expect(
         page

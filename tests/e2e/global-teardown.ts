@@ -173,6 +173,14 @@ export default async function globalTeardown(): Promise<void> {
       await control.query("BEGIN");
       try {
         await control.query(
+          "DELETE FROM platform_diagnostic_events WHERE tenant_id = $1",
+          [tenantId],
+        );
+        await control.query(
+          "DELETE FROM platform_incidents WHERE tenant_id = $1",
+          [tenantId],
+        );
+        await control.query(
           "DELETE FROM tenant_sms_provider_allowlist WHERE tenant_id=$1",
           [tenantId],
         );
