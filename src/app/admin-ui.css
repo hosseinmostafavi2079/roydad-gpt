@@ -1229,6 +1229,59 @@ main.content:has(.admin-data-panel) .page-title {
 .diagnostics-center {
   min-width: 0;
 }
+
+.platform-admins-center {
+  min-width: 0;
+}
+.platform-admins-center .form-stack {
+  display: grid;
+  gap: 14px;
+}
+.admin-management-list {
+  display: grid;
+  gap: 16px;
+}
+.admin-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.admin-management-email,
+.admin-activation-code {
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.admin-management-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.admin-management-fields dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.admin-management-fields dd {
+  margin: 6px 0;
+}
+.admin-activation-code {
+  display: block;
+  padding: 16px;
+  margin: 16px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-family: monospace;
+  user-select: all;
+}
+@media (max-width: 600px) {
+  .admin-management-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .platform-admins-center .page-heading {
+    align-items: stretch;
+  }
+}
 .diagnostics-center h2 {
   font-size: 17px;
   font-weight: 750;

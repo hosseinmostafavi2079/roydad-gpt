@@ -9,6 +9,7 @@ const items = [
   { href: "/platform/plans", label: "طرح‌ها و محدودیت‌ها", icon: "◇" },
   { href: "/platform/backups", label: "پشتیبان‌گیری", icon: "↥" },
   { href: "/platform/diagnostics", label: "عیب‌یابی و سلامت سیستم", icon: "◎" },
+  { href: "/platform/admins", label: "مدیران پلتفرم", icon: "♙" },
 ];
 
 export function PlatformNav({ requireMfa = false }: { requireMfa?: boolean }) {

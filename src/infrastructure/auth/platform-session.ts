@@ -2,11 +2,11 @@ import "server-only";
 
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { DomainError } from "@/shared/errors/domain-error";
 import { getAuth } from "@/infrastructure/auth/auth";
 import { getControlPool } from "@/infrastructure/db/control/pool";
-import { requestIdFrom } from "@/shared/http/api-response";
 import { getServerConfig } from "@/shared/config/env";
+import { DomainError } from "@/shared/errors/domain-error";
+import { requestIdFrom } from "@/shared/http/api-response";
 
 export type PlatformActor = Readonly<{
   adminId: string;
@@ -41,14 +41,15 @@ export async function requirePlatformAdmin(options?: {
     email: string;
     display_name: string;
     revoked_at: Date | null;
+    activated_at: Date | null;
   }>(
-    `SELECT admin.id, admin.email, admin.display_name, admin.revoked_at
+    `SELECT admin.id, admin.email, admin.display_name, admin.revoked_at, admin.activated_at
      FROM platform_admins AS admin
      WHERE admin.auth_user_id = $1`,
     [session.user.id],
   );
   const admin = result.rows[0];
-  if (!admin || admin.revoked_at) {
+  if (!admin || admin.revoked_at || !admin.activated_at) {
     throw new DomainError(
       "FORBIDDEN",
       "Platform administrator access is not active.",
