@@ -2,9 +2,15 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import type { QueryResult } from "pg";
+import { ZodError } from "zod";
 import { getControlPool } from "@/infrastructure/db/control/pool";
 import { logger } from "@/infrastructure/logging/logger";
+import {
+  recordOperationalFailure,
+  recordOperationalRecovery,
+} from "@/modules/platform/diagnostics/service";
 import type { TenantContext } from "@/modules/tenant-identity/auth";
+import { DomainError } from "@/shared/errors/domain-error";
 import { expirePaymentReservations } from "./lifecycle";
 import { reconcileUnresolvedPayments } from "./service";
 
@@ -57,8 +63,20 @@ export async function runPaymentMaintenanceCycle(): Promise<{
           summary.expired += expired.expired;
           summary.reconciled += reconciled.updated;
           summary.failures += reconciled.failed;
+          if (reconciled.failed === 0)
+            await recordOperationalRecovery({
+              code: "PAYMENT_RECONCILIATION_FAILED",
+              tenantId: row.tenant_id,
+              requestId,
+            });
         } catch (error) {
           summary.failures += 1;
+          if (!(error instanceof DomainError) && !(error instanceof ZodError))
+            await recordOperationalFailure({
+              code: "PAYMENT_RECONCILIATION_FAILED",
+              tenantId: row.tenant_id,
+              requestId,
+            });
           logger.warn(
             {
               tenantId: row.tenant_id,

@@ -2,7 +2,9 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Pool, PoolClient } from "pg";
 import { getControlPool } from "@/infrastructure/db/control/pool";
+import { logger } from "@/infrastructure/logging/logger";
 import { appendAuditRecord } from "@/modules/platform/audit/repository";
+import { DiagnosticsRepository } from "@/modules/platform/diagnostics/repository";
 import { DomainError } from "@/shared/errors/domain-error";
 import { nextBackupRun } from "./schedule";
 import type { BackupState, ManualBackupInput } from "./schema";
@@ -85,7 +87,14 @@ export function safeBackupJob(row: Job) {
   };
 }
 export class BackupRepository {
-  constructor(private readonly pool: Pool = getControlPool()) {}
+  constructor(
+    private readonly pool: Pool = getControlPool(),
+    private readonly diagnosticWarning: () => void = () =>
+      logger.warn(
+        { eventCode: "DIAGNOSTICS_WRITE_UNAVAILABLE" },
+        "Diagnostic recording unavailable",
+      ),
+  ) {}
   private async transaction<T>(operation: (client: PoolClient) => Promise<T>) {
     const client = await this.pool.connect();
     try {
@@ -203,7 +212,17 @@ export class BackupRepository {
         "VALIDATION_FAILED",
         "Invalid backup verification result.",
       );
-    return this.transaction(async (client) => {
+    let verificationFailed = false;
+    const result = await this.transaction(async (client) => {
+      if (to === "FAILED") {
+        const previous = (
+          await client.query<{ state: string }>(
+            "SELECT state FROM platform_backup_jobs WHERE id=$1 FOR UPDATE",
+            [id],
+          )
+        ).rows[0];
+        verificationFailed = previous?.state === "VERIFYING";
+      }
       const from =
         to === "VERIFYING"
           ? ["RUNNING"]
@@ -234,6 +253,33 @@ export class BackupRepository {
         );
       return safeBackupJob(job);
     });
+    if (to === "FAILED") {
+      try {
+        await new DiagnosticsRepository(this.pool).recordOperationalFailure({
+          code: verificationFailed ? "BACKUP_VERIFY_FAILED" : "BACKUP_FAILED",
+          tenantId: result.tenantId,
+          requestId: result.requestId,
+          relatedJobId: result.id,
+          metadata: { scope: result.scope, errorCode: "BACKUP_FAILED" },
+        });
+      } catch {
+        this.diagnosticWarning();
+      }
+    }
+    if (to === "SUCCEEDED") {
+      try {
+        const diagnostics = new DiagnosticsRepository(this.pool);
+        for (const code of ["BACKUP_FAILED", "BACKUP_VERIFY_FAILED"] as const)
+          await diagnostics.recordOperationalRecovery({
+            code,
+            tenantId: result.tenantId,
+            requestId: result.requestId,
+          });
+      } catch {
+        this.diagnosticWarning();
+      }
+    }
+    return result;
   }
   // Trusted host CLI only: explicit allow-list, parameterized tenant identity; never exposed by HTTP.
   async tenantMetadata(tenantId: string) {

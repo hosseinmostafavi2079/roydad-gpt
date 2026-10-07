@@ -1,34 +1,41 @@
 import { existsSync } from "node:fs";
-import { Client } from "pg";
 import { fileURLToPath } from "node:url";
-import { getServerConfig } from "../src/shared/config/env";
-import { applySqlMigrations } from "../src/infrastructure/db/migrations/runner";
-import {
-  applyTenantPrismaMigrations,
-  tenantCurrentMigrationVersion,
-} from "../src/infrastructure/db/tenant/prisma-migrations";
+import { Client } from "pg";
 import {
   decryptTenantOwnerBootstrap,
   encryptTenantOwnerBootstrap,
 } from "../src/infrastructure/auth/tenant-bootstrap";
 import {
-  clearOwnerBootstrap,
-  issueInitialTenantOwnerInvitation,
-} from "../src/modules/tenant-identity/repository";
-import { provisionEmailFreeOwner } from "../src/modules/tenant-identity/owner-bootstrap";
-import { getTenantPool } from "../src/infrastructure/db/tenant/pool";
+  closeControlPool,
+  getControlPool,
+} from "../src/infrastructure/db/control/pool";
+import { applySqlMigrations } from "../src/infrastructure/db/migrations/runner";
+import {
+  closeTenantPools,
+  getTenantPool,
+} from "../src/infrastructure/db/tenant/pool";
+import {
+  applyTenantPrismaMigrations,
+  tenantCurrentMigrationVersion,
+} from "../src/infrastructure/db/tenant/prisma-migrations";
+import { logger } from "../src/infrastructure/logging/logger";
+import { appendAuditRecord } from "../src/modules/platform/audit/repository";
+import {
+  recordOperationalFailure,
+  recordOperationalRecovery,
+  upsertComponentHeartbeat,
+} from "../src/modules/platform/diagnostics/service";
 import {
   getProvisioningBoss,
   provisioningQueueName,
   stopProvisioningBoss,
 } from "../src/modules/platform/provisioning/queue";
+import { provisionEmailFreeOwner } from "../src/modules/tenant-identity/owner-bootstrap";
 import {
-  closeControlPool,
-  getControlPool,
-} from "../src/infrastructure/db/control/pool";
-import { closeTenantPools } from "../src/infrastructure/db/tenant/pool";
-import { logger } from "../src/infrastructure/logging/logger";
-import { appendAuditRecord } from "../src/modules/platform/audit/repository";
+  clearOwnerBootstrap,
+  issueInitialTenantOwnerInvitation,
+} from "../src/modules/tenant-identity/repository";
+import { getServerConfig } from "../src/shared/config/env";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 const config = getServerConfig();
@@ -596,6 +603,11 @@ async function provision(jobId: string, tenantId: string) {
     await verifyTenantDatabase(record.database_name, tenantId, record.slug);
 
     await transition(jobId, tenantId, "ACTIVE", requestId);
+    await recordOperationalRecovery({
+      code: "TENANT_PROVISIONING_FAILED",
+      tenantId,
+      requestId,
+    });
     await checkPublicRoutes(
       tenantId,
       `${record.slug}.${config.PLATFORM_BASE_DOMAIN}`,
@@ -611,6 +623,7 @@ async function provision(jobId: string, tenantId: string) {
             ? "FAILED_SEED"
             : "FAILED_VERIFICATION";
     let failurePersisted = true;
+    let failureTransitioned = false;
     const client = await getControlPool().connect();
     try {
       await client.query("BEGIN");
@@ -658,6 +671,7 @@ async function provision(jobId: string, tenantId: string) {
           requestId,
           afterState: { failedPhase: phase, errorCode: failure },
         });
+        failureTransitioned = true;
       }
       await client.query("COMMIT");
     } catch (_persistError) {
@@ -670,6 +684,14 @@ async function provision(jobId: string, tenantId: string) {
     } finally {
       client.release();
     }
+    if (failurePersisted && failureTransitioned)
+      await recordOperationalFailure({
+        code: "TENANT_PROVISIONING_FAILED",
+        tenantId,
+        requestId,
+        relatedJobId: jobId,
+        metadata: { errorCode: failure, phase },
+      });
     logger.error(
       {
         jobId,
@@ -706,10 +728,16 @@ const workerId = await boss.work<{
   },
 );
 logger.info("Provisioning worker started");
+void upsertComponentHeartbeat("MAIN_WORKER");
+const heartbeatTimer = setInterval(() => {
+  void upsertComponentHeartbeat("MAIN_WORKER");
+}, 60_000);
+heartbeatTimer.unref();
 process.send?.({ type: "eventos.provisioning.ready" });
 let shutdownPromise: Promise<void> | undefined;
 const shutdown = (): Promise<void> => {
   shutdownPromise ??= (async () => {
+    clearInterval(heartbeatTimer);
     await boss.offWork(provisioningQueueName, { id: workerId, wait: true });
     await stopProvisioningBoss();
     await closeTenantPools();

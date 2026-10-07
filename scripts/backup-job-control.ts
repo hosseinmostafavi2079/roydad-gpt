@@ -1,12 +1,16 @@
 import { z } from "zod";
 import { closeControlPool } from "../src/infrastructure/db/control/pool";
 import { BackupRepository } from "../src/modules/platform/backups/repository";
+import { upsertComponentHeartbeat } from "../src/modules/platform/diagnostics/service";
 
 // Local image CLI only. No Docker, shell or backup-directory access in this process.
 try {
   const [command, id, key, size, ...extra] = process.argv.slice(2);
   if (extra.length) throw new Error("Unexpected arguments");
-  const repository = new BackupRepository();
+  const diagnosticWarning = () => {
+    process.stderr.write("Diagnostic recording unavailable.\n");
+  };
+  const repository = new BackupRepository(undefined, diagnosticWarning);
   let result: unknown;
   switch (command) {
     case "enqueue-due":
@@ -43,6 +47,7 @@ try {
       break;
     case "claim":
       if (id) throw new Error();
+      await upsertComponentHeartbeat("BACKUP_RUNNER", diagnosticWarning);
       result = await repository.claim();
       break;
     case "metadata":
