@@ -6,73 +6,80 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const pageHeaders = vi.hoisted(() => ({ value: new Headers() }));
 const platformRateLimit = vi.hoisted(() => ({
   namespace: "",
-  auth: undefined as
-    | ReturnType<typeof import("better-auth").betterAuth>
-    | undefined,
+  resetAuth: () => {},
 }));
 vi.mock("@/infrastructure/auth/auth", async (importOriginal) => {
   const original =
     await importOriginal<typeof import("@/infrastructure/auth/auth")>();
   const { betterAuth } = await import("better-auth");
+  function createTestAuth() {
+    return betterAuth({
+      ...original.getAuth().options,
+      rateLimit: {
+        ...original.getAuth().options.rateLimit,
+        customStorage: {
+          async consume(key, rule) {
+            const bucket = `${platformRateLimit.namespace}:${key}`;
+            const client = await getControlPool().connect();
+            try {
+              await client.query("BEGIN");
+              await client.query(
+                "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+                [bucket],
+              );
+              const row = (
+                await client.query(
+                  'SELECT "count","lastRequest" FROM platform_auth_rate_limits WHERE "key"=$1 FOR UPDATE',
+                  [bucket],
+                )
+              ).rows[0];
+              const now = Date.now();
+              const fresh =
+                !row || now - Number(row.lastRequest) >= rule.window * 1000;
+              const allowed = fresh || row.count < rule.max;
+              if (allowed)
+                await client.query(
+                  'INSERT INTO platform_auth_rate_limits(id,"key","count","lastRequest") VALUES($1,$2,$3,$4) ON CONFLICT("key") DO UPDATE SET "count"=EXCLUDED."count","lastRequest"=EXCLUDED."lastRequest"',
+                  [
+                    randomUUID(),
+                    bucket,
+                    fresh ? 1 : row.count + 1,
+                    fresh ? now : Number(row.lastRequest),
+                  ],
+                );
+              await client.query("COMMIT");
+              return {
+                allowed,
+                retryAfter: allowed
+                  ? null
+                  : Math.ceil(
+                      (Number(row.lastRequest) + rule.window * 1000 - now) /
+                        1000,
+                    ),
+              };
+            } catch (error) {
+              await client.query("ROLLBACK");
+              throw error;
+            } finally {
+              client.release();
+            }
+          },
+        },
+      },
+    });
+  }
+  type TestAuth = ReturnType<typeof createTestAuth>;
+  let cachedAuth: TestAuth | undefined;
+  platformRateLimit.resetAuth = () => {
+    cachedAuth = undefined;
+  };
   return {
     ...original,
     getAuth: () => {
       if (!platformRateLimit.namespace)
         throw new Error("Test rate-limit namespace required");
-      return (platformRateLimit.auth ??= betterAuth({
-        ...original.getAuth().options,
-        rateLimit: {
-          ...original.getAuth().options.rateLimit,
-          customStorage: {
-            async consume(key, rule) {
-              const bucket = `${platformRateLimit.namespace}:${key}`;
-              const client = await getControlPool().connect();
-              try {
-                await client.query("BEGIN");
-                await client.query(
-                  "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
-                  [bucket],
-                );
-                const row = (
-                  await client.query(
-                    'SELECT "count","lastRequest" FROM platform_auth_rate_limits WHERE "key"=$1 FOR UPDATE',
-                    [bucket],
-                  )
-                ).rows[0];
-                const now = Date.now();
-                const fresh =
-                  !row || now - Number(row.lastRequest) >= rule.window * 1000;
-                const allowed = fresh || row.count < rule.max;
-                if (allowed)
-                  await client.query(
-                    'INSERT INTO platform_auth_rate_limits(id,"key","count","lastRequest") VALUES($1,$2,$3,$4) ON CONFLICT("key") DO UPDATE SET "count"=EXCLUDED."count","lastRequest"=EXCLUDED."lastRequest"',
-                    [
-                      randomUUID(),
-                      bucket,
-                      fresh ? 1 : row.count + 1,
-                      fresh ? now : Number(row.lastRequest),
-                    ],
-                  );
-                await client.query("COMMIT");
-                return {
-                  allowed,
-                  retryAfter: allowed
-                    ? null
-                    : Math.ceil(
-                        (Number(row.lastRequest) + rule.window * 1000 - now) /
-                          1000,
-                      ),
-                };
-              } catch (error) {
-                await client.query("ROLLBACK");
-                throw error;
-              } finally {
-                client.release();
-              }
-            },
-          },
-        },
-      }));
+      if (!cachedAuth) cachedAuth = createTestAuth();
+      return cachedAuth;
     },
   };
 });
@@ -945,7 +952,7 @@ describe("Identity V2 real PostgreSQL", () => {
     // Dedicated database-backed bucket: no shared developer records are reset,
     // and trusted-IP handling and production thresholds remain unchanged.
     platformRateLimit.namespace = `identity_rate_${randomUUID().replaceAll("-", "")}`;
-    platformRateLimit.auth = undefined;
+    platformRateLimit.resetAuth();
     vi.stubEnv("MAIL_TRANSPORT", "disabled");
     resetServerConfigForTests();
     try {
@@ -1140,7 +1147,7 @@ describe("Identity V2 real PostgreSQL", () => {
         'DELETE FROM platform_auth_rate_limits WHERE starts_with("key",$1)',
         [platformRateLimit.namespace + ":"],
       );
-      platformRateLimit.auth = undefined;
+      platformRateLimit.resetAuth();
       platformRateLimit.namespace = "";
       for (const table of ["platform_auth_sessions", "platform_auth_accounts"])
         await getControlPool().query(`DELETE FROM ${table} WHERE "userId"=$1`, [
