@@ -24,10 +24,14 @@ export const backupStates: Record<BackupState, [string, string]> = {
   VERIFYING: ["در حال بررسی", "warning"],
   SUCCEEDED: ["موفق", "success"],
   FAILED: ["ناموفق", "danger"],
-  PRUNED: ["حذف‌شده طبق سیاست نگهداری", "neutral"],
+  PRUNED: ["حذف شده", "neutral"],
 };
 export const hasActiveBackups = (jobs: BackupJob[]) =>
-  jobs.some((job) => ["QUEUED", "RUNNING", "VERIFYING"].includes(job.state));
+  jobs.some(
+    (job) =>
+      ["QUEUED", "RUNNING", "VERIFYING"].includes(job.state) ||
+      ["QUEUED", "RUNNING"].includes(job.deleteRequest?.state ?? ""),
+  );
 const pageSize = 25;
 const weekdays = [
   "یکشنبه",
@@ -60,7 +64,7 @@ function Badge({ state }: { state: BackupState }) {
   return <span className={`admin-status admin-status-${tone}`}>{label}</span>;
 }
 function JobStatus({ job }: { job: BackupJob }) {
-  const active = hasActiveBackups([job]);
+  const active = ["QUEUED", "RUNNING", "VERIFYING"].includes(job.state);
   const delayed =
     job.state === "QUEUED" &&
     Date.now() - Date.parse(job.createdAt ?? "") > 120_000;
@@ -70,7 +74,7 @@ function JobStatus({ job }: { job: BackupJob }) {
     VERIFYING: "در حال بررسی فایل‌ها و صحت Checksum...",
     SUCCEEDED: "بکاپ با موفقیت تکمیل شد.",
     FAILED: job.errorMessage ?? "اجرای بکاپ ناموفق بود.",
-    PRUNED: "طبق سیاست نگهداری حذف شده است.",
+    PRUNED: "حذف شده",
   };
   return (
     <div
@@ -81,6 +85,20 @@ function JobStatus({ job }: { job: BackupJob }) {
         {active && <span className="backup-spinner" aria-hidden="true" />}
         {text[job.state]}
       </p>
+      {job.deleteRequest?.state && job.state !== "PRUNED" && (
+        <p>
+          {["QUEUED", "RUNNING"].includes(job.deleteRequest.state) && (
+            <span className="backup-spinner" aria-hidden="true" />
+          )}
+          {
+            {
+              QUEUED: "در صف حذف",
+              RUNNING: "در حال حذف",
+              FAILED: "حذف ناموفق بود",
+            }[job.deleteRequest.state]
+          }
+        </p>
+      )}
       {job.state === "QUEUED" && (
         <>
           {delayed && (
@@ -159,6 +177,9 @@ export function BackupCenter() {
     null,
   );
   const [detail, setDetail] = useState<BackupJob | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<BackupJob | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
   const [search, setSearch] = useState("");
@@ -332,6 +353,46 @@ export function BackupCenter() {
       );
     } catch {
       setError("دریافت جزئیات بکاپ ممکن نشد. دوباره تلاش کنید.");
+    }
+  }
+  async function requestDeletion() {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    setMessage("");
+    try {
+      const response = await fetch(
+        `/api/platform/backups/${encodeURIComponent(deleteTarget.id)}/delete`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+          cache: "no-store",
+        },
+      );
+      const body = await response.json();
+      if (!response.ok) {
+        const message =
+          body.error?.code === "CONFLICT" &&
+          body.error?.message === "حداقل یک نسخه پشتیبان موفق باید باقی بماند."
+            ? "حداقل یک نسخه پشتیبان موفق باید باقی بماند."
+            : "ثبت درخواست حذف ممکن نشد. دوباره تلاش کنید.";
+        setDeleteError(message);
+        setError(message);
+        return;
+      }
+      const updated: BackupJob = body.data;
+      setJobs((current) =>
+        current.map((job) => (job.id === updated.id ? updated : job)),
+      );
+      setDetail((current) => (current?.id === updated.id ? updated : current));
+      setDeleteTarget(null);
+      setError("");
+      setMessage("درخواست حذف ثبت شد؛ نسخه پس از اجرای سرویس بکاپ حذف می‌شود.");
+    } catch {
+      setDeleteError("ثبت درخواست حذف ممکن نشد. دوباره تلاش کنید.");
+      setError("ثبت درخواست حذف ممکن نشد. دوباره تلاش کنید.");
+    } finally {
+      setDeleting(false);
     }
   }
   const completed = [...jobs].sort((a, b) =>
@@ -675,6 +736,22 @@ export function BackupCenter() {
               <article className="backup-job" key={job.id}>
                 <div className="backup-actions">
                   <Badge state={job.state} />
+                  {job.state === "SUCCEEDED" &&
+                    job.checksumVerified &&
+                    !["QUEUED", "RUNNING"].includes(
+                      job.deleteRequest?.state ?? "",
+                    ) && (
+                      <AdminButton
+                        tone="danger"
+                        disabled={!job.canDelete}
+                        onClick={() => {
+                          setDeleteError("");
+                          setDeleteTarget(job);
+                        }}
+                      >
+                        حذف نسخه
+                      </AdminButton>
+                    )}
                   <AdminButton
                     icon="view"
                     onClick={() => {
@@ -686,6 +763,11 @@ export function BackupCenter() {
                   </AdminButton>
                 </div>
                 <JobStatus job={job} />
+                {job.deleteProtected && (
+                  <p className="hint">
+                    حداقل یک نسخه پشتیبان موفق باید باقی بماند.
+                  </p>
+                )}
                 <JobFields job={job} tenant={tenantName(job)} />
               </article>
             ))}
@@ -718,6 +800,20 @@ export function BackupCenter() {
         بازیابی بکاپ در حال حاضر فقط از طریق فرآیند عملیاتی کنترل‌شده انجام
         می‌شود.
       </p>
+      <ConfirmationDialog
+        open={deleteTarget !== null}
+        title="حذف نسخه پشتیبان"
+        description={
+          deleteError ||
+          "این نسخه پشتیبان به‌صورت دائمی از فضای ذخیره‌سازی حذف می‌شود. اطلاعات سابقه برای گزارش‌گیری باقی می‌ماند."
+        }
+        confirmText="درخواست حذف"
+        busy={deleting}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          void requestDeletion();
+        }}
+      />
       <ConfirmationDialog
         open={confirm !== null}
         title={

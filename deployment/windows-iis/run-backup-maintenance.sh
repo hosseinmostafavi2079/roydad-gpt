@@ -26,4 +26,20 @@ while read -r id key; do
     exit 1
   fi
 done <<< "$selection"
-echo 'EventOS backup maintenance completed (at most one job and ten deletions).'
+# Manual requests use the same exact-child helper, with separate durable DB proof.
+for ((manual_count=0; manual_count<5; manual_count++)); do
+  claim="$(control claim-delete)" || { echo 'Manual deletion claim failed safely.' >&2; exit 1; }
+  [[ "$claim" != '{"data":null}' ]] || break
+  selected="$(parse 'let t="";for await(const p of process.stdin)t+=p;const r=JSON.parse(t).data;const u=/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;if(!r||!u.test(r.id)||!u.test(r.backupJobId)||!/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/.test(r.backupKey)||!["FULL_PLATFORM","TENANT"].includes(r.scope)||(r.scope==="TENANT"&&!u.test(r.tenantId))||(r.scope==="FULL_PLATFORM"&&r.tenantId!==null))process.exit(1);console.log(r.id+" "+r.backupJobId+" "+r.backupKey)' <<< "$claim")" || { echo 'Manual deletion claim invalid; stopped safely.' >&2; exit 1; }
+  read -r deletion_id backup_job_id backup_key <<< "$selected"
+  if ! control check-delete "$deletion_id" "$backup_key" >/dev/null; then
+    control fail-delete "$deletion_id" "$backup_key" >/dev/null || { echo 'Deletion failure recording unavailable; operator review required.' >&2; exit 1; }
+    continue
+  fi
+  if bash "$release/deployment/windows-iis/prune-backup.sh" "$root" "$backup_key" --selected-job "$backup_job_id" >/dev/null 2>&1; then
+    control complete-delete "$deletion_id" "$backup_key" >/dev/null || { echo 'Deletion completed; database marking unavailable. Operator review required.' >&2; exit 1; }
+  else
+    control fail-delete "$deletion_id" "$backup_key" >/dev/null || { echo 'Deletion failure recording unavailable; operator review required.' >&2; exit 1; }
+  fi
+done
+echo 'EventOS backup maintenance completed (at most one job, ten retention deletions and five manual deletions).'

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   enqueue: vi.fn(),
   list: vi.fn(),
   detail: vi.fn(),
+  requestDeletion: vi.fn(),
 }));
 vi.mock("@/infrastructure/auth/platform-session", () => ({
   requirePlatformAdmin: mocks.auth,
@@ -17,10 +18,12 @@ vi.mock("@/modules/platform/backups/repository", () => ({
     enqueue = mocks.enqueue;
     list = mocks.list;
     detail = mocks.detail;
+    requestDeletion = mocks.requestDeletion;
   },
 }));
 import { POST, GET } from "@/app/api/platform/backups/route";
 import { GET as detail } from "@/app/api/platform/backups/[jobId]/route";
+import { POST as deleteBackup } from "@/app/api/platform/backups/[jobId]/delete/route";
 const origin = "http://localhost:3000";
 function request(body: unknown, requestOrigin = origin) {
   return new Request(`${origin}/api/platform/backups`, {
@@ -96,4 +99,56 @@ it("bounds listing and validates detail UUID", async () => {
       })
     ).status,
   ).toBe(400);
+});
+const deleteContext = {
+  params: Promise.resolve({ jobId: "11111111-1111-4111-8111-111111111111" }),
+};
+it("authenticates and protects deletion mutations by origin", async () => {
+  mocks.auth.mockRejectedValue(
+    new DomainError("UNAUTHENTICATED", "Sign-in required."),
+  );
+  expect((await deleteBackup(request({}), deleteContext)).status).toBe(401);
+  expect(
+    (await deleteBackup(request({}, "https://attacker.test"), deleteContext))
+      .status,
+  ).toBe(403);
+  expect(mocks.requestDeletion).not.toHaveBeenCalled();
+});
+it("queues deletion using only a UUID and the authenticated actor", async () => {
+  mocks.detail.mockResolvedValue({
+    state: "SUCCEEDED",
+    deleteRequest: { state: "QUEUED" },
+  });
+  const response = await deleteBackup(request({}), deleteContext);
+  expect(response.status).toBe(200);
+  expect((await response.json()).data.deleteRequest.state).toBe("QUEUED");
+  expect(mocks.requestDeletion).toHaveBeenCalledWith(
+    "11111111-1111-4111-8111-111111111111",
+    "admin",
+    expect.stringMatching(/^[a-f0-9-]{36}$/),
+  );
+});
+it.each([{ path: "/host" }, { backupKey: "key" }, { databaseName: "db" }])(
+  "rejects delete input %j",
+  async (body) => {
+    expect((await deleteBackup(request(body), deleteContext)).status).toBe(400);
+    expect(mocks.requestDeletion).not.toHaveBeenCalled();
+  },
+);
+it("rejects malformed deletion UUID and returns safe last-backup rejection", async () => {
+  expect(
+    (
+      await deleteBackup(request({}), {
+        params: Promise.resolve({ jobId: "../bad" }),
+      })
+    ).status,
+  ).toBe(400);
+  mocks.requestDeletion.mockRejectedValue(
+    new DomainError("CONFLICT", "حداقل یک نسخه پشتیبان موفق باید باقی بماند."),
+  );
+  const response = await deleteBackup(request({}), deleteContext);
+  expect(response.status).toBe(409);
+  expect((await response.json()).error.message).toBe(
+    "حداقل یک نسخه پشتیبان موفق باید باقی بماند.",
+  );
 });

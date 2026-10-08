@@ -34,6 +34,9 @@ test("backup center: authorization, safe requests, details and responsive RTL", 
     updatedAt: "2026-10-07T02:00:00Z",
     errorCode: null,
     errorMessage: null,
+    deleteRequest: { state: null as "QUEUED" | "RUNNING" | "FAILED" | null },
+    canDelete: true,
+    deleteProtected: false,
   };
   let jobs = [
     job,
@@ -68,6 +71,8 @@ test("backup center: authorization, safe requests, details and responsive RTL", 
     lastRunAt: null,
   };
   const requests: unknown[] = [];
+  let deletionRequests = 0;
+  let rejectDeletion = true;
   await page.route("**/api/platform/tenants?*", (route) =>
     route.fulfill({
       json: {
@@ -84,10 +89,33 @@ test("backup center: authorization, safe requests, details and responsive RTL", 
       if (request.method() === "PATCH")
         policy = { ...policy, ...request.postDataJSON() };
       await route.fulfill({ json: { data: policy } });
+    } else if (new URL(request.url()).pathname.endsWith("/delete")) {
+      expect(request.postDataJSON()).toEqual({});
+      if (rejectDeletion) {
+        rejectDeletion = false;
+        await route.fulfill({
+          status: 409,
+          json: {
+            error: {
+              code: "CONFLICT",
+              message: "حداقل یک نسخه پشتیبان موفق باید باقی بماند.",
+            },
+          },
+        });
+        return;
+      }
+      deletionRequests++;
+      const queued = {
+        ...job,
+        canDelete: false,
+        deleteRequest: { state: "QUEUED" as const },
+      };
+      jobs = jobs.map((item) => (item.id === queued.id ? queued : item));
+      await route.fulfill({ json: { data: queued } });
     } else if (request.method() === "POST") {
       const body = request.postDataJSON();
       requests.push(body);
-      const queued = { ...job, ...body, state: "QUEUED" };
+      const queued = { ...job, ...body, state: "QUEUED", canDelete: false };
       jobs = [queued];
       await route.fulfill({ json: { data: queued } });
     } else
@@ -128,7 +156,7 @@ test("backup center: authorization, safe requests, details and responsive RTL", 
     page.getByText("در حال بررسی فایل‌ها و صحت Checksum...", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByText("طبق سیاست نگهداری حذف شده است.", { exact: true }),
+    page.locator(".backup-job-status").getByText("حذف شده", { exact: true }),
   ).toBeVisible();
   await expect(page.locator(".backup-job .backup-spinner")).toHaveCount(4);
   for (const width of [1440, 768, 390, 320]) {
@@ -146,6 +174,19 @@ test("backup center: authorization, safe requests, details and responsive RTL", 
       fullPage: true,
     });
   }
+  await page.getByRole("button", { name: "حذف نسخه", exact: true }).click();
+  await expect(
+    page.getByRole("dialog", { name: "حذف نسخه پشتیبان" }),
+  ).toContainText("اطلاعات سابقه برای گزارش‌گیری باقی می‌ماند.");
+  expect(deletionRequests).toBe(0);
+  await page.getByRole("button", { name: "درخواست حذف", exact: true }).click();
+  await expect(
+    page.getByRole("dialog", { name: "حذف نسخه پشتیبان" }),
+  ).toContainText("حداقل یک نسخه پشتیبان موفق باید باقی بماند.");
+  expect(deletionRequests).toBe(0);
+  await page.getByRole("button", { name: "درخواست حذف", exact: true }).click();
+  await expect(page.getByText("در صف حذف", { exact: true })).toBeVisible();
+  expect(deletionRequests).toBe(1);
   await page
     .getByRole("button", { name: "تهیه بکاپ کامل", exact: true })
     .click();
@@ -199,6 +240,6 @@ test("backup center: authorization, safe requests, details and responsive RTL", 
   ).not.toContainText("hidden-host-key");
   await page.keyboard.press("Escape");
   expect(
-    await page.getByRole("button", { name: /بازیابی|حذف|دانلود/ }).count(),
+    await page.getByRole("button", { name: /بازیابی|دانلود/ }).count(),
   ).toBe(0);
 });

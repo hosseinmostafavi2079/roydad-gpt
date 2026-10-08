@@ -37,6 +37,7 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$EVENTOS_MAINTENANCE_FIXTURE/calls"
 case "$*" in
   *'backup-job-control.ts enqueue-due') echo '{"data":null}' ;;
+  *'backup-job-control.ts claim-delete') echo '{"data":null}' ;;
   *'backup-job-control.ts retention '*|*'backup-job-control.ts retry-prunes') echo '{"data":[{"id":"11111111-1111-4111-8111-111111111111","backupKey":"eventos-20260101T000000Z-11111111-1111-4111-8111-111111111111"}]}' ;;
   *'backup-job-control.ts check-prune '*) [[ "${EVENTOS_UNAUTHORIZED:-0}" == 0 ]]; echo '{"data":{}}' ;;
   *'backup-job-control.ts mark-pruned '*) echo PRUNED >> "$EVENTOS_MAINTENANCE_FIXTURE/states"; echo '{"data":{}}' ;;

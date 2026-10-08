@@ -404,8 +404,7 @@ describe("Phase 1 real PostgreSQL gates", () => {
   }, 60_000);
 
   afterAll(async () => {
-    for (const child of workerProcesses)
-      await stopWorker(child).catch(() => undefined);
+    for (const child of workerProcesses) await stopWorker(child);
     await stopProvisioningBoss().catch(() => undefined);
     clearTenantResolutionCacheForTests();
     await removeTenantFixtures();
@@ -531,6 +530,9 @@ describe("Phase 1 real PostgreSQL gates", () => {
       worker = await startWorker(undefined, {
         NODE_ENV: "production",
         MAIL_TRANSPORT: "disabled",
+        // Production ignores the test probe override. Keep its public probes
+        // away from the development server, whose pools this test cannot close.
+        BETTER_AUTH_URL: "http://localhost:1",
       });
       const created = await createTenant(
         {

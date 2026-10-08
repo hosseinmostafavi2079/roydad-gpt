@@ -57,6 +57,9 @@ const job: BackupJob = {
   updatedAt: "2026-10-07T02:00:00Z",
   startedAt: "2026-10-07T01:00:00Z",
   completedAt: "2026-10-07T02:00:00Z",
+  deleteRequest: { state: null },
+  canDelete: false,
+  deleteProtected: false,
 };
 let jobs: BackupJob[];
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -172,8 +175,10 @@ it("announces loading, renders empty history and disabled policy without destruc
   expect(host.querySelectorAll("button").length).toBeGreaterThan(0);
   for (const text of ["بازیابی", "حذف", "دانلود"])
     expect(
-      Array.from(host.querySelectorAll("button")).some((value) =>
-        value.textContent?.includes(text),
+      Array.from(host.querySelectorAll("button")).some(
+        (value) =>
+          !value.closest("dialog:not([open])") &&
+          value.textContent?.includes(text),
       ),
     ).toBe(false);
 });
@@ -301,7 +306,7 @@ it.each([
   ["VERIFYING", "در حال بررسی فایل‌ها و صحت Checksum...", true],
   ["SUCCEEDED", "بکاپ با موفقیت تکمیل شد.", false],
   ["FAILED", "اجرای بکاپ ناموفق بود.", false],
-  ["PRUNED", "طبق سیاست نگهداری حذف شده است.", false],
+  ["PRUNED", "حذف شده", false],
 ] as const)(
   "renders explicit %s status without fake progress",
   async (state, text, spinner) => {
@@ -425,4 +430,108 @@ it("paginates with bounded limit and offset", async () => {
     "/api/platform/backups?limit=25&offset=25",
     expect.anything(),
   );
+});
+it("requires destructive confirmation and queues deletion without removing history", async () => {
+  jobs = [{ ...job, canDelete: true }];
+  await render();
+  await click("حذف نسخه");
+  expect(mutations("POST")).toHaveLength(0);
+  expect(host.querySelector("dialog[open]")?.textContent).toContain(
+    "اطلاعات سابقه برای گزارش‌گیری باقی می‌ماند.",
+  );
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({
+      data: { ...job, canDelete: false, deleteRequest: { state: "QUEUED" } },
+    }),
+  });
+  await click("درخواست حذف");
+  expect(fetchMock).toHaveBeenCalledWith(
+    `/api/platform/backups/${job.id}/delete`,
+    expect.objectContaining({ method: "POST", body: "{}" }),
+  );
+  expect(host.textContent).toContain("در صف حذف");
+  expect(host.querySelectorAll(".backup-job")).toHaveLength(1);
+  expect(host.textContent).not.toContain("حذف با موفقیت");
+});
+it.each(["QUEUED", "RUNNING", "VERIFYING", "FAILED", "PRUNED"] as const)(
+  "does not offer deletion for %s",
+  async (state) => {
+    jobs = [{ ...job, state, canDelete: true }];
+    await render();
+    expect(
+      Array.from(host.querySelectorAll("button")).some(
+        (b) => b.textContent === "حذف نسخه",
+      ),
+    ).toBe(false);
+  },
+);
+it.each([
+  ["QUEUED", "در صف حذف"],
+  ["RUNNING", "در حال حذف"],
+  ["FAILED", "حذف ناموفق بود"],
+] as const)("renders %s deletion status", async (state, text) => {
+  jobs = [{ ...job, deleteRequest: { state } }];
+  await render();
+  expect(host.textContent).toContain(text);
+});
+it.each(["QUEUED", "RUNNING"] as const)(
+  "polls active %s deletion and stops after completion",
+  async (state) => {
+    jobs = [{ ...job, deleteRequest: { state } }];
+    await render();
+    const requests = () =>
+      fetchMock.mock.calls.filter((call) => call[0].includes("?limit="));
+    const count = requests().length;
+    await tick(7000);
+    expect(requests()).toHaveLength(count);
+    jobs = [{ ...job, state: "PRUNED" }];
+    await tick(500);
+    expect(requests()).toHaveLength(count + 1);
+    await tick(30000);
+    expect(requests()).toHaveLength(count + 1);
+    expect(host.textContent).toContain("حذف شده");
+  },
+);
+it("disables the backend-protected last backup without counting paginated rows", async () => {
+  jobs = [{ ...job, canDelete: false, deleteProtected: true }];
+  await render();
+  expect(button("حذف نسخه").disabled).toBe(true);
+  expect(host.textContent).toContain(
+    "حداقل یک نسخه پشتیبان موفق باید باقی بماند.",
+  );
+});
+it("shows only reviewed last-backup error or a generic deletion error", async () => {
+  jobs = [{ ...job, canDelete: true }];
+  await render();
+  await click("حذف نسخه");
+  fetchMock.mockResolvedValueOnce({
+    ok: false,
+    json: async () => ({
+      error: {
+        code: "CONFLICT",
+        message: "حداقل یک نسخه پشتیبان موفق باید باقی بماند.",
+      },
+    }),
+  });
+  await click("درخواست حذف");
+  expect(host.textContent).toContain(
+    "حداقل یک نسخه پشتیبان موفق باید باقی بماند.",
+  );
+  expect(host.querySelector("dialog[open]")?.textContent).toContain(
+    "حداقل یک نسخه پشتیبان موفق باید باقی بماند.",
+  );
+  fetchMock.mockResolvedValueOnce({
+    ok: false,
+    json: async () => ({ error: { message: "secret-host-path-stack" } }),
+  });
+  await click("درخواست حذف");
+  expect(host.textContent).not.toContain("secret-host-path-stack");
+  expect(host.textContent).toContain("ثبت درخواست حذف ممکن نشد");
+  expect(host.querySelector("input[name=path]")).toBeNull();
+  expect(
+    Array.from(host.querySelectorAll("button")).some((b) =>
+      /بازیابی|دانلود/.test(b.textContent ?? ""),
+    ),
+  ).toBe(false);
 });
