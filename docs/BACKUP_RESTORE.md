@@ -55,6 +55,42 @@ After forward migration `0017_backup_manual_deletion.sql`, an ACTIVE Platform Ad
 
 Maintenance retains its schedule → one backup → retention order, then handles at most five manual requests using `claim-delete`, `check-delete`, the unchanged exact-child `prune-backup.sh`, and `complete-delete` or `fail-delete`. Request states are QUEUED → RUNNING → SUCCEEDED/FAILED. Successful physical removal changes the backup to PRUNED, preserving metadata and append-only audits. A rejected/failed physical operation changes only the request to FAILED with a fixed generic error; the backup remains SUCCEEDED and may be requested again. If physical removal succeeds but database completion fails, maintenance stops and the RUNNING request requires operator reconciliation; it must not be blindly failed or requeued. No web restore, path input, filesystem browser or Docker control is exposed. Scheduled Task configuration is unchanged.
 
-`install-backup-maintenance-task.ps1` is a future operator helper, **not executed or installed by this task**. It defaults to dry-run and requires an explicit current Windows user whose WSL distribution is accessible. Apply creates only `EventOS-Backup-Maintenance`, waking every 15 minutes (ten-year repetition window), with IgnoreNew and a two-hour execution limit. Any existing task of that name is rejected rather than replaced. The principal is Interactive: that user must remain logged on. It never chooses SYSTEM, requests passwords, or modifies other tasks. Secure unattended logon setup remains a separate operator action. Operators must provide an approved execution policy/signature for PowerShell file execution; the helper does not change execution policy.
+`install-backup-maintenance-task.ps1` is a future operator helper, **not executed or installed by this task**. It defaults to dry-run and requires an explicit current Windows user whose WSL distribution is accessible. Apply creates only `EventOS-Backup-Maintenance`, waking every 15 minutes (ten-year repetition window), with IgnoreNew and a two-hour execution limit. Any existing task of that name is rejected rather than replaced. The principal is Interactive: that user must remain logged on. It never chooses SYSTEM, requests passwords, or modifies other tasks. Secure unattended logon setup uses the separate explicit helper below. Operators must provide an approved execution policy/signature for PowerShell file execution; the helper does not change execution policy.
 
-Step 4 adds the protected Backup Center at `/platform/backups`; Steps 5–6 add diagnostics and its protected UI. Intentionally deferred: restore web API/UI, interrupted-job recovery, per-tenant automatic schedules and unattended credential setup. Tenant S3 export remains unsupported and fails safely; external object-storage backup/versioning remains required. Archive validation does not establish restore readiness. No production connection, deployment or task installation was performed.
+Step 4 adds the protected Backup Center at `/platform/backups`; Steps 5–6 add diagnostics and its protected UI. Intentionally deferred: restore web API/UI, interrupted-job recovery, per-tenant automatic schedules. Tenant S3 export remains unsupported and fails safely; external object-storage backup/versioning remains required. Archive validation does not establish restore readiness. No production connection, deployment or task installation was performed.
+
+## Explicit unattended maintenance setup (Windows PowerShell 5.1)
+
+The normal installer remains Interactive and password-free. After installing it as the current Windows account that owns Ubuntu, verify an ordinary maintenance run before converting it. These commands are operator instructions, not actions performed by this change.
+
+```powershell
+$release = 'C:\EventOS\releases\<approved-sha>'
+$wslRelease = '/mnt/c/EventOS/releases/<approved-sha>'
+$backupDirectory = 'C:\EventOS\backups'
+$taskUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+& "$release\deployment\windows-iis\powershell\install-backup-maintenance-task.ps1" -TaskUser $taskUser -WslReleasePath $wslRelease -WindowsBackupDirectory $backupDirectory -Apply
+Start-ScheduledTask -TaskName 'EventOS-Backup-Maintenance' -TaskPath '\'
+Get-ScheduledTaskInfo -TaskName 'EventOS-Backup-Maintenance' -TaskPath '\'
+```
+
+Wait until that Interactive run finishes with an advanced `LastRunTime` and `LastTaskResult=0`. Then validate the conversion without prompting or changing anything:
+
+```powershell
+& "$release\deployment\windows-iis\powershell\enable-backup-maintenance-unattended.ps1" -ReleasePath $release -WslReleasePath $wslRelease -WindowsBackupDirectory $backupDirectory
+```
+
+Convert explicitly; enter the Windows account password only into the secure credential prompt after confirming the operation:
+
+```powershell
+& "$release\deployment\windows-iis\powershell\enable-backup-maintenance-unattended.ps1" -ReleasePath $release -WslReleasePath $wslRelease -WindowsBackupDirectory $backupDirectory -Apply
+(Get-ScheduledTask -TaskName 'EventOS-Backup-Maintenance' -TaskPath '\').Principal | Select-Object UserId, LogonType, RunLevel
+Get-ScheduledTaskInfo -TaskName 'EventOS-Backup-Maintenance' -TaskPath '\'
+```
+
+Require `LogonType=Password`, `RunLevel=Highest`, the same account SID and a fresh completed run with `LastTaskResult=0`. The helper preserves the existing action, triggers, settings and 15-minute repetition. It starts real maintenance and polls every two seconds for at most 120 seconds; a successful start alone is insufficient. Conversion, postcondition or execution failure attempts a verified Interactive rollback. A timed-out backup is not stopped. If rollback cannot be verified, the helper explicitly reports failure and immediate operator review is required.
+
+No password is stored in EventOS configuration, repository, environment or task action. Windows Task Scheduler manages the run-as credential. The helper accepts an optional `PSCredential`, never a plaintext password argument; its temporary in-process password conversion is cleared immediately and the unmanaged buffer is zeroed in `finally`. Refresh credentials by running the helper with `-Apply` again after the account password changes. Never put passwords into commands, transcripts or files.
+
+The helper targets only the root `EventOS-Backup-Maintenance` task. It rejects service identities, S4U, different account SIDs, unexpected actions/arguments, broad backup ACLs and mismatched Windows/WSL release paths. It does not change protected tasks, execution policy, Docker or WSL configuration. Use the approved script execution policy/signature already required by the installer.
+
+Test a future reboot with no interactive login separately on the intended server as an operator. Mocked local tests and CI cannot prove post-reboot WSL execution. This change performs no task installation, production connection or deployment.
